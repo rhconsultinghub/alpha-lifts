@@ -21,7 +21,16 @@ function loadInitial(): AppState {
     const raw = localStorage.getItem(STORAGE_KEY);
     // shallow-merge over fresh defaults so fields added in later app versions (not present in an
     // older saved session) fall back to their default rather than being `undefined`.
-    if (raw) state = { ...defaults, ...(JSON.parse(raw) as Partial<AppState>) };
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<AppState>;
+      state = { ...defaults, ...parsed };
+      // back-compat: sessions saved before onboarding existed have no `onboarded` flag in storage —
+      // infer it from already having a real program, so returning users aren't sent through the
+      // wizard again (which would otherwise overwrite their existing program).
+      if (parsed.onboarded === undefined && parsed.dayOrder && parsed.dayOrder.length > 0) {
+        state.onboarded = true;
+      }
+    }
   } catch {
     state = defaults;
   }
@@ -196,6 +205,27 @@ export function useApp() {
         activeProgramId: newId, programName: name, trainingType: w.trainingType,
         program: built.days, dayOrder: built.dayOrder, startedAt: new Date().toISOString(), savedPrograms,
         newProgramWizard: null, showSettings: false, activeDayKey: null, screen: 'program' as Screen
+      };
+    });
+  }, []);
+
+  // first-run onboarding: same wizard fields/build logic as createProgramFromWizard, but there's
+  // no existing program to stash into savedPrograms yet.
+  const completeOnboarding = useCallback(() => {
+    setState(s => {
+      const w = s.newProgramWizard;
+      if (!w) return s;
+      const name = w.name.trim() || 'My Program';
+      const built = w.splitId === 'custom'
+        ? buildCustomProgram(w.customDays.length ? w.customDays : [{ label: 'Day 1', kind: 'training' }])
+        : buildProgramFromPreset(SPLIT_PRESETS.find(p => p.id === w.splitId) || SPLIT_PRESETS[0], w.trainingType, w.prefill);
+      const newId = 'prog_' + Date.now();
+      return {
+        ...s,
+        onboarded: true,
+        activeProgramId: newId, programName: name, trainingType: w.trainingType,
+        program: built.days, dayOrder: built.dayOrder, startedAt: new Date().toISOString(),
+        newProgramWizard: null, screen: 'program' as Screen
       };
     });
   }, []);
@@ -702,6 +732,7 @@ export function useApp() {
       switchProgram, newProgram, requestRemoveProgram, renameSavedProgram,
       openNewProgramWizard, closeNewProgramWizard, setWizardField, setWizardPrefill, selectWizardSplit,
       addWizardCustomDay, removeWizardCustomDay, setWizardCustomDayField, createProgramFromWizard,
+      completeOnboarding,
       setBodyView, openBodyModal, closeBodyModal, openDetail, closeDetail,
       openMuscleDrill, closeMuscleDrill,
       openLibraryDetail, closeLibraryDetail, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,

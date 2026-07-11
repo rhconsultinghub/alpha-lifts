@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useApp } from './state/useApp';
 import { buildViewModel } from './state/viewModel';
+import { OnboardingScreen } from './components/OnboardingScreen';
 import { ProgramScreen } from './components/ProgramScreen';
 import { DayViewScreen } from './components/DayViewScreen';
 import { DayBuilderScreen } from './components/DayBuilderScreen';
@@ -29,6 +30,16 @@ export default function App() {
   useEffect(() => {
     scrollRef.current?.scrollTo(0, 0);
   }, [state.screen]);
+
+  if (vm.needsOnboarding) {
+    return (
+      <div className="app-shell">
+        <div className="scr" style={{ background: '#0f0e0d' }}>
+          <OnboardingScreen vm={vm} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">

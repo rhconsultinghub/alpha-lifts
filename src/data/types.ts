@@ -170,6 +170,7 @@ export type CoachVoice = 'Direct' | 'Encouraging' | 'Hype';
 export type WarmupStyle = 'Minimal' | 'Standard' | 'Cautious';
 
 export interface AppState {
+  onboarded: boolean;
   screen: Screen;
   trainingType: TrainingType;
   dayOrder: string[];

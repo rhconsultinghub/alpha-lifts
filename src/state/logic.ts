@@ -1,5 +1,6 @@
 import { EXLIB, MUSCLE_TARGETS, TRAINING_MULT, TRAINING_LABELS, incrementForEquip, KG_PER_LB_STEP } from '../data/exercises';
 import { clamp, roundTo, seededFrac } from '../data/program';
+import { WARMUP_LIBRARY, type WarmupMove } from '../data/warmups';
 import type { AppState, ProgramDays, ProgramExercise, Muscle, Units, TrainingType, ExerciseHistoryEntry } from '../data/types';
 
 export function fmtWeight(kg: number, units: Units): string {
@@ -206,6 +207,32 @@ export function dayMuscleRanks(state: AppState, dayKey: string): Record<string, 
   const ranks: Record<string, number> = {};
   Object.keys(sums).forEach(m => { ranks[m] = max > 0 ? sums[m] / max : 0; });
   return ranks;
+}
+
+// Picks a handful of simple warm-up moves that cover the muscles a training day targets most,
+// using a greedy set-cover so a few moves address as many target muscles as possible.
+export function warmupForDay(state: AppState, dayKey: string): { name: string; cue: string }[] {
+  const day = state.program[dayKey];
+  if (!day || (day.kind || 'training') === 'rest' || !day.exercises.length) return [];
+  const ranks = dayMuscleRanks(state, dayKey);
+  const targetMuscles = (Object.keys(ranks) as Muscle[]).sort((a, b) => ranks[b] - ranks[a]).slice(0, 4);
+  if (!targetMuscles.length) return [];
+
+  const remaining = new Set<Muscle>(targetMuscles);
+  const picked: WarmupMove[] = [];
+  while (remaining.size && picked.length < 4) {
+    let best: WarmupMove | null = null;
+    let bestScore = 0;
+    for (const move of WARMUP_LIBRARY) {
+      if (picked.includes(move)) continue;
+      const score = move.muscles.filter(m => remaining.has(m)).length;
+      if (score > bestScore) { bestScore = score; best = move; }
+    }
+    if (!best || bestScore === 0) break;
+    picked.push(best);
+    best.muscles.forEach(m => remaining.delete(m));
+  }
+  return picked.map(m => ({ name: m.name, cue: m.cue }));
 }
 
 export function programWeekNumber(startedAt: string): number {

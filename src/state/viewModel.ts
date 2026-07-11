@@ -6,7 +6,7 @@ import {
   muscleBarsList, dayWarning, recommendation, estimateDayTime, formatDuration,
   warmupInfo, dayMuscleRanks, programWeekNumber, formatElapsed, fmtWeight, weightStep, formatSetTime,
   volumeChartData, weeklyHeatmapData, exerciseProgressData, compareLiftsData, consistencyData,
-  volumeDonutData, durationTrendData
+  volumeDonutData, durationTrendData, warmupForDay
 } from './logic';
 
 const ACCENT = 'oklch(0.65 0.19 35)';
@@ -144,7 +144,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
       prefillRecommendedColor: w.prefill === 'recommended' ? '#0d0c0b' : 'rgba(245,240,234,.7)',
       prefillScratchBg: w.prefill === 'scratch' ? ACCENT : 'rgba(255,255,255,.06)',
       prefillScratchColor: w.prefill === 'scratch' ? '#0d0c0b' : 'rgba(245,240,234,.7)',
-      close: actions.closeNewProgramWizard, create: actions.createProgramFromWizard
+      close: actions.closeNewProgramWizard,
+      create: s.onboarded ? actions.createProgramFromWizard : actions.completeOnboarding
     };
   })();
 
@@ -209,6 +210,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       toggleSkip: () => actions.toggleSkipDay(dayKey),
       diagramRanks: ranks,
       muscleBars: w.bars, hasWarning: w.level !== 'good', warningColor: w.color, warningText: w.text,
+      warmups: warmupForDay(s, dayKey),
       exercises: day.exercises.map((ex, i) => {
         const lib = EXLIB[ex.id];
         const equip = lib.equip[ex.equipIdx];
@@ -467,6 +469,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
   const resumeElapsedText = s.workout ? formatElapsed(Date.now() - (s.workout.startedAt || Date.now())) : '';
 
   return {
+    needsOnboarding: !s.onboarded,
     isProgram: s.screen === 'program',
     isDayView: s.screen === 'dayView',
     isDayBuilder: s.screen === 'dayBuilder',

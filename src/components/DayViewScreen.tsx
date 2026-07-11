@@ -47,6 +47,23 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
       </div>
 
       <div style={{ padding: '6px 20px 40px' }}>
+        {d.warmups.length > 0 && (
+          <div style={{ padding: '14px 16px', borderRadius: 14, background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.08)', marginBottom: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+              <span style={{ fontSize: 14 }}>🔥</span>
+              <span style={{ font: "600 12px 'Inter'", color: '#f5f0ea' }}>Warm-Up First</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {d.warmups.map((wu: any, i: number) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                  <span style={{ font: "500 12px 'Inter'", color: 'rgba(245,240,234,.8)' }}>{wu.name}</span>
+                  <span style={{ flex: 'none', font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)' }}>{wu.cue}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {d.balanceTip.show && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '12px 14px', borderRadius: 14, background: 'oklch(0.7 0.13 230 / 0.1)', border: '1px solid oklch(0.7 0.13 230 / 0.35)', marginBottom: 18 }}>
             <span style={{ fontSize: 15 }}>💡</span>
