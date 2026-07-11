@@ -9,7 +9,7 @@ export function ExerciseDetailModal({ vm }: { vm: ViewModel }) {
       <div style={{ padding: '18px 20px 40px' }}>
         <button onClick={d.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14, marginBottom: 16 }}>✕</button>
         <div style={{ width: '100%', height: 180, borderRadius: 18, marginBottom: 16, overflow: 'hidden' }}>
-          <ExercisePhoto pattern={d.pattern} size={180} radius={18} />
+          <ExercisePhoto id={d.id} pattern={d.pattern} size={180} radius={18} />
         </div>
         <div className="num" style={{ fontSize: 24, fontWeight: 700 }}>{d.name}</div>
         <div style={{ display: 'flex', gap: 6, margin: '10px 0 16px' }}>

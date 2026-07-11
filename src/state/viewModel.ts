@@ -4,7 +4,7 @@ import type { AppState, HistoryEntry, Muscle, TrainingType } from '../data/types
 import type { Actions } from './useApp';
 import {
   muscleBarsList, dayWarning, recommendation, estimateDayTime, formatDuration,
-  warmupInfo, dayMuscleRanks, programWeekNumber, formatElapsed, fmtWeight, weightStep, formatSetTime,
+  warmupInfo, dayMuscleRanks, formatElapsed, fmtWeight, weightStep, formatSetTime,
   volumeChartData, weeklyHeatmapData, exerciseProgressData, compareLiftsData, consistencyData,
   volumeDonutData, durationTrendData, warmupForDay
 } from './logic';
@@ -274,7 +274,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const total = es ? es.length : e2.sets;
       const complete = !!es && es.every(r => r.done);
       return {
-        name: l2.name, pattern: l2.pattern, go: () => actions.switchExercise(i),
+        id: e2.id, name: l2.name, pattern: l2.pattern, go: () => actions.switchExercise(i),
         statusText: complete ? '✓' : (es ? doneCount + '/' + total : total + ' sets'),
         bg: i === exIndex ? ACCENT : (complete ? 'oklch(0.7 0.15 145 / 0.12)' : 'rgba(255,255,255,.05)'),
         color: i === exIndex ? '#0d0c0b' : (complete ? 'oklch(0.75 0.15 145)' : 'rgba(245,240,234,.7)'),
@@ -290,7 +290,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       completeWorkout: actions.completeWorkout,
       endEarly: actions.requestEndEarly,
       endEarlyLabel: s.confirmEndEarly ? 'Tap again to confirm ending' : 'End Workout Early',
-      exName: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label,
+      id: ex.id, exName: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label,
       recTitle: rec.title, recNote: rec.note,
       viewHistory: () => actions.openExerciseHistory(ex.id),
       openDetail: () => actions.openDetail(dayKey, exIndex),
@@ -353,7 +353,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const lib = EXLIB[ex.id];
       const equip = lib.equip[ex.equipIdx];
       detail = {
-        open: true, name: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label, cue: lib.cue,
+        open: true, id: ex.id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label, cue: lib.cue,
         secondaryText: lib.secondary.length ? lib.secondary.join(', ') : 'None',
         close: actions.closeDetail,
         openSwap: () => { actions.closeDetail(); actions.openSwap(dayKey, s.detail!.exIndex, 'equip', false); }
@@ -423,6 +423,58 @@ export function buildViewModel(state: AppState, actions: Actions) {
     };
   }
 
+  // ---------- muscle drill-down quick "switch exercise" (can span multiple days) ----------
+  let muscleSwap: any = { open: false };
+  if (s.muscleSwap) {
+    const ms = s.muscleSwap;
+    const currentLib = EXLIB[ms.exId];
+    // union of every applicable day's theme, so the replacement list stays valid no matter which
+    // of the affected days end up selected.
+    const theme = new Set<Muscle>();
+    ms.dayKeys.forEach(k => (s.program[k]?.theme || DAY_THEMES[k] || (Object.keys(MUSCLE_TARGETS) as Muscle[])).forEach(m => theme.add(m)));
+
+    const dayOptions = ms.dayKeys.map(k => {
+      const day = s.program[k];
+      const sel = ms.selectedDayKeys.includes(k);
+      return {
+        key: k, label: day ? day.label : k, sel,
+        bg: sel ? 'oklch(0.65 0.19 35 / 0.15)' : 'rgba(255,255,255,.04)', border: sel ? 'oklch(0.65 0.19 35 / 0.6)' : 'rgba(255,255,255,.08)',
+        check: sel ? '●' : '', toggle: () => actions.toggleMuscleSwapDay(k)
+      };
+    });
+
+    const staged = ms.stagedExId;
+    const mkOpt = (id: string) => {
+      const lib = EXLIB[id];
+      const sel = id === staged;
+      return { label: lib.name, muscle: lib.muscle, check: sel ? '●' : '', bg: sel ? 'oklch(0.65 0.19 35 / 0.15)' : 'rgba(255,255,255,.04)', border: sel ? 'oklch(0.65 0.19 35 / 0.6)' : 'rgba(255,255,255,.08)', stage: () => actions.muscleSwapStageEx(id) };
+    };
+    const allIds = Object.keys(EXLIB).filter(id => id !== ms.exId && theme.has(EXLIB[id].muscle));
+    const variantIds = allIds.filter(id => EXLIB[id].pattern === currentLib.pattern);
+    const variantOptions = variantIds.map(mkOpt);
+    const nonVariantIds = allIds.filter(id => !variantIds.includes(id));
+    const sameMuscleOptions = nonVariantIds.filter(id => EXLIB[id].muscle === currentLib.muscle).map(mkOpt);
+    const otherMuscleOptions = nonVariantIds.filter(id => EXLIB[id].muscle !== currentLib.muscle).map(mkOpt);
+
+    muscleSwap = {
+      open: true,
+      title: 'Switch Exercise',
+      exName: currentLib.name,
+      close: actions.closeMuscleSwap, backdrop: actions.closeMuscleSwap,
+      dayOptions,
+      hasVariants: variantOptions.length > 0,
+      variantOptions,
+      sameMuscleOptions, otherMuscleOptions,
+      showAll: ms.showAll,
+      showAllLabel: ms.showAll ? 'Hide other muscle groups' : 'Show all muscle groups',
+      toggleAll: actions.muscleSwapToggleAll,
+      confirmDisabled: !staged,
+      confirm: actions.muscleSwapConfirm,
+      confirmBg: !staged ? 'rgba(255,255,255,.15)' : ACCENT,
+      confirmLabel: 'Confirm Exercise Swap'
+    };
+  }
+
   // ---------- muscle drill ----------
   const muscleDrill = (() => {
     const name = s.muscleDrill;
@@ -435,7 +487,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
       s.program[k].exercises.forEach(ex => {
         const lib = EXLIB[ex.id];
         if (lib.muscle === name) {
-          rows.push({ day: s.program[k].label, name: lib.name, sets: ex.sets, equip: lib.equip[ex.equipIdx].label });
+          rows.push({
+            day: s.program[k].label, name: lib.name, sets: ex.sets, equip: lib.equip[ex.equipIdx].label,
+            switchExercise: () => actions.openMuscleSwap(k, ex.id)
+          });
           lib.secondary.forEach(m => { secondaryCounts[m] = (secondaryCounts[m] || 0) + 1; });
         }
       });
@@ -489,7 +544,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     openDayBuilder: actions.openDayBuilder, closeDayBuilder: actions.closeDayBuilder,
     startWorkout: actions.startWorkout, exitWorkout: actions.exitWorkout,
     openAddExercise: () => actions.openSwap(s.activeDayKey || '', -1, 'replace', true),
-    workout, detail, swap, settings, openSettings: actions.openSettings,
+    workout, detail, swap, muscleSwap, settings, openSettings: actions.openSettings,
     confirmEndEarly: s.confirmEndEarly,
     openBodyModal: actions.openBodyModal, closeBodyModal: actions.closeBodyModal, showBodyModal: s.showBodyModal,
     setBodyView: actions.setBodyView, bodyView: s.bodyView,
@@ -499,7 +554,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     showResume, resumeText, resumeElapsedText, resumeWorkout: actions.resumeWorkout,
     currentUnitsLabel, currentPlanLabel: TRAINING_LABELS[s.trainingType], programName: s.programName,
     renameProgram: (name: string) => actions.renameProgram(name),
-    weekNumber: programWeekNumber(s.startedAt),
+    weekNumber: s.weekNumber,
     openWeekReview: actions.openWeekReview,
     completeSummary: s.completeSummary || [],
 
@@ -523,7 +578,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const lib = EXLIB[id];
       const isCustom = id in s.customExercises;
       return {
-        open: true, name: lib.name, muscle: lib.muscle, pattern: lib.pattern,
+        open: true, id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern,
         secondaryText: lib.secondary.length ? lib.secondary.join(', ') : 'None',
         equipChips: lib.equip,
         restText: lib.restBase + 's',
@@ -614,7 +669,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
 
     // ---------- Progress tab ----------
     volumeChart: volumeChartData(s),
-    weeklyHeatmap: weeklyHeatmapData(bars),
+    weeklyHeatmap: weeklyHeatmapData(s, bars),
     exerciseProgress: exerciseProgressData(s, actions.selectExerciseProgress),
     progressPickerOpen: !!s.progressPickerOpen,
     toggleProgressPicker: actions.toggleProgressPicker,
@@ -626,7 +681,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     durationTrend: durationTrendData(s),
     sessionArchive: s.history.slice(0, 20).map(h => sessionRowVM(h, s, actions)),
     weekReview: (() => {
-      const currentWeek = programWeekNumber(s.startedAt);
+      const currentWeek = s.weekNumber;
       const weekNums = [...new Set(s.history.map(h => h.weekNumber || 1))];
       if (!weekNums.includes(currentWeek)) weekNums.push(currentWeek);
       weekNums.sort((a, b) => b - a);

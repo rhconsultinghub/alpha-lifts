@@ -30,7 +30,10 @@ export function MuscleDrillModal({ vm }: { vm: ViewModel }) {
                 <div style={{ font: "600 13px 'Inter'" }}>{r.name}</div>
                 <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.45)', marginTop: 2 }}>{r.day} · {r.equip}</div>
               </div>
-              <div style={{ font: "600 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'rgba(255,255,255,.08)' }}>{r.sets} sets</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ font: "600 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'rgba(255,255,255,.08)' }}>{r.sets} sets</div>
+                <button onClick={r.switchExercise} style={{ font: "600 11px 'Inter'", padding: '6px 10px', borderRadius: 100, border: 'none', background: 'oklch(0.65 0.19 35 / 0.15)', color: 'oklch(0.75 0.17 35)' }}>⇄ Switch</button>
+              </div>
             </div>
           ))}
         </div>

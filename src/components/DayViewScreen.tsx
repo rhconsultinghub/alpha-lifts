@@ -76,7 +76,7 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
 
         {d.exercises.map((ex: any, i: number) => (
           <div key={i} style={{ padding: '18px 0', borderBottom: '1px solid rgba(255,255,255,.1)', display: 'flex', gap: 14 }}>
-            <ExercisePhoto pattern={ex.pattern} onClick={ex.openDetail} />
+            <ExercisePhoto id={ex.id} pattern={ex.pattern} onClick={ex.openDetail} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
                 <button onClick={ex.openDetail} style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', font: "600 18px 'Inter'", color: '#f5f0ea' }}>{ex.name}</button>

@@ -23,7 +23,7 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
       <div style={{ display: 'flex', gap: 8, overflowX: 'auto', padding: '12px 20px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
         {w.navList.map((n: any, i: number) => (
           <button key={i} onClick={n.go} style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 7, background: n.bg, border: `1px solid ${n.border}`, color: n.color, font: "600 11px 'Inter'", padding: '6px 12px 6px 6px', borderRadius: 100, whiteSpace: 'nowrap' }}>
-            <span style={{ width: 22, height: 22, borderRadius: '50%', flex: 'none', overflow: 'hidden', background: 'rgba(0,0,0,.15)', display: 'flex' }}><ExercisePhoto pattern={n.pattern} size={22} radius={0} /></span>
+            <span style={{ width: 22, height: 22, borderRadius: '50%', flex: 'none', overflow: 'hidden', background: 'rgba(0,0,0,.15)', display: 'flex' }}><ExercisePhoto id={n.id} pattern={n.pattern} size={22} radius={0} /></span>
             {n.name}<span style={{ opacity: 0.7 }}>{n.statusText}</span>
           </button>
         ))}
@@ -32,7 +32,7 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
 
       <div style={{ padding: '12px 20px 140px' }}>
         <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
-          <ExercisePhoto pattern={w.pattern} size={76} radius={16} onClick={w.openDetail} />
+          <ExercisePhoto id={w.id} pattern={w.pattern} size={76} radius={16} onClick={w.openDetail} />
           <div style={{ flex: 1 }}>
             <div className="num" style={{ fontSize: 21, fontWeight: 700 }}>{w.exName}</div>
             <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.45)', marginTop: 3 }}>{w.muscle} · {w.equipLabel}</div>

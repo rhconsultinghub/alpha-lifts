@@ -1,7 +1,7 @@
 import { EXLIB, MUSCLE_TARGETS, TRAINING_MULT, TRAINING_LABELS, incrementForEquip, KG_PER_LB_STEP } from '../data/exercises';
-import { clamp, roundTo, seededFrac } from '../data/program';
+import { clamp, roundTo } from '../data/program';
 import { WARMUP_LIBRARY, type WarmupMove } from '../data/warmups';
-import type { AppState, ProgramDays, ProgramExercise, Muscle, Units, TrainingType, ExerciseHistoryEntry } from '../data/types';
+import type { AppState, ProgramDays, ProgramExercise, Muscle, Units, TrainingType, ExerciseHistoryEntry, HistoryEntry } from '../data/types';
 
 export function fmtWeight(kg: number, units: Units): string {
   if (units === 'lb') return Math.round((kg * 2.20462) / 5) * 5 + ' lb';
@@ -235,10 +235,18 @@ export function warmupForDay(state: AppState, dayKey: string): { name: string; c
   return picked.map(m => ({ name: m.name, cue: m.cue }));
 }
 
-export function programWeekNumber(startedAt: string): number {
-  const start = new Date(startedAt);
-  const days = Math.floor((Date.now() - start.getTime()) / 86400000);
-  return Math.max(1, Math.floor(days / 7) + 1);
+// True once every training day (kind !== 'rest') has been completed or skipped on or after
+// weekStartedAt — the trigger useApp.ts uses to roll into the next week immediately, rather than
+// waiting for 7 calendar days to pass regardless of whether the user actually trained.
+export function isWeekComplete(program: ProgramDays, dayOrder: string[], weekStartedAt: string): boolean {
+  const trainingKeys = dayOrder.filter(k => program[k] && (program[k].kind || 'training') !== 'rest');
+  if (!trainingKeys.length) return false;
+  const startMs = new Date(weekStartedAt).getTime();
+  return trainingKeys.every(k => {
+    const day = program[k];
+    if (day.skipped) return true;
+    return !!day.lastCompletedAt && new Date(day.lastCompletedAt).getTime() >= startMs;
+  });
 }
 
 export function formatElapsed(ms: number): string {
@@ -280,17 +288,53 @@ export function volumeChartData(state: AppState) {
   return { bars, avgText: fmtWeight(avg, state.units), avgLinePct: max > 0 ? Math.round((avg / max) * 100) : 0 };
 }
 
-export function weeklyHeatmapData(bars: MuscleBar[]) {
+// HistoryEntry.id is 'h' + Date.now() at creation — the only place in the persisted shape with a
+// real, unambiguous timestamp (`date`/`day` are display-formatted strings, locale-dependent and
+// not reliably parseable back into a Date).
+function historyTimestamp(h: HistoryEntry): number {
+  const n = Number(h.id.slice(1));
+  return Number.isFinite(n) ? n : Date.now();
+}
+
+// Past weeks reflect what was actually logged (state.exerciseHistory), not a guess — a muscle/week
+// with no completed sets shows 0%, it's never backfilled with synthetic variance. Only the "Now"
+// column (current week) mirrors the live program's planned volume, same as the muscle balance bars
+// elsewhere in the app.
+export function weeklyHeatmapData(state: AppState, bars: MuscleBar[]) {
   const weeksN = 6;
   const muscles = Object.keys(MUSCLE_TARGETS);
   const basePct: Record<string, number> = {};
   bars.forEach(b => { basePct[b.name] = b.pct; });
+  const mult = TRAINING_MULT[state.trainingType];
+
+  // exerciseHistory entries only carry a display date/day string, not a timestamp — join back to
+  // state.history (written in the same completeWorkout() action, so date+day always match) to
+  // recover a real time for week-bucketing.
+  const sessionTime = new Map<string, number>();
+  state.history.forEach(h => {
+    if (h.status === 'completed') sessionTime.set(h.date + '|' + h.day, historyTimestamp(h));
+  });
+  const now = Date.now();
+  const weekSets: Record<string, number>[] = Array.from({ length: weeksN }, () => ({}));
+  Object.entries(state.exerciseHistory).forEach(([exId, entries]) => {
+    const lib = EXLIB[exId];
+    if (!lib) return;
+    entries.forEach(e => {
+      const t = sessionTime.get(e.date + '|' + e.day);
+      if (t == null) return;
+      const weeksAgo = Math.floor((now - t) / (7 * 86400000));
+      if (weeksAgo < 0 || weeksAgo >= weeksN) return;
+      const setCount = e.sets && e.sets.length ? e.sets.length : 1;
+      weekSets[weeksAgo][lib.muscle] = (weekSets[weeksAgo][lib.muscle] || 0) + setCount;
+    });
+  });
+
   const cols: { label: string; w: number }[] = [];
   for (let w = weeksN - 1; w >= 0; w--) cols.push({ label: w === 0 ? 'Now' : '-' + w + 'w', w });
   const rows = muscles.map(m => {
+    const target = MUSCLE_TARGETS[m as Muscle] * mult;
     const cells = cols.map(c => {
-      const variance = 0.65 + seededFrac(m + '_wk_' + c.w) * 0.6;
-      const pct = c.w === 0 ? (basePct[m] || 0) : Math.round(clamp((basePct[m] || 0) * variance, 0, 145));
+      const pct = c.w === 0 ? (basePct[m] || 0) : (target > 0 ? Math.round(((weekSets[c.w][m] || 0) / target) * 100) : 0);
       const t = clamp(pct / 130, 0, 1);
       const bg = pct === 0 ? 'rgba(255,255,255,.04)' :
         pct < 60 ? 'oklch(0.55 0.12 230 / ' + (0.18 + t * 0.5) + ')' :
@@ -408,6 +452,11 @@ export function compareLiftsData(state: AppState, toggle: (id: string) => void) 
 export function consistencyData(state: AppState) {
   const todayD = new Date();
   const orderLen = state.dayOrder.length || 7;
+  // real dates a session was actually completed on, so "done" reflects logged history instead of
+  // a fabricated pattern — see historyTimestamp() above for why id (not the display date string)
+  // is the source of truth for the real calendar date.
+  const completedDateKeys = new Set(state.history.filter(h => h.status === 'completed').map(h => new Date(historyTimestamp(h)).toDateString()));
+  const programStartD = state.startedAt ? new Date(state.startedAt) : null;
   const cells: { date: string; dayNum: number; status: string; bg: string }[] = [];
   for (let i = 27; i >= 0; i--) {
     const d = new Date(todayD); d.setDate(d.getDate() - i);
@@ -416,10 +465,14 @@ export function consistencyData(state: AppState) {
     const progDay = progDayKey ? state.program[progDayKey] : null;
     const isRest = !progDay || (progDay.kind || 'training') === 'rest';
     const dateKey = d.toISOString().slice(0, 10);
+    // a day before the current program existed isn't something the user could have "missed" —
+    // show it as neutral rather than fabricating a done/missed verdict for it.
+    const beforeProgram = !!programStartD && d < new Date(programStartD.getFullYear(), programStartD.getMonth(), programStartD.getDate());
     let status: string;
-    if (isRest) status = 'rest';
+    if (beforeProgram) status = 'none';
+    else if (isRest) status = 'rest';
     else if (i === 0) status = 'today';
-    else status = seededFrac(dateKey) < 0.82 ? 'done' : 'missed';
+    else status = completedDateKeys.has(d.toDateString()) ? 'done' : 'missed';
     cells.push({
       date: dateKey, dayNum: d.getDate(), status,
       bg: status === 'done' ? 'oklch(0.65 0.16 145)' : status === 'missed' ? 'oklch(0.65 0.17 35 / 0.55)' : status === 'today' ? 'oklch(0.65 0.19 35 / 0.4)' : 'rgba(255,255,255,.05)'
@@ -428,7 +481,7 @@ export function consistencyData(state: AppState) {
   let streak = 0;
   for (let i = cells.length - 1; i >= 0; i--) {
     const c = cells[i];
-    if (c.status === 'rest' || c.status === 'today') continue;
+    if (c.status === 'rest' || c.status === 'today' || c.status === 'none') continue;
     if (c.status === 'done') streak++; else break;
   }
   return { cells, streak, completedCount: cells.filter(c => c.status === 'done').length, missedCount: cells.filter(c => c.status === 'missed').length };

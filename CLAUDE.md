@@ -17,8 +17,8 @@ npm run build     # tsc -b && vite build -> dist/ (also generates the PWA servic
 npx tsc -b        # typecheck only
 ```
 
-No test suite exists — verification has been done manually via Playwright browser automation
-during development (see "Verification approach" below), not via an automated CI test suite.
+No test suite exists — verification has been done manually via browser automation during
+development (see "Verification approach" below), not via an automated CI test suite.
 
 ## Architecture
 
@@ -51,16 +51,70 @@ buildViewModel(state, actions) (src/state/viewModel.ts)
 - **`src/data/warmups.ts`** — small curated warm-up move library, matched to a day's target
   muscles via greedy set-cover in `logic.ts#warmupForDay`.
 - **`src/icons/ExerciseIcon.tsx`** — hand-drawn SVG pictograms per exercise "pattern" (movement
-  type, e.g. `bench_press`, `row`, `squat`). No external image assets — everything is inline SVG
-  built from primitives, single accent color, duotone body-line strokes for visual weight.
+  type, e.g. `bench_press`, `row`, `squat`), used as the fallback for any exercise without a
+  bundled photo (see below). Single accent color, duotone body-line strokes for visual weight.
 - **`src/components/BodyDiagram.tsx`** — schematic anatomical body map (front/back), muscle
-  regions built from rect/circle primitives, opacity = how much that muscle is worked.
+  regions built from hand-drawn SVG `<path>` shapes (a few simple rects remain for non-tracked
+  connective bits like the neck/forearms/feet), opacity = how much that muscle is worked. Shared
+  `DELT_L/R`, `ARM_L/R`, `THIGH_L/R`, `CALF_L/R` path constants are reused between the front and
+  back views since those limb silhouettes are identical either way — only which muscle they're
+  tagged with (and therefore how they light up) changes.
+- **`src/data/exercisePhotos.ts`** + **`public/exercise-photos/*.jpg`** — real reference photos
+  (one per exercise), sourced from `free-exercise-db` (github.com/yuhonas/free-exercise-db,
+  public domain/Unlicense) for the exercises added from that same source — see "Exercise library"
+  below. `EXERCISE_PHOTO_IDS` is the allowlist of exercise ids that have a bundled photo;
+  everything else (the original hand-curated exercises, and any custom user-created ones) has no
+  photo and `ExercisePhoto.tsx` falls back to the `ExerciseIcon` pictogram. Photos are bundled
+  (not hotlinked) so the PWA stays fully offline-capable — `vite.config.ts`'s Workbox
+  `globPatterns` includes `jpg` for this reason; if a future asset type is added to
+  `public/`, remember to extend that glob or it won't be precached for offline use.
+
+### Exercise library
+
+`EXLIB` in `src/data/exercises.ts` is two eras of data back to back: the original ~90
+hand-curated exercises (bespoke cues, rest times, rep ranges, multi-equipment variants), followed
+by a block of 67 exercises imported from `free-exercise-db`. The import was a one-off curation
+pass, not a live sync — there's no script left in the repo that re-runs it. If asked to pull in
+more exercises from that source later:
+- Its muscle taxonomy differs from this app's 11-muscle `Muscle` type and needs mapping (e.g.
+  `lats`/`middle back`/`lower back`/`traps` all collapse to `'Back'` here); its `equipment` field
+  is one value per exercise rather than this app's multi-equipment-variant model, so equivalent
+  entries (e.g. a barbell and dumbbell version of the same movement) need to be merged by hand or
+  heuristic, not imported as separate exercises, or the library balloons with near-duplicates.
+  It also has no rep range or rest-time data, since it's not built around a sets/reps/weight
+  training model — those need reasonable heuristic defaults.
+- Check exercise ids against the existing `EXLIB` keys before merging — `calf_raise` collided
+  with an existing entry during this import and had to be renamed to `calf_raise_machine`;
+  it's not a naming convention, just how that particular collision was resolved.
+- Photos live at `exercises/{free-exercise-db id}/0.jpg` on that repo's `main` branch
+  (`https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/...`); each new
+  exercise added from there should get a matching photo bundled per the point above.
 
 ### Session-scoped vs. permanent program edits
 
 Mid-workout exercise changes (swap/add/remove) are staged in `state.workout.dayExercises` /
 `exSets` and only written back to `state.program` if the user confirms "Update My Plan" on the
 completion screen — see `completeWorkout()` and `pendingPlanUpdate` in `useApp.ts`.
+
+Separately, the muscle drill-down modal (tap a muscle bar on the Program screen) has its own
+lighter-weight "switch exercise" quick action (`MuscleSwapModal.tsx` / `MuscleSwapState` in
+`types.ts`) that edits `state.program` directly and immediately — it's for permanent plan edits
+from outside a workout session, not the mid-workout staging flow above. Its one wrinkle: the same
+exercise id can appear on more than one program day (e.g. both Lower days in an Upper/Lower
+split), so it lets the user pick which of those day(s) the replacement applies to rather than
+assuming "all of them" or "just the one they clicked."
+
+### Weekly completion tracking
+
+`AppState.weekNumber` / `weekStartedAt` track the *active* week by actual completion, not
+calendar time — `isWeekComplete()` in `logic.ts` checks whether every training day
+(`kind !== 'rest'`) has been completed or skipped on or after `weekStartedAt`. `useApp.ts` checks
+this after every `completeWorkout()` and `toggleSkipDay()`; once true, it bumps `weekNumber`,
+resets `weekStartedAt` to now, and clears `skipped`/`lastCompletedAt` on every training day so the
+Program screen shows a clean slate immediately, rather than waiting out the remaining calendar
+days. `weekNumber`/`weekStartedAt` are per-program state (mirrored into `SavedProgram` alongside
+`startedAt`) — carry them through anywhere a program is duplicated or switched, or the week
+counter will silently reset.
 
 ## First-run / onboarding
 
@@ -84,10 +138,15 @@ Static PWA on GitHub Pages, project site (not a custom domain), auto-deployed vi
 - `vite-plugin-pwa` generates the manifest + service worker (`registerType: 'autoUpdate'`).
 - Icons in `public/`: `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`,
   `apple-touch-icon.png`, `favicon.svg` — all a flexed-arm-holding-a-dumbbell glyph, single
-  accent orange (`#f0752f`) on a dark rounded-square background. Source SVG coordinates for this
-  glyph aren't kept anywhere separately; if it needs to change, redraw directly in these files
-  (see git history around the "Redesign app icon" commit for the hand-tuned circle/line
-  coordinates if useful as a starting point).
+  accent orange (`#f0752f`) on a dark rounded-square gradient background (`#241d15` → `#120f0a`).
+  Current version was generated from a user-supplied reference PNG (flat black background, no
+  transparency) by luminance-keying the background to transparent and compositing the resulting
+  glyph onto that gradient at each icon's target size — not hand-drawn SVG coordinates this time.
+  The generation script wasn't kept (it was a one-off Node + `sharp` script run outside the repo);
+  if the icon needs to change again, either redraw by hand or rebuild a similar keying script from
+  a new reference image. `favicon.svg` embeds a base64 PNG of the same glyph rather than being
+  pure vector, for the same reason. The maskable icon keeps its content inside the centered 80%
+  "safe zone" diameter per the W3C maskable-icon spec, since platforms crop it to their own shape.
 - To verify a subpath deployment locally (since `vite preview` ignores `base` and always serves
   from `/`), copy `dist/` into a folder literally named `alpha-lifts` and serve its *parent* dir
   with any static file server, then hit `http://localhost:PORT/alpha-lifts/`.
@@ -102,18 +161,38 @@ remembering if setup issues resurface:
   real GitHub repo fresh and copying files in via `robocopy ... /XD node_modules .git`. If git
   ever starts saying `warning: could not open directory 'AppData/'` or similar, that's the same
   mistake recurring — check `git status` isn't walking up into `C:\Users\Ryan`.
-- Project folder now lives at `C:\Users\Ryan\OneDrive\Personal Projects\Alpha Lifts` (inside
-  OneDrive — fine for git, but `node_modules` will get synced by OneDrive too unless excluded,
-  which can slow down `npm install`/`npm run dev`/`npm run build`).
+- Project folder is at `C:\Users\Ryan\Desktop\Personal Projects\Alpha Lifts\alpha-lifts` (a
+  prior handoff had it under OneDrive instead — it's since moved to Desktop; update this note
+  again if it moves again, since tooling that hardcodes a path — e.g. a dev-server launcher
+  config — will silently break otherwise).
+- Windows paths with spaces (this one has several) can trip up tools that spawn child processes
+  without proper quoting/escaping. A directory junction (`mklink /J` or PowerShell's
+  `New-Item -ItemType Junction`) pointed at the real project folder works as a space-free
+  stand-in when needed — just confirm the junction actually resolves (`Get-Item` through it)
+  before relying on it, since a mis-quoted target silently creates a broken link rather than
+  erroring.
 
 ## Verification approach used throughout this project
 
-No automated test suite. Every change has been manually verified end-to-end using headless
-Playwright with real Chromium, launched directly (no local Playwright install — imported from
-the global module path and pointed at the sandbox's pre-installed Chromium binary). Pattern:
-write a throwaway script under `.verify/`, run it against `npm run dev`, screenshot + read the
-result, delete the script afterward. `.verify/` is gitignored. If continuing work in a sandbox
-without Playwright pre-installed this way, adapt accordingly.
+No automated test suite. Every change has been manually verified end-to-end via browser
+automation against `npm run dev`. Two approaches have been used depending on what the sandbox
+provides:
+- Headless Playwright with real Chromium, launched directly (no local Playwright install —
+  imported from the global module path and pointed at the sandbox's pre-installed Chromium
+  binary).
+- The harness's own browser-automation tools, when available, driving a real dev-server preview
+  directly (navigate/click/read page text/read console/exec JS in-page) — no Playwright install
+  needed at all in that case. Screenshot capture has been flaky in that tool in at least one
+  session; when it hangs, `get_page_text`/`read_page`/in-page `javascript_exec` (e.g. reading
+  `<img>` `naturalWidth`/`complete`, or serializing an SVG's live DOM markup and rasterizing it
+  separately with `sharp` to actually look at it) covers the same ground without needing a working
+  screenshot call.
+
+For non-visual data/pipeline work (e.g. mapping an external dataset into this app's schema),
+throwaway Node scripts under `.verify/` (gitignored) have also been used for scratch computation
+— e.g. auditing every split/training-type combo's resulting volume % and estimated day time
+across all wizard presets, or curating the free-exercise-db import — deleted once the resulting
+change was integrated into the actual source files.
 
 ## Feature history (condensed)
 
@@ -126,7 +205,15 @@ limit, date-labeled rest chart, baseline exercise coverage fixes (no more 0%-tra
 of the box), week-by-week review, richer anatomical body diagram, upgraded exercise pictograms,
 plan renaming, mid-workout-edit plan-update confirmation prompt; (5) PWA + GitHub Pages
 deployment; (6) first-run onboarding wizard (no seeded demo data), redesigned app icon, warm-up
-section on Day View.
+section on Day View; (7) recommended-plan set-count/rest-time rebalance so default programs land
+near 100% of weekly muscle target instead of routinely overshooting it, and no default day is
+estimated to run more than ~90 min; weekly-volume heatmap and consistency chart now reflect real
+logged history instead of synthetic variance for users with no (or partial) history; week
+rollover now triggers on actual completion of every training day rather than waiting out 7
+calendar days; muscle drill-down quick "switch exercise" action (can target more than one day at
+once); 67 more exercises + reference photos imported from free-exercise-db into the exercise
+library; new app icon; body diagram redrawn with organic per-muscle shapes instead of plain
+rects/circles.
 
 No open/pending feature work as of this handoff — the app is in a complete, deployed state.
 Ask the user what's next.

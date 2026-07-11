@@ -68,6 +68,8 @@ export interface SavedProgram {
   dayOrder: string[];
   startedAt: string;
   days: ProgramDays;
+  weekNumber?: number;
+  weekStartedAt?: string;
 }
 
 export interface WorkoutSetRow {
@@ -127,6 +129,17 @@ export interface SwapState {
   isAdd: boolean;
 }
 
+// quick "switch exercise" from the muscle drill-down: unlike SwapState (single day/exercise
+// slot), the same exercise id can appear on more than one program day, so the user picks which
+// of those day(s) the replacement should apply to before choosing a new exercise.
+export interface MuscleSwapState {
+  exId: string;
+  dayKeys: string[];
+  selectedDayKeys: string[];
+  stagedExId: string | null;
+  showAll: boolean;
+}
+
 export interface PendingPlanUpdate {
   dayKey: string;
   updatedDayExercises: ProgramExercise[];
@@ -175,6 +188,12 @@ export interface AppState {
   trainingType: TrainingType;
   dayOrder: string[];
   startedAt: string;
+  // "week" here tracks actual completion, not calendar time: weekStartedAt marks when the
+  // current week began, and once every training day is completed or skipped on or after that
+  // moment, the app rolls straight into the next week rather than waiting out the remaining
+  // calendar days — see isWeekComplete() in state/logic.ts.
+  weekNumber: number;
+  weekStartedAt: string;
   units: Units;
   restPacing: RestPacing;
   coachVoice: CoachVoice;
@@ -193,6 +212,7 @@ export interface AppState {
   muscleDrill: Muscle | null;
   detail: { dayKey: string; exIndex: number } | null;
   swap: SwapState | null;
+  muscleSwap: MuscleSwapState | null;
   workout: WorkoutState | null;
   completeSummary: CompleteSummaryRow[] | null;
   exerciseHistoryModalId: string | null;

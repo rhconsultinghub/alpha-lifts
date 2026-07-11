@@ -17,7 +17,7 @@ export function LibraryExerciseDetailModal({ vm }: { vm: ViewModel }) {
           )}
         </div>
         <div style={{ width: '100%', height: 180, borderRadius: 18, marginBottom: 16, overflow: 'hidden' }}>
-          <ExercisePhoto pattern={d.pattern} size={180} radius={18} />
+          <ExercisePhoto id={d.id} pattern={d.pattern} size={180} radius={18} />
         </div>
         <div className="num" style={{ fontSize: 24, fontWeight: 700 }}>{d.name}</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '10px 0 16px' }}>

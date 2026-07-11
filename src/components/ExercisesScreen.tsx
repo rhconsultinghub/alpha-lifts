@@ -16,7 +16,7 @@ export function ExercisesScreen({ vm }: { vm: ViewModel }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {g.items.map(ex => (
               <button key={ex.id} onClick={ex.openDetail} style={{ textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(255,255,255,.04)', border: 'none', borderRadius: 16, padding: '12px 14px', color: '#f5f0ea' }}>
-                <ExercisePhoto pattern={ex.pattern} size={52} radius={12} />
+                <ExercisePhoto id={ex.id} pattern={ex.pattern} size={52} radius={12} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <div style={{ font: "600 14px 'Inter'" }}>{ex.name}</div>

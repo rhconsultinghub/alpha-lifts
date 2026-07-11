@@ -8,7 +8,7 @@ import type {
   Units, WarmupStyle, WorkoutSetRow, WizardCustomDay
 } from '../data/types';
 import {
-  recommendation, restForExercise, dayMuscleRanks, programWeekNumber, fmtWeight,
+  recommendation, restForExercise, dayMuscleRanks, isWeekComplete, fmtWeight,
   nextIncompleteIndex, defaultCompareLiftIds
 } from './logic';
 
@@ -117,7 +117,7 @@ export function useApp() {
     setState(s => {
       if (id === s.activeProgramId) return s;
       const savedPrograms = { ...s.savedPrograms };
-      savedPrograms[s.activeProgramId] = { name: s.programName, trainingType: s.trainingType, dayOrder: s.dayOrder, startedAt: s.startedAt, days: s.program };
+      savedPrograms[s.activeProgramId] = { name: s.programName, trainingType: s.trainingType, dayOrder: s.dayOrder, startedAt: s.startedAt, days: s.program, weekNumber: s.weekNumber, weekStartedAt: s.weekStartedAt };
       const target = savedPrograms[id];
       delete savedPrograms[id];
       return {
@@ -126,6 +126,7 @@ export function useApp() {
         trainingType: target.trainingType || 'progressive_overload',
         dayOrder: target.dayOrder || Object.keys(target.days),
         startedAt: target.startedAt || new Date().toISOString(),
+        weekNumber: target.weekNumber || 1, weekStartedAt: target.weekStartedAt || target.startedAt || new Date().toISOString(),
         program: target.days, savedPrograms, activeDayKey: null, screen: 'program' as Screen
       };
     });
@@ -134,12 +135,12 @@ export function useApp() {
     setState(s => {
       const newId = 'prog_' + Date.now();
       const savedPrograms = { ...s.savedPrograms };
-      savedPrograms[s.activeProgramId] = { name: s.programName, trainingType: s.trainingType, dayOrder: s.dayOrder, startedAt: s.startedAt, days: s.program };
+      savedPrograms[s.activeProgramId] = { name: s.programName, trainingType: s.trainingType, dayOrder: s.dayOrder, startedAt: s.startedAt, days: s.program, weekNumber: s.weekNumber, weekStartedAt: s.weekStartedAt };
       return {
         ...s,
         activeProgramId: newId, programName: s.programName + ' Copy',
         program: JSON.parse(JSON.stringify(s.program)), dayOrder: [...s.dayOrder], trainingType: s.trainingType,
-        startedAt: new Date().toISOString(),
+        startedAt: new Date().toISOString(), weekNumber: 1, weekStartedAt: new Date().toISOString(),
         savedPrograms
       };
     });
@@ -199,11 +200,12 @@ export function useApp() {
         : buildProgramFromPreset(SPLIT_PRESETS.find(p => p.id === w.splitId) || SPLIT_PRESETS[0], w.trainingType, w.prefill);
       const newId = 'prog_' + Date.now();
       const savedPrograms = { ...s.savedPrograms };
-      savedPrograms[s.activeProgramId] = { name: s.programName, trainingType: s.trainingType, dayOrder: s.dayOrder, startedAt: s.startedAt, days: s.program };
+      savedPrograms[s.activeProgramId] = { name: s.programName, trainingType: s.trainingType, dayOrder: s.dayOrder, startedAt: s.startedAt, days: s.program, weekNumber: s.weekNumber, weekStartedAt: s.weekStartedAt };
       return {
         ...s,
         activeProgramId: newId, programName: name, trainingType: w.trainingType,
-        program: built.days, dayOrder: built.dayOrder, startedAt: new Date().toISOString(), savedPrograms,
+        program: built.days, dayOrder: built.dayOrder, startedAt: new Date().toISOString(),
+        weekNumber: 1, weekStartedAt: new Date().toISOString(), savedPrograms,
         newProgramWizard: null, showSettings: false, activeDayKey: null, screen: 'program' as Screen
       };
     });
@@ -225,6 +227,7 @@ export function useApp() {
         onboarded: true,
         activeProgramId: newId, programName: name, trainingType: w.trainingType,
         program: built.days, dayOrder: built.dayOrder, startedAt: new Date().toISOString(),
+        weekNumber: 1, weekStartedAt: new Date().toISOString(),
         newProgramWizard: null, screen: 'program' as Screen
       };
     });
@@ -243,9 +246,17 @@ export function useApp() {
         const entry = {
           id: 'h' + now.getTime(), day: day.label, program: s.programName, date: dateStr,
           volumeKg: 0, durationMin: 0, avgRestSec: 0,
-          weekNumber: programWeekNumber(s.startedAt), status: 'skipped' as const, exercises: []
+          weekNumber: s.weekNumber, status: 'skipped' as const, exercises: []
         };
-        return { ...s, program, history: [entry, ...s.history] };
+        let weekNumber = s.weekNumber, weekStartedAt = s.weekStartedAt;
+        if (isWeekComplete(program, s.dayOrder, weekStartedAt)) {
+          weekNumber += 1; weekStartedAt = now.toISOString();
+          s.dayOrder.forEach(k => {
+            const d = program[k];
+            if (d && (d.kind || 'training') !== 'rest') { d.skipped = false; d.lastCompletedAt = null; }
+          });
+        }
+        return { ...s, program, history: [entry, ...s.history], weekNumber, weekStartedAt };
       }
       return { ...s, program };
     });
@@ -392,6 +403,40 @@ export function useApp() {
   const swapToggleAll = useCallback(() => setState(s => (s.swap ? { ...s, swap: { ...s.swap, showAll: !s.swap.showAll } } : s)), []);
   const swapStageEquip = useCallback((idx: number) => setState(s => (s.swap ? { ...s, swap: { ...s.swap, stagedEquipIdx: idx } } : s)), []);
   const swapStageEx = useCallback((id: string) => setState(s => (s.swap ? { ...s, swap: { ...s.swap, stagedExId: id } } : s)), []);
+
+  // ---------- muscle drill-down quick "switch exercise" (can span multiple days) ----------
+  const openMuscleSwap = useCallback((dayKey: string, exId: string) => {
+    setState(s => {
+      const dayKeys = s.dayOrder.filter(k => s.program[k] && s.program[k].exercises.some(e => e.id === exId));
+      return { ...s, muscleSwap: { exId, dayKeys, selectedDayKeys: [dayKey], stagedExId: null, showAll: false } };
+    });
+  }, []);
+  const closeMuscleSwap = useCallback(() => setState(s => ({ ...s, muscleSwap: null })), []);
+  const toggleMuscleSwapDay = useCallback((dayKey: string) => {
+    setState(s => {
+      if (!s.muscleSwap) return s;
+      const has = s.muscleSwap.selectedDayKeys.includes(dayKey);
+      if (has && s.muscleSwap.selectedDayKeys.length === 1) return s; // keep at least one day selected
+      const selectedDayKeys = has ? s.muscleSwap.selectedDayKeys.filter(k => k !== dayKey) : [...s.muscleSwap.selectedDayKeys, dayKey];
+      return { ...s, muscleSwap: { ...s.muscleSwap, selectedDayKeys } };
+    });
+  }, []);
+  const muscleSwapToggleAll = useCallback(() => setState(s => (s.muscleSwap ? { ...s, muscleSwap: { ...s.muscleSwap, showAll: !s.muscleSwap.showAll } } : s)), []);
+  const muscleSwapStageEx = useCallback((id: string) => setState(s => (s.muscleSwap ? { ...s, muscleSwap: { ...s.muscleSwap, stagedExId: id } } : s)), []);
+  const muscleSwapConfirm = useCallback(() => {
+    setState(s => {
+      const ms = s.muscleSwap;
+      if (!ms || !ms.stagedExId) return s;
+      const lib = EXLIB[ms.stagedExId];
+      const program = JSON.parse(JSON.stringify(s.program));
+      ms.selectedDayKeys.forEach(dayKey => {
+        const day = program[dayKey];
+        if (!day) return;
+        day.exercises = day.exercises.map((ex: ProgramExercise) => (ex.id === ms.exId ? mkEx(ms.stagedExId as string, ex.sets, 0, { weight: 0, reps: lib.repHi, hitTop: true }) : ex));
+      });
+      return { ...s, program, muscleSwap: null };
+    });
+  }, []);
 
   const swapConfirm = useCallback(() => {
     setState(s => {
@@ -659,7 +704,7 @@ export function useApp() {
       const avgRestSec = Math.round(s.workout.dayExercises.reduce((a, ex) => a + restForExercise(ex.id, s.restPacing), 0) / Math.max(1, s.workout.dayExercises.length));
       const historyEntry = {
         id: 'h' + now.getTime(), day: dayLabel, program: s.programName, date: dateStr, volumeKg: Math.round(totalVolume),
-        durationMin, avgRestSec, weekNumber: programWeekNumber(s.startedAt), status: 'completed' as const, exercises: summary!
+        durationMin, avgRestSec, weekNumber: s.weekNumber, status: 'completed' as const, exercises: summary!
       };
       const exerciseHistory = { ...s.exerciseHistory };
       s.workout.dayExercises.forEach((ex, idx) => {
@@ -673,17 +718,27 @@ export function useApp() {
       const program = JSON.parse(JSON.stringify(s.program));
       program[dayKey].lastCompletedAt = now.toISOString();
       program[dayKey].exercisesDoneMask = exercisesDoneMask;
+      if (!hasChanges) program[dayKey].exercises = updatedDayExercises;
+
+      let weekNumber = s.weekNumber, weekStartedAt = s.weekStartedAt;
+      if (isWeekComplete(program, s.dayOrder, weekStartedAt)) {
+        weekNumber += 1; weekStartedAt = now.toISOString();
+        s.dayOrder.forEach(k => {
+          const d = program[k];
+          if (d && (d.kind || 'training') !== 'rest') { d.skipped = false; d.lastCompletedAt = null; }
+        });
+      }
+
       if (hasChanges) {
         return {
           ...s, program, screen: 'complete' as Screen, completeSummary: summary, workout: null,
-          history: [historyEntry, ...s.history], exerciseHistory,
+          history: [historyEntry, ...s.history], exerciseHistory, weekNumber, weekStartedAt,
           pendingPlanUpdate: { dayKey, updatedDayExercises, changedCount: s.workout.changesMade }
         };
       }
-      program[dayKey].exercises = updatedDayExercises;
       return {
         ...s, program, screen: 'complete' as Screen, completeSummary: summary, workout: null,
-        history: [historyEntry, ...s.history], exerciseHistory, pendingPlanUpdate: null
+        history: [historyEntry, ...s.history], exerciseHistory, weekNumber, weekStartedAt, pendingPlanUpdate: null
       };
     });
     stopElapsedTimer();
@@ -739,6 +794,7 @@ export function useApp() {
       setExerciseFormField, toggleFormMuscle, toggleFormSecondary, toggleFormEquip, saveExerciseForm,
       requestDeleteExercise, deleteExercise,
       openSwap, closeSwap, swapTab, swapToggleAll, swapStageEquip, swapStageEx, swapConfirm, removeWorkoutExercise,
+      openMuscleSwap, closeMuscleSwap, toggleMuscleSwapDay, muscleSwapToggleAll, muscleSwapStageEx, muscleSwapConfirm,
       removeExercise, changeSets,
       startWorkout, switchExercise, setSetField, bumpSetField, toggleSetDone, addSet, removeSet,
       restAdjust, restSkip, advance, applyPlanUpdate, discardPlanUpdate,

@@ -1,0 +1,26 @@
+// Exercise ids with a bundled reference photo in public/exercise-photos/{id}.jpg — sourced from
+// free-exercise-db (github.com/yuhonas/free-exercise-db, public domain/Unlicense), one photo per
+// exercise, downloaded alongside the exercise data added from that same source (see exercises.ts).
+// Every other exercise (the original hand-curated set, plus any custom user-created ones) has no
+// photo and falls back to the hand-drawn SVG pictogram in ExerciseIcon.
+export const EXERCISE_PHOTO_IDS = new Set([
+  'ab_rollout', 'ab_rollout_on_knees', 'alternate_bicep_curl', 'alternate_hammer_curl',
+  'alternating_floor_press', 'alternating_press', 'alternating_renegade_row', 'alternating_shoulder_press',
+  'anti_gravity_press', 'bench_press_medium_grip', 'bench_press_with_neutral_grip', 'bent_arm_pullover',
+  'bent_over_one_arm_long_bar_row', 'bent_over_row', 'bent_over_two_arm_long_bar_row', 'bent_over_two_dumbbell_row',
+  'bent_over_two_dumbbell_row_with_palms_in', 'bent_press', 'bicep_curl', 'box_squat_with_chains',
+  'calf_press', 'calf_raise_machine', 'chair_squat', 'chest_press', 'clean_and_press', 'clock_push_up',
+  'close_grip_front_lat_pulldown', 'cross_body_crunch', 'cuban_press', 'decline_flyes', 'decline_oblique_crunch',
+  'decline_press', 'decline_reverse_crunch', 'double_push_press', 'drag_curl', 'elevated_back_lunge',
+  'extended_range_one_arm_floor_press', 'flyes', 'freehand_jump_squat', 'front_squat_clean_grip',
+  'front_squat_to_a_bench', 'glute_kickback', 'high_curls', 'jackknife_sit_up', 'lunge_pass_through',
+  'lying_leg_curls', 'one_arm_row', 'one_arm_upright_row', 'one_legged_deadlift', 'one_legged_kickback',
+  'palms_down_wrist_curl_over_a_bench', 'palms_up_wrist_curl_over_a_bench', 'pistol_squat', 'press_sit_up',
+  'reverse_calf_raises', 'reverse_crunch', 'reverse_curl', 'reverse_flyes', 'rocking_standing_calf_raise',
+  'seated_one_leg_calf_raise', 'seated_palms_down_wrist_curl', 'seated_press', 'single_leg_glute_bridge',
+  'squat', 'squat_to_a_bench', 'standing_leg_curl', 'stiff_legged_deadlift'
+]);
+
+export function exercisePhotoUrl(id: string): string | null {
+  return EXERCISE_PHOTO_IDS.has(id) ? `${import.meta.env.BASE_URL}exercise-photos/${id}.jpg` : null;
+}
