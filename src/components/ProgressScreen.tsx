@@ -153,14 +153,18 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
           <div style={{ font: "600 11px 'Inter'", color: 'oklch(0.72 0.17 35)' }}>{cons.streak}-day streak</div>
         </div>
         <div style={CARD}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 5, marginBottom: 10 }}>
-            {cons.cells.map((c: any, i: number) => (
-              <div key={i} style={{ aspectRatio: '1', borderRadius: 5, background: c.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', font: "600 8px 'Inter'", color: 'rgba(245,240,234,.5)' }}>{c.dayNum}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 5, marginBottom: 6 }}>
+            {cons.weekdayLabels.map((l: string, i: number) => (
+              <div key={i} style={{ textAlign: 'center', font: "600 8px 'Inter'", color: 'rgba(245,240,234,.3)' }}>{l}</div>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: 14, font: "500 10px 'Inter'", color: 'rgba(245,240,234,.45)' }}>
-            <span>{cons.completedCount} completed</span>
-            <span>{cons.missedCount} missed</span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 5, marginBottom: 10 }}>
+            {cons.cells.map((c: any, i: number) => (
+              <div key={i} style={{ aspectRatio: '1', borderRadius: 5, background: c.bg, opacity: c.status === 'future' ? 0.35 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', font: "600 8px 'Inter'", color: 'rgba(245,240,234,.5)' }}>{c.dayNum}</div>
+            ))}
+          </div>
+          <div style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.45)' }}>
+            {cons.completedCount} completed in the last 5 weeks
           </div>
         </div>
 

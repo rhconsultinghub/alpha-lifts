@@ -58,24 +58,41 @@ buildViewModel(state, actions) (src/state/viewModel.ts)
   connective bits like the neck/forearms/feet), opacity = how much that muscle is worked. Shared
   `DELT_L/R`, `ARM_L/R`, `THIGH_L/R`, `CALF_L/R` path constants are reused between the front and
   back views since those limb silhouettes are identical either way — only which muscle they're
-  tagged with (and therefore how they light up) changes.
-- **`src/data/exercisePhotos.ts`** + **`public/exercise-photos/*.jpg`** — real reference photos
-  (one per exercise), sourced from `free-exercise-db` (github.com/yuhonas/free-exercise-db,
-  public domain/Unlicense) for the exercises added from that same source — see "Exercise library"
-  below. `EXERCISE_PHOTO_IDS` is the allowlist of exercise ids that have a bundled photo;
-  everything else (the original hand-curated exercises, and any custom user-created ones) has no
-  photo and `ExercisePhoto.tsx` falls back to the `ExerciseIcon` pictogram. Photos are bundled
-  (not hotlinked) so the PWA stays fully offline-capable — `vite.config.ts`'s Workbox
-  `globPatterns` includes `jpg` for this reason; if a future asset type is added to
-  `public/`, remember to extend that glob or it won't be precached for offline use.
+  tagged with (and therefore how they light up) changes. Every region's coordinates deliberately
+  overlap its neighbor by a few units (shoulder into arm, chest into abs, hip into thigh, traps
+  into rear delts, etc.) so the composite reads as one continuous standing figure instead of
+  disconnected floating shapes — an earlier version of this file didn't do that and looked like a
+  constellation of parts rather than a body; if you're adjusting proportions, preserve the overlap
+  or that regression comes back. There's no live-app screenshot tool reliably available in every
+  sandbox — verifying a change here by extracting the rendered SVG's live DOM markup (or
+  reconstructing the same path constants) and rasterizing it with `sharp` in a scratch script,
+  then reading the resulting PNG, has worked when the harness's own screenshot action hangs.
+- **`src/data/exercisePhotos.ts`** + **`public/exercise-photos/*.jpg`** — real reference photos,
+  sourced from `free-exercise-db` (github.com/yuhonas/free-exercise-db, public domain/Unlicense).
+  `EXERCISE_PHOTO_IDS` is the allowlist of exercise ids that have a bundled photo (137 of 151 as
+  of this writing — see "Exercise library" below for the 14 that don't); anything not in that set
+  (including custom user-created exercises) has no photo and `ExercisePhoto.tsx` falls back to
+  the `ExerciseIcon` pictogram. Photos are bundled (not hotlinked) so the PWA stays fully
+  offline-capable — `vite.config.ts`'s Workbox `globPatterns` includes `jpg` for this reason; if a
+  future asset type is added to `public/`, remember to extend that glob or it won't be precached
+  for offline use.
 
 ### Exercise library
 
 `EXLIB` in `src/data/exercises.ts` is two eras of data back to back: the original ~90
 hand-curated exercises (bespoke cues, rest times, rep ranges, multi-equipment variants), followed
-by a block of 67 exercises imported from `free-exercise-db`. The import was a one-off curation
-pass, not a live sync — there's no script left in the repo that re-runs it. If asked to pull in
-more exercises from that source later:
+by a block of 67 exercises imported from `free-exercise-db`. Both eras now have photos — the 67
+imported ones got a photo as part of that import, and the original ~90 were matched afterward by
+name/muscle against the same catalog (`EXERCISE_PHOTO_IDS` in `exercisePhotos.ts` covers both).
+14 of the original ~90 have no reasonable match in that catalog (niche/coined names like "Kelso
+Shrug", "Larsen Press", "Pec Deck", "Suitcase Carry" — that catalog just doesn't have everything)
+and were deliberately left on the icon fallback rather than paired with a wrong or misleading
+photo; don't force a match onto those without actually checking the source images if asked to
+revisit it.
+
+Both the import and the later name-matching pass were one-off curation, not a live sync — there's
+no script left in the repo that re-runs either. If asked to pull in more exercises or photos from
+that source later:
 - Its muscle taxonomy differs from this app's 11-muscle `Muscle` type and needs mapping (e.g.
   `lats`/`middle back`/`lower back`/`traps` all collapse to `'Back'` here); its `equipment` field
   is one value per exercise rather than this app's multi-equipment-variant model, so equivalent
@@ -84,11 +101,18 @@ more exercises from that source later:
   It also has no rep range or rest-time data, since it's not built around a sets/reps/weight
   training model — those need reasonable heuristic defaults.
 - Check exercise ids against the existing `EXLIB` keys before merging — `calf_raise` collided
-  with an existing entry during this import and had to be renamed to `calf_raise_machine`;
-  it's not a naming convention, just how that particular collision was resolved.
+  with an existing entry during the exercise-data import and had to be renamed to
+  `calf_raise_machine`; it's not a naming convention, just how that particular collision was
+  resolved.
+- Name-matching by string similarity alone produces confidently-wrong matches at a meaningful
+  rate (e.g. an early automated pass matched "Barbell Row" to "Sled Row" and "Zercher Squat" to
+  plain "Barbell Squat" — same score tier as several correct matches, but visually/equipment-wise
+  wrong). Spot-check matches against what the exercise actually is before trusting a score-based
+  pick, especially for anything equipment-specific or a named variant of a more generic movement.
 - Photos live at `exercises/{free-exercise-db id}/0.jpg` on that repo's `main` branch
   (`https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/...`); each new
-  exercise added from there should get a matching photo bundled per the point above.
+  exercise matched from there should get a matching photo added to both `EXERCISE_PHOTO_IDS` and
+  `public/exercise-photos/`.
 
 ### Session-scoped vs. permanent program edits
 
@@ -213,7 +237,13 @@ rollover now triggers on actual completion of every training day rather than wai
 calendar days; muscle drill-down quick "switch exercise" action (can target more than one day at
 once); 67 more exercises + reference photos imported from free-exercise-db into the exercise
 library; new app icon; body diagram redrawn with organic per-muscle shapes instead of plain
-rects/circles.
+rects/circles; (8) immediate same-session follow-up on phase 7 — matched reference photos onto
+the *original* ~90 hand-curated exercises too (137 of 151 now have a real photo, up from just the
+67 imported ones), reworked the Consistency chart into a real Mon-Sun calendar heatmap with
+weekday headers instead of an unlabeled rolling window that silently assumed a fixed weekday
+training schedule (broken by the week-rollover-on-completion change in phase 7), and redrew the
+body diagram again with every region's shape deliberately overlapping its neighbor so it reads as
+one continuous figure instead of disconnected floating parts.
 
 No open/pending feature work as of this handoff — the app is in a complete, deployed state.
 Ask the user what's next.

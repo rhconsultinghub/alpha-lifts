@@ -449,42 +449,52 @@ export function compareLiftsData(state: AppState, toggle: (id: string) => void) 
   };
 }
 
+// A real Mon-Sun calendar grid (like a GitHub-style contribution calendar) rather than a rolling
+// N-day window — a rolling window doesn't align to week boundaries, so cells can't carry weekday
+// headers and read as an arbitrary, unlabeled strip of numbers. Cell status is presence-only
+// ("did a session happen this date") rather than trying to infer which real calendar date *should*
+// have been a training day: since weeks now roll over on completion rather than a fixed calendar
+// cadence (see isWeekComplete()), there's no reliable way to say a given weekday "should" have
+// been rest vs. training, so a "missed" verdict tied to that guess would routinely be wrong.
+const CONSISTENCY_WEEKS = 5;
+const WEEKDAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
 export function consistencyData(state: AppState) {
-  const todayD = new Date();
-  const orderLen = state.dayOrder.length || 7;
-  // real dates a session was actually completed on, so "done" reflects logged history instead of
-  // a fabricated pattern — see historyTimestamp() above for why id (not the display date string)
-  // is the source of truth for the real calendar date.
+  const today = new Date();
+  const todayKey = today.toDateString();
   const completedDateKeys = new Set(state.history.filter(h => h.status === 'completed').map(h => new Date(historyTimestamp(h)).toDateString()));
   const programStartD = state.startedAt ? new Date(state.startedAt) : null;
+  const programStartKey = programStartD ? new Date(programStartD.getFullYear(), programStartD.getMonth(), programStartD.getDate()) : null;
+
+  // grid spans CONSISTENCY_WEEKS full Mon-Sun weeks, ending with the week containing today.
+  const todayMon0 = (today.getDay() + 6) % 7; // 0=Mon..6=Sun
+  const gridEnd = new Date(today); gridEnd.setDate(gridEnd.getDate() + (6 - todayMon0));
+  const gridStart = new Date(gridEnd); gridStart.setDate(gridStart.getDate() - (CONSISTENCY_WEEKS * 7 - 1));
+
   const cells: { date: string; dayNum: number; status: string; bg: string }[] = [];
-  for (let i = 27; i >= 0; i--) {
-    const d = new Date(todayD); d.setDate(d.getDate() - i);
-    const dowIdx = (d.getDay() + 6) % 7;
-    const progDayKey = state.dayOrder[dowIdx % orderLen];
-    const progDay = progDayKey ? state.program[progDayKey] : null;
-    const isRest = !progDay || (progDay.kind || 'training') === 'rest';
+  for (let i = 0; i < CONSISTENCY_WEEKS * 7; i++) {
+    const d = new Date(gridStart); d.setDate(d.getDate() + i);
     const dateKey = d.toISOString().slice(0, 10);
-    // a day before the current program existed isn't something the user could have "missed" —
-    // show it as neutral rather than fabricating a done/missed verdict for it.
-    const beforeProgram = !!programStartD && d < new Date(programStartD.getFullYear(), programStartD.getMonth(), programStartD.getDate());
     let status: string;
-    if (beforeProgram) status = 'none';
-    else if (isRest) status = 'rest';
-    else if (i === 0) status = 'today';
-    else status = completedDateKeys.has(d.toDateString()) ? 'done' : 'missed';
+    if (d > today) status = 'future';
+    else if (d.toDateString() === todayKey) status = 'today';
+    else if (programStartKey && d < programStartKey) status = 'none';
+    else status = completedDateKeys.has(d.toDateString()) ? 'done' : 'empty';
     cells.push({
       date: dateKey, dayNum: d.getDate(), status,
-      bg: status === 'done' ? 'oklch(0.65 0.16 145)' : status === 'missed' ? 'oklch(0.65 0.17 35 / 0.55)' : status === 'today' ? 'oklch(0.65 0.19 35 / 0.4)' : 'rgba(255,255,255,.05)'
+      bg: status === 'done' ? 'oklch(0.65 0.16 145)' : status === 'today' ? 'oklch(0.65 0.19 35 / 0.4)' : 'rgba(255,255,255,.05)'
     });
   }
+
+  // streak = consecutive most-recent attempted days (from real history, newest-first) that were
+  // completed rather than skipped — a calendar-day streak would break on every planned rest day,
+  // which isn't a meaningful "you fell off" signal for a program that isn't 7-days-a-week.
   let streak = 0;
-  for (let i = cells.length - 1; i >= 0; i--) {
-    const c = cells[i];
-    if (c.status === 'rest' || c.status === 'today' || c.status === 'none') continue;
-    if (c.status === 'done') streak++; else break;
+  for (const h of state.history) {
+    if (h.status === 'completed') streak++; else break;
   }
-  return { cells, streak, completedCount: cells.filter(c => c.status === 'done').length, missedCount: cells.filter(c => c.status === 'missed').length };
+
+  return { weekdayLabels: WEEKDAY_LABELS, cells, streak, completedCount: cells.filter(c => c.status === 'done').length };
 }
 
 const DONUT_PALETTE = ['oklch(0.65 0.19 35)', 'oklch(0.7 0.13 230)', 'oklch(0.7 0.15 145)', 'oklch(0.75 0.13 90)', 'oklch(0.68 0.15 300)', 'oklch(0.7 0.14 20)', 'oklch(0.72 0.12 260)', 'oklch(0.66 0.16 160)', 'oklch(0.7 0.12 0)', 'oklch(0.62 0.1 250)', 'oklch(0.72 0.16 60)'];
