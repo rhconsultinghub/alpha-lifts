@@ -74,28 +74,34 @@ buildViewModel(state, actions) (src/state/viewModel.ts)
   SVG's live DOM markup and compositing it back onto the source PNG with `sharp` in a scratch
   script, then reading the resulting PNG, has worked when the harness's own screenshot action
   hangs.
-- **`src/data/exercisePhotos.ts`** + **`public/exercise-photos/*.jpg`** — real reference photos,
-  sourced from `free-exercise-db` (github.com/yuhonas/free-exercise-db, public domain/Unlicense).
-  `EXERCISE_PHOTO_IDS` is the allowlist of exercise ids that have a bundled photo (137 of 151 as
-  of this writing — see "Exercise library" below for the 14 that don't); anything not in that set
-  (including custom user-created exercises) has no photo and `ExercisePhoto.tsx` falls back to
-  the `ExerciseIcon` pictogram. Photos are bundled (not hotlinked) so the PWA stays fully
-  offline-capable — `vite.config.ts`'s Workbox `globPatterns` includes `jpg` for this reason; if a
-  future asset type is added to `public/`, remember to extend that glob or it won't be precached
-  for offline use.
+- **`src/data/exercisePhotos.ts`** + **`public/exercise-photos/*.jpg`** — real reference photos.
+  `EXERCISE_PHOTO_IDS` is the allowlist of exercise ids that have a bundled photo — as of this
+  writing that's all 151 exercises (137 from free-exercise-db, github.com/yuhonas/free-exercise-db,
+  public domain/Unlicense; the remaining 14 from user-supplied photos, cropped from a labeled
+  collage — see "Exercise library" below). Anything not in that set (i.e. any custom user-created
+  exercise) has no photo and `ExercisePhoto.tsx` falls back to the `ExerciseIcon` pictogram.
+  Photos are bundled (not hotlinked) so the PWA stays fully offline-capable —
+  `vite.config.ts`'s Workbox `globPatterns` includes `jpg` for this reason; if a future asset type
+  is added to `public/`, remember to extend that glob or it won't be precached for offline use.
 
 ### Exercise library
 
 `EXLIB` in `src/data/exercises.ts` is two eras of data back to back: the original ~90
 hand-curated exercises (bespoke cues, rest times, rep ranges, multi-equipment variants), followed
-by a block of 67 exercises imported from `free-exercise-db`. Both eras now have photos — the 67
-imported ones got a photo as part of that import, and the original ~90 were matched afterward by
-name/muscle against the same catalog (`EXERCISE_PHOTO_IDS` in `exercisePhotos.ts` covers both).
-14 of the original ~90 have no reasonable match in that catalog (niche/coined names like "Kelso
-Shrug", "Larsen Press", "Pec Deck", "Suitcase Carry" — that catalog just doesn't have everything)
-and were deliberately left on the icon fallback rather than paired with a wrong or misleading
-photo; don't force a match onto those without actually checking the source images if asked to
-revisit it.
+by a block of 67 exercises imported from `free-exercise-db`. All 151 exercises now have a photo.
+The 67 imported ones got a photo as part of that import; of the original ~90, 70 were matched
+afterward by name/muscle against the free-exercise-db catalog, and the remaining 14 (niche/coined
+names free-exercise-db doesn't have — Pec Deck, Chest-Supported Row, Bulgarian Split Squat, Hip
+Abduction Machine, Kelso Shrug, Pendlay Row, Seal Row, Meadows Row, Landmine Press, Cossack
+Squat, Nordic Curl, Suitcase Carry, Copenhagen Plank, Larsen Press) got user-supplied photos
+instead — 13 of those were cropped out of one labeled collage image (grid-calibrated crop
+boundaries the same way the body-diagram overlay was calibrated: composite a coordinate grid over
+the source with `sharp`, read it, crop each cell, then `trim()` each crop since the crop box
+still includes a sliver of the text label above the photo that a plain background-color trim
+won't remove on its own — the crop's *top* edge needs to start below the label text, trim only
+cleans up the remaining uniform white margin after that). Neither the collage nor the standalone
+Chest-Supported-Row source image is kept in the repo; if these ever need re-cropping, they'd need
+to be re-supplied.
 
 Both the import and the later name-matching pass were one-off curation, not a live sync — there's
 no script left in the repo that re-runs either. If asked to pull in more exercises or photos from
@@ -286,7 +292,33 @@ individually-verified YouTube tutorial video to all ~151 exercises and all 15 wa
 (`VideoEmbed.tsx`), sourced via 9 parallel background research agents; every exercise's "how to"
 text and every warm-up move's new `howTo` field rewritten as a real multi-sentence write-up
 instead of a one-line cue; warm-up moves are now tappable for a detail view
-(`WarmupDetailModal.tsx`) with that write-up + video.
+(`WarmupDetailModal.tsx`) with that write-up + video; (10) filled the last exercise-photo gap —
+the 14 exercises with no free-exercise-db match got user-supplied photos (cropped from a labeled
+collage), so all 151 exercises now have a real photo, none left on the icon fallback.
 
-No open/pending feature work as of this handoff — the app is in a complete, deployed state.
-Ask the user what's next.
+## Open/pending work as of this handoff
+
+Working a punch list from user feedback on phases 8-10 above. Still open:
+- **Exercise search** — add a search box under the Exercises tab, filterable by exercise name and
+  by muscle group. No implementation started yet.
+- **Muscles-worked diagram polish** — the calibrated shading overlay (see `BodyDiagram.tsx` notes
+  above) still doesn't stay inside the actual muscle outlines in every region per user feedback;
+  needs another, tighter calibration pass. Also replace the `#f7f3ee` background card — user
+  wants it to not look like "a white square that sticks out" against the dark UI; consider
+  recoloring/keying the source image instead of (or in addition to) changing the card color.
+- **Adaptive workout time estimate** — `estimateDayTime()` in `logic.ts` is currently a static
+  formula that never changes. User wants it to start from that formula as a default and then
+  evolve based on the user's actual logged `durationMin` history for that program day over time.
+  Important constraint from the user: an exercise that was *skipped* mid-session (present in the
+  plan, just not completed that particular time — see `exercisesDoneMask`) must **not** reduce
+  the estimate; only an exercise actually *removed* from the day's plan should. Needs care to
+  distinguish those two cases when deriving the adaptive estimate from history.
+- **Default-plan exercise variety** — premade splits currently allow the same exercise to be
+  selected for more than one day in the same plan (`DAY_TYPE_EXERCISES` in `wizard.ts`). User
+  wants more deliberate/varied exercise selection per day so plans don't repeat the same movement
+  needlessly. Re-run the `.verify/`-style per-split/per-training-type audit (volume % + day time,
+  see phase 7 above) after any change here, since exercise selection interacts with the
+  set-count-rebalancing logic from phase 7 and could regress it.
+
+Ask the user before starting any of the above if picking this up cold — confirm which item(s)
+they want next, since this list was captured mid-session and priority order wasn't specified.

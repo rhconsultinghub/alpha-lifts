@@ -1,14 +1,16 @@
-// Exercise ids with a bundled reference photo in public/exercise-photos/{id}.jpg — sourced from
-// free-exercise-db (github.com/yuhonas/free-exercise-db, public domain/Unlicense). Every exercise
-// falls into one of three groups:
-//  1. The 67 exercises imported from that same source (see exercises.ts) — one photo each,
-//     downloaded alongside the exercise data itself.
-//  2. The original ~90 hand-curated exercises — matched afterward by name/muscle against the
-//     free-exercise-db catalog (not every one had a match; see the gap below).
-//  3. Anything with no reasonable match in that catalog (mostly niche/coined variant names like
-//     "Kelso Shrug" or "Larsen Press" that don't exist there), plus any custom user-created
-//     exercise — these fall back to the hand-drawn SVG pictogram in ExerciseIcon instead of
-//     getting a mismatched or misleading photo.
+// Exercise ids with a bundled reference photo in public/exercise-photos/{id}.jpg. Every exercise
+// now has one, from three sources:
+//  1. The 67 exercises imported from free-exercise-db (github.com/yuhonas/free-exercise-db,
+//     public domain/Unlicense) — one photo each, downloaded alongside the exercise data itself.
+//  2. The original ~90 hand-curated exercises — most matched afterward by name/muscle against
+//     that same free-exercise-db catalog.
+//  3. The remaining 14 with no reasonable free-exercise-db match (niche/coined variant names like
+//     "Kelso Shrug" or "Larsen Press") — user-supplied reference photos, cropped from a labeled
+//     collage image (`public/exercise-photos/` originals aren't kept in the repo; if these need
+//     re-cropping, the source collage lived at `Other Missing Exercises.png` alongside a separate
+//     `Chest supported row.png` for that one exercise, both outside the repo).
+// Any custom user-created exercise still has no photo and falls back to the hand-drawn SVG
+// pictogram in ExerciseIcon.
 export const EXERCISE_PHOTO_IDS = new Set([
   'ab_rollout', 'ab_rollout_on_knees', 'alternate_bicep_curl', 'alternate_hammer_curl',
   'alternating_floor_press', 'alternating_press', 'alternating_renegade_row', 'alternating_shoulder_press',
@@ -37,7 +39,11 @@ export const EXERCISE_PHOTO_IDS = new Set([
   'pushup', 'rdl', 'rear_delt_fly', 'reverse_hyper', 'russian_twist', 'seated_calf_raise',
   'seated_leg_curl', 'seated_row', 'single_arm_row', 'sissy_squat', 'situp', 'skull_crusher',
   'sled_push', 'snatch_grip_deadlift', 'spider_curl', 'straight_arm_pulldown', 'tbar_row',
-  'triceps_pushdown', 'upright_row', 'walking_lunge', 'zercher_squat', 'zottman_curl'
+  'triceps_pushdown', 'upright_row', 'walking_lunge', 'zercher_squat', 'zottman_curl',
+  // user-supplied photos for the remaining exercises with no free-exercise-db match
+  'pec_deck', 'chest_supported_row', 'bulgarian_split_squat', 'hip_abduction', 'kelso_shrug',
+  'pendlay_row', 'seal_row', 'meadows_row', 'landmine_press', 'cossack_squat', 'nordic_curl',
+  'suitcase_carry', 'copenhagen_plank', 'larsen_press'
 ]);
 
 export function exercisePhotoUrl(id: string): string | null {
