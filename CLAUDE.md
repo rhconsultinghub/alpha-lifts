@@ -311,18 +311,20 @@ added user-supplied photos for the last 14 gap exercises (13 cropped from one la
 diagram overlay a second time (shoulders/arms/rear-delts/traps/triceps were still bleeding past
 their outlines after phase 9's first calibration pass) and inverted the reference images to light
 line art on a dark background, replacing the white background card the user flagged as sticking
-out against the rest of the UI (see `BodyDiagram.tsx` notes above).
+out against the rest of the UI (see `BodyDiagram.tsx` notes above); `estimateDayTime()` in
+`logic.ts` now blends its static per-set formula (renamed `estimateDayTimeFormula()`) with the
+user's own logged `state.history` for that exact day once samples exist, weighted toward the
+logged average as more samples accumulate (full weight at 5 samples). A history entry only counts
+as a sample if every exercise in it was actually logged (`badgeText === 'Logged'`, never
+`'Skipped'`) and its exercise count matches the day's current plan — so a workout that ran short
+purely because exercises were skipped mid-session can never drag the estimate down, while an
+exercise genuinely removed from the day's plan changes the exercise count, drops all pre-removal
+history out of the sample pool, and the estimate correctly shrinks via the formula recomputing
+with one fewer exercise.
 
 ## Open/pending work as of this handoff
 
 Working a punch list from user feedback on phases 8-10 above. Still open:
-- **Adaptive workout time estimate** — `estimateDayTime()` in `logic.ts` is currently a static
-  formula that never changes. User wants it to start from that formula as a default and then
-  evolve based on the user's actual logged `durationMin` history for that program day over time.
-  Important constraint from the user: an exercise that was *skipped* mid-session (present in the
-  plan, just not completed that particular time — see `exercisesDoneMask`) must **not** reduce
-  the estimate; only an exercise actually *removed* from the day's plan should. Needs care to
-  distinguish those two cases when deriving the adaptive estimate from history.
 - **Default-plan exercise variety** — premade splits currently allow the same exercise to be
   selected for more than one day in the same plan (`DAY_TYPE_EXERCISES` in `wizard.ts`). User
   wants more deliberate/varied exercise selection per day so plans don't repeat the same movement

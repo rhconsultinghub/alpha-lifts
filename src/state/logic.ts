@@ -163,7 +163,7 @@ export function restForExercise(exId: string, pacing: RestPacing = 'Standard'): 
   return Math.round(EXLIB[exId].restBase * REST_PACING_MULT[pacing]);
 }
 
-export function estimateDayTime(state: AppState, dayKey: string, pacing: RestPacing = 'Standard', warmupStyle: WarmupStyle = 'Standard'): number {
+function estimateDayTimeFormula(state: AppState, dayKey: string, pacing: RestPacing, warmupStyle: WarmupStyle): number {
   const day = state.program[dayKey];
   let sec = day.exercises.length * 30;
   day.exercises.forEach(ex => {
@@ -172,6 +172,26 @@ export function estimateDayTime(state: AppState, dayKey: string, pacing: RestPac
     if (lib.compound && ex.last.weight >= 40 && warmupStyle !== 'Minimal') sec += 150;
   });
   return sec;
+}
+
+// Starts from the static formula above, then blends toward the user's own logged history for
+// this exact day as samples accumulate. A session only counts as a sample if every exercise in
+// it was actually logged (badgeText 'Logged', never 'Skipped') and its exercise count matches
+// today's plan — so a workout that ran short because exercises were *skipped* mid-session can
+// never pull the estimate down, only a session logged against a plan that's since had an
+// exercise permanently removed falls out of the pool (its exercise count no longer matches),
+// which correctly lets the estimate shrink once the formula recomputes with fewer exercises.
+export function estimateDayTime(state: AppState, dayKey: string, pacing: RestPacing = 'Standard', warmupStyle: WarmupStyle = 'Standard'): number {
+  const base = estimateDayTimeFormula(state, dayKey, pacing, warmupStyle);
+  const day = state.program[dayKey];
+  const samples = state.history
+    .filter(h => h.status === 'completed' && h.program === state.programName && h.day === day.label)
+    .filter(h => h.exercises.length === day.exercises.length && h.exercises.every(e => e.badgeText === 'Logged'))
+    .slice(0, 5);
+  if (!samples.length) return base;
+  const avgActualSec = (samples.reduce((a, h) => a + h.durationMin, 0) / samples.length) * 60;
+  const weight = samples.length / 5;
+  return Math.round(base * (1 - weight) + avgActualSec * weight);
 }
 
 export function formatDuration(sec: number): string {
