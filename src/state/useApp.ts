@@ -274,6 +274,10 @@ export function useApp() {
   const openMuscleDrill = useCallback((name: string) => setState(s => ({ ...s, muscleDrill: name as AppState['muscleDrill'] })), []);
   const closeMuscleDrill = useCallback(() => setState(s => ({ ...s, muscleDrill: null })), []);
 
+  // ---------- warm-up detail ----------
+  const openWarmupDetail = useCallback((id: string) => setState(s => ({ ...s, warmupDetailId: id })), []);
+  const closeWarmupDetail = useCallback(() => setState(s => ({ ...s, warmupDetailId: null })), []);
+
   // ---------- exercise library ----------
   const openLibraryDetail = useCallback((id: string) => setState(s => ({ ...s, libraryDetailId: id })), []);
   const closeLibraryDetail = useCallback(() => setState(s => ({ ...s, libraryDetailId: null })), []);
@@ -789,7 +793,7 @@ export function useApp() {
       addWizardCustomDay, removeWizardCustomDay, setWizardCustomDayField, createProgramFromWizard,
       completeOnboarding,
       setBodyView, openBodyModal, closeBodyModal, openDetail, closeDetail,
-      openMuscleDrill, closeMuscleDrill,
+      openMuscleDrill, closeMuscleDrill, openWarmupDetail, closeWarmupDetail,
       openLibraryDetail, closeLibraryDetail, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,
       setExerciseFormField, toggleFormMuscle, toggleFormSecondary, toggleFormEquip, saveExerciseForm,
       requestDeleteExercise, deleteExercise,

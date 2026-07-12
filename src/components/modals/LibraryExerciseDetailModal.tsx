@@ -1,5 +1,6 @@
 import type { ViewModel } from '../../state/viewModel';
 import { ExercisePhoto } from '../ExercisePhoto';
+import { VideoEmbed } from '../VideoEmbed';
 
 export function LibraryExerciseDetailModal({ vm }: { vm: ViewModel }) {
   const d = vm.libraryDetail as any;
@@ -33,7 +34,9 @@ export function LibraryExerciseDetailModal({ vm }: { vm: ViewModel }) {
           <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.55)' }}><span style={{ color: 'rgba(245,240,234,.8)', fontWeight: 600 }}>Type:</span> {d.typeText}</div>
         </div>
         <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 6 }}>HOW TO</div>
-        <div style={{ font: "400 14px/1.6 'Inter'", color: 'rgba(245,240,234,.8)' }}>{d.cue}</div>
+        <div style={{ font: "400 14px/1.6 'Inter'", color: 'rgba(245,240,234,.8)', marginBottom: d.videoId ? 16 : 0 }}>{d.cue}</div>
+
+        {d.videoId && <VideoEmbed videoId={d.videoId} title={d.name + ' tutorial'} />}
       </div>
     </div>
   );

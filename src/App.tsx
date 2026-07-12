@@ -16,6 +16,7 @@ import { SwapModal } from './components/modals/SwapModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { MuscleDrillModal } from './components/modals/MuscleDrillModal';
 import { MuscleSwapModal } from './components/modals/MuscleSwapModal';
+import { WarmupDetailModal } from './components/modals/WarmupDetailModal';
 import { LibraryExerciseDetailModal } from './components/modals/LibraryExerciseDetailModal';
 import { ExerciseFormModal } from './components/modals/ExerciseFormModal';
 import { ExerciseHistoryModal } from './components/modals/ExerciseHistoryModal';
@@ -61,6 +62,7 @@ export default function App() {
         <SettingsModal vm={vm} />
         <MuscleDrillModal vm={vm} />
         <MuscleSwapModal vm={vm} />
+        <WarmupDetailModal vm={vm} />
         <LibraryExerciseDetailModal vm={vm} />
         <ExerciseFormModal vm={vm} />
         <ExerciseHistoryModal vm={vm} />

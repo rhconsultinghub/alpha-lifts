@@ -1,128 +1,71 @@
-// Schematic anatomical body map, redrawn to follow the proportions/pose of a reference anatomy
-// chart (standing straight, arms hanging at the sides, standard front/back muscle-group split) —
-// single accent color, opacity encodes how much each muscle is worked. Every region's shape
-// deliberately overlaps its neighbor by a few units (shoulder into arm, chest into abs, hip into
-// thigh, etc.) so the composite reads as one continuous figure instead of floating disconnected
-// parts; only the ab grid and minor connective bits (neck, forearms, hands, feet) stay simple
-// geometric shapes since they read fine that way even in real anatomy references.
+// Anatomical body map — this renders the user-supplied reference anatomy chart itself
+// (public/body-front.png / body-back.png, cropped from their original front+back composite
+// image) with a semi-transparent SVG shading overlay on top, rather than a hand-drawn
+// approximation of it. Overlay shape coordinates were calibrated directly against these exact
+// images (front is 482x973px, back is 470x966px — a coordinate grid was composited over each and
+// read back to place every region), not derived from generic anatomy proportions, so they track
+// this specific artwork's pose/proportions. Opacity per region encodes how much that muscle is
+// worked, same as before.
 const ACCENT_BASE = 'oklch(0.65 0.19 35';
 
-interface RectShape { shape: 'rect'; attrs: { x: number; y: number; width: number; height: number; rx: number }; muscle: string | null; }
-interface CircleShape { shape: 'circle'; attrs: { cx: number; cy: number; r: number }; muscle: string | null; }
-interface PathShape { shape: 'path'; d: string; muscle: string | null; }
-type Shape = RectShape | CircleShape | PathShape;
+interface Region { d: string; muscle: string; }
 
-const rect = (x: number, y: number, width: number, height: number, rx: number, muscle: string | null): RectShape =>
-  ({ shape: 'rect', attrs: { x, y, width, height, rx }, muscle });
-const circle = (cx: number, cy: number, r: number, muscle: string | null): CircleShape =>
-  ({ shape: 'circle', attrs: { cx, cy, r }, muscle });
-const path = (d: string, muscle: string | null): PathShape => ({ shape: 'path', d, muscle });
+const FRONT_W = 482, FRONT_H = 973;
+const BACK_W = 470, BACK_H = 966;
 
-// deltoid cap — used for both front (Shoulders) and back (Rear Delts) views, since the outline is
-// the same from either side. Reaches up into the neck/traps region and down into the arm.
-const DELT_L = 'M66,26 Q24,26 20,52 Q20,70 50,70 Q60,60 62,40 Q64,30 66,26 Z';
-const DELT_R = 'M94,26 Q136,26 140,52 Q140,70 110,70 Q100,60 98,40 Q96,30 94,26 Z';
-// upper arm — used for both front (Biceps) and back (Triceps), hanging straight down at the side.
-const ARM_L = 'M52,58 Q24,56 22,80 Q20,100 34,104 Q48,100 48,80 Q50,66 52,58 Z';
-const ARM_R = 'M108,58 Q136,56 138,80 Q140,100 126,104 Q112,100 112,80 Q110,66 108,58 Z';
-// front thigh (Quads) and back thigh (Hamstrings) share the same silhouette.
-const THIGH_L = 'M58,136 Q82,130 80,166 Q78,196 66,206 Q56,200 56,176 Q52,152 58,136 Z';
-const THIGH_R = 'M102,136 Q78,130 80,166 Q82,196 94,206 Q104,200 104,176 Q108,152 102,136 Z';
-// calf — same silhouette on both views.
-const CALF_L = 'M60,200 Q80,204 76,230 Q74,250 64,258 Q56,252 56,232 Q54,212 60,200 Z';
-const CALF_R = 'M100,200 Q80,204 84,230 Q86,250 96,258 Q104,252 104,232 Q106,212 100,200 Z';
-// neck — wide enough to overlap both the shoulder caps and (on the back view) the traps.
-const NECK = rect(60, 24, 40, 18, 5, null);
-const FOREARM_L = rect(22, 96, 18, 42, 7, null);
-const FOREARM_R = rect(120, 96, 18, 42, 7, null);
-const HAND_L = rect(20, 134, 20, 20, 6, null);
-const HAND_R = rect(120, 134, 20, 20, 6, null);
-const FOOT_L = rect(52, 254, 26, 14, 5, null);
-const FOOT_R = rect(82, 254, 26, 14, 5, null);
-
-const FRONT_PARTS: Shape[] = [
-  // head + neck
-  circle(80, 15, 14, null),
-  NECK,
-  // shoulders (deltoids)
-  path(DELT_L, 'Shoulders'), path(DELT_R, 'Shoulders'),
-  // chest — a pair of curved pecs reaching up past the collarbone and in past the sternum
-  path('M78,38 Q60,28 50,44 Q44,58 52,70 Q64,78 78,72 Q82,60 78,38 Z', 'Chest'),
-  path('M82,38 Q100,28 110,44 Q116,58 108,70 Q96,78 82,72 Q78,60 82,38 Z', 'Chest'),
-  // upper arms / forearms / hands
-  path(ARM_L, 'Biceps'), path(ARM_R, 'Biceps'),
-  FOREARM_L, FOREARM_R, HAND_L, HAND_R,
-  // abs — 3x2 grid, reaching up to overlap the chest
-  rect(62, 66, 16, 16, 5, 'Core'),
-  rect(82, 66, 16, 16, 5, 'Core'),
-  rect(62, 84, 16, 16, 5, 'Core'),
-  rect(82, 84, 16, 16, 5, 'Core'),
-  rect(62, 102, 16, 16, 5, 'Core'),
-  rect(82, 102, 16, 16, 5, 'Core'),
-  // obliques flanking the abs
-  rect(50, 68, 14, 56, 5, 'Core'),
-  rect(96, 68, 14, 56, 5, 'Core'),
-  // hips/waist connector
-  rect(54, 116, 52, 28, 13, null),
-  // quads
-  path(THIGH_L, 'Quads'), path(THIGH_R, 'Quads'),
-  // calves
-  path(CALF_L, 'Calves'), path(CALF_R, 'Calves'),
-  // feet
-  FOOT_L, FOOT_R
+const FRONT_REGIONS: Region[] = [
+  { d: 'M118,149 A52,58 0 1 1 118,265 A52,58 0 1 1 118,149', muscle: 'Shoulders' },
+  { d: 'M364,149 A52,58 0 1 1 364,265 A52,58 0 1 1 364,149', muscle: 'Shoulders' },
+  { d: 'M238,178 Q160,182 148,225 Q143,260 175,288 Q210,295 238,290 Z', muscle: 'Chest' },
+  { d: 'M244,178 Q322,182 334,225 Q339,260 307,288 Q272,295 244,290 Z', muscle: 'Chest' },
+  { d: 'M108,250 A42,85 0 1 1 108,420 A42,85 0 1 1 108,250', muscle: 'Biceps' },
+  { d: 'M374,250 A42,85 0 1 1 374,420 A42,85 0 1 1 374,250', muscle: 'Biceps' },
+  { d: 'M175,292 L307,292 Q315,340 300,400 Q280,440 241,462 Q202,440 182,400 Q167,340 175,292 Z', muscle: 'Core' },
+  { d: 'M172,498 Q238,492 236,560 Q234,620 220,672 Q195,678 178,650 Q165,580 172,498 Z', muscle: 'Quads' },
+  { d: 'M310,498 Q244,492 246,560 Q248,620 262,672 Q287,678 304,650 Q317,580 310,498 Z', muscle: 'Quads' },
+  { d: 'M178,702 Q233,708 228,760 Q225,800 205,822 Q182,815 178,775 Q172,730 178,702 Z', muscle: 'Calves' },
+  { d: 'M304,702 Q249,708 254,760 Q257,800 277,822 Q300,815 304,775 Q310,730 304,702 Z', muscle: 'Calves' }
 ];
 
-const BACK_PARTS: Shape[] = [
-  // head + neck
-  circle(80, 15, 14, null),
-  NECK,
-  // trapezius — kite shape from the neck down between the shoulder blades, overlapping the
-  // rear delts on either side
-  path('M80,24 Q100,28 96,54 Q90,64 80,62 Q70,64 64,54 Q60,28 80,24 Z', 'Back'),
-  // rear delts
-  path(DELT_L, 'Rear Delts'), path(DELT_R, 'Rear Delts'),
-  // lats — wing shapes tapering from the armpit down to a point at the waist (v-taper)
-  path('M58,60 Q64,90 56,116 Q50,132 38,134 Q30,120 34,96 Q38,68 58,60 Z', 'Back'),
-  path('M102,60 Q96,90 104,116 Q110,132 122,134 Q130,120 126,96 Q122,68 102,60 Z', 'Back'),
-  // triceps / forearms / hands
-  path(ARM_L, 'Triceps'), path(ARM_R, 'Triceps'),
-  FOREARM_L, FOREARM_R, HAND_L, HAND_R,
-  // lower back / erector spinae — a wide column either side of the spine, bridging the traps
-  // above to the glutes below
-  path('M66,58 Q60,80 64,110 Q72,118 80,116 Q88,118 96,110 Q100,80 94,58 Q80,50 66,58 Z', 'Back'),
-  // glutes
-  path('M50,110 Q80,102 110,110 Q118,124 110,138 Q80,148 50,138 Q42,124 50,110 Z', 'Glutes'),
-  // hamstrings
-  path(THIGH_L, 'Hamstrings'), path(THIGH_R, 'Hamstrings'),
-  // calves
-  path(CALF_L, 'Calves'), path(CALF_R, 'Calves'),
-  // feet
-  FOOT_L, FOOT_R
+const BACK_REGIONS: Region[] = [
+  { d: 'M235,92 Q295,105 280,190 Q260,220 235,215 Q210,220 190,190 Q175,105 235,92 Z', muscle: 'Back' },
+  { d: 'M105,147 A48,58 0 1 1 105,263 A48,58 0 1 1 105,147', muscle: 'Rear Delts' },
+  { d: 'M365,147 A48,58 0 1 1 365,263 A48,58 0 1 1 365,147', muscle: 'Rear Delts' },
+  { d: 'M172,232 Q180,300 165,370 Q150,410 95,418 Q75,390 82,320 Q90,255 172,232 Z', muscle: 'Back' },
+  { d: 'M298,232 Q290,300 305,370 Q320,410 375,418 Q395,390 388,320 Q380,255 298,232 Z', muscle: 'Back' },
+  { d: 'M108,250 A42,85 0 1 1 108,420 A42,85 0 1 1 108,250', muscle: 'Triceps' },
+  { d: 'M374,250 A42,85 0 1 1 374,420 A42,85 0 1 1 374,250', muscle: 'Triceps' },
+  { d: 'M205,230 Q195,300 205,380 Q220,400 235,398 Q250,400 265,380 Q275,300 265,230 Q235,215 205,230 Z', muscle: 'Back' },
+  { d: 'M150,395 Q235,382 320,395 Q335,435 320,465 Q235,485 150,465 Q135,435 150,395 Z', muscle: 'Glutes' },
+  { d: 'M168,498 Q228,492 226,560 Q224,620 210,668 Q185,672 170,640 Q162,570 168,498 Z', muscle: 'Hamstrings' },
+  { d: 'M302,498 Q242,492 244,560 Q246,620 260,668 Q285,672 300,640 Q308,570 302,498 Z', muscle: 'Hamstrings' },
+  { d: 'M178,692 Q228,698 224,750 Q220,790 202,818 Q180,810 176,772 Q170,725 178,692 Z', muscle: 'Calves' },
+  { d: 'M292,692 Q242,698 246,750 Q250,790 268,818 Q290,810 294,772 Q300,725 292,692 Z', muscle: 'Calves' }
 ];
 
 export function fillForMuscle(muscle: string | null, ranks: Record<string, number>): string {
-  if (!muscle || !(muscle in ranks)) return 'rgba(255,255,255,.07)';
-  const opacity = 0.22 + 0.78 * (ranks[muscle] || 0);
+  if (!muscle || !(muscle in ranks)) return 'transparent';
+  const opacity = 0.28 + 0.6 * (ranks[muscle] || 0);
   return ACCENT_BASE + ' / ' + opacity.toFixed(2) + ')';
 }
 
-export function BodyDiagram({ view, ranks, width = 34, height = 63, showStroke = false }: {
+export function BodyDiagram({ view, ranks, width = 34, height = 63 }: {
   view: 'front' | 'back';
   ranks: Record<string, number>;
   width?: number;
   height?: number;
-  showStroke?: boolean;
 }) {
-  const parts = view === 'front' ? FRONT_PARTS : BACK_PARTS;
+  const isFront = view === 'front';
+  const src = `${import.meta.env.BASE_URL}${isFront ? 'body-front.png' : 'body-back.png'}`;
+  const regions = isFront ? FRONT_REGIONS : BACK_REGIONS;
+  const vbW = isFront ? FRONT_W : BACK_W;
+  const vbH = isFront ? FRONT_H : BACK_H;
   return (
-    <svg viewBox="0 0 160 296" style={{ width, height, display: 'block' }}>
-      {parts.map((p, i) => {
-        const fill = fillForMuscle(p.muscle, ranks);
-        const strokeProps = showStroke ? { stroke: 'rgba(255,255,255,.14)', strokeWidth: 1 } : {};
-        if (p.shape === 'circle') return <circle key={i} cx={p.attrs.cx} cy={p.attrs.cy} r={p.attrs.r} fill={fill} {...strokeProps} />;
-        if (p.shape === 'path') return <path key={i} d={p.d} fill={fill} {...strokeProps} />;
-        return <rect key={i} x={p.attrs.x} y={p.attrs.y} width={p.attrs.width} height={p.attrs.height} rx={p.attrs.rx} fill={fill} {...strokeProps} />;
-      })}
-    </svg>
+    <div style={{ width, height, position: 'relative', borderRadius: 8, overflow: 'hidden', background: '#f7f3ee', flex: 'none' }}>
+      <img src={src} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }} />
+      <svg viewBox={`0 0 ${vbW} ${vbH}`} preserveAspectRatio="xMidYMid meet" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+        {regions.map((r, i) => <path key={i} d={r.d} fill={fillForMuscle(r.muscle, ranks)} />)}
+      </svg>
+    </div>
   );
 }

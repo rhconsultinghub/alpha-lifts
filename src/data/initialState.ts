@@ -25,6 +25,7 @@ export function createInitialState(): AppState {
     bodyView: 'front',
     showBodyModal: false,
     muscleDrill: null,
+    warmupDetailId: null,
     detail: null,
     swap: null,
     muscleSwap: null,

@@ -1,5 +1,6 @@
 import type { ViewModel } from '../../state/viewModel';
 import { ExercisePhoto } from '../ExercisePhoto';
+import { VideoEmbed } from '../VideoEmbed';
 
 export function ExerciseDetailModal({ vm }: { vm: ViewModel }) {
   const d = vm.detail;
@@ -21,7 +22,13 @@ export function ExerciseDetailModal({ vm }: { vm: ViewModel }) {
         </div>
 
         <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 6 }}>HOW TO</div>
-        <div style={{ font: "400 14px/1.6 'Inter'", color: 'rgba(245,240,234,.8)', marginBottom: 24 }}>{d.cue}</div>
+        <div style={{ font: "400 14px/1.6 'Inter'", color: 'rgba(245,240,234,.8)', marginBottom: d.videoId ? 16 : 24 }}>{d.cue}</div>
+
+        {d.videoId && (
+          <div style={{ marginBottom: 24 }}>
+            <VideoEmbed videoId={d.videoId} title={d.name + ' tutorial'} />
+          </div>
+        )}
 
         <button onClick={d.openSwap} style={{ width: '100%', background: 'none', border: '1px solid rgba(255,255,255,.2)', color: '#f5f0ea', font: "600 13px 'Inter'", padding: 14, borderRadius: 14 }}>⇄ Swap this exercise</button>
       </div>

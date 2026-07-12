@@ -23,6 +23,9 @@ export interface ExerciseDef {
   // 'time' exercises (e.g. planks) are tracked by seconds held instead of rep count — the
   // repLo/repHi/reps fields are reused to mean seconds when this is set.
   trackingMode?: 'reps' | 'time';
+  // YouTube video id (the part after v=) for an embedded tutorial — verified real videos found
+  // per-exercise, not present for every exercise (custom user-created ones never have one).
+  videoId?: string;
 }
 
 export interface ExerciseLast {
@@ -210,6 +213,7 @@ export interface AppState {
   bodyView: BodyView;
   showBodyModal: boolean;
   muscleDrill: Muscle | null;
+  warmupDetailId: string | null;
   detail: { dayKey: string; exIndex: number } | null;
   swap: SwapState | null;
   muscleSwap: MuscleSwapState | null;

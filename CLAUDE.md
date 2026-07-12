@@ -53,20 +53,27 @@ buildViewModel(state, actions) (src/state/viewModel.ts)
 - **`src/icons/ExerciseIcon.tsx`** — hand-drawn SVG pictograms per exercise "pattern" (movement
   type, e.g. `bench_press`, `row`, `squat`), used as the fallback for any exercise without a
   bundled photo (see below). Single accent color, duotone body-line strokes for visual weight.
-- **`src/components/BodyDiagram.tsx`** — schematic anatomical body map (front/back), muscle
-  regions built from hand-drawn SVG `<path>` shapes (a few simple rects remain for non-tracked
-  connective bits like the neck/forearms/feet), opacity = how much that muscle is worked. Shared
-  `DELT_L/R`, `ARM_L/R`, `THIGH_L/R`, `CALF_L/R` path constants are reused between the front and
-  back views since those limb silhouettes are identical either way — only which muscle they're
-  tagged with (and therefore how they light up) changes. Every region's coordinates deliberately
-  overlap its neighbor by a few units (shoulder into arm, chest into abs, hip into thigh, traps
-  into rear delts, etc.) so the composite reads as one continuous standing figure instead of
-  disconnected floating shapes — an earlier version of this file didn't do that and looked like a
-  constellation of parts rather than a body; if you're adjusting proportions, preserve the overlap
-  or that regression comes back. There's no live-app screenshot tool reliably available in every
-  sandbox — verifying a change here by extracting the rendered SVG's live DOM markup (or
-  reconstructing the same path constants) and rasterizing it with `sharp` in a scratch script,
-  then reading the resulting PNG, has worked when the harness's own screenshot action hangs.
+- **`src/components/BodyDiagram.tsx`** — anatomical body map (front/back). This renders a real
+  reference image (`public/body-front.png` / `body-back.png`, 482x973 / 470x966px — cropped and
+  auto-trimmed from a user-supplied front+back anatomy chart, then palette-compressed) with a
+  semi-transparent SVG shading overlay on top; it does **not** hand-draw the body. Opacity per
+  region = how much that muscle is worked, same as before. Overlay `<path>`/ellipse coordinates
+  were calibrated directly against these exact images — a coordinate grid was composited over each
+  cropped image with `sharp`, read back visually, and each region's shape hand-placed to align
+  with that specific artwork — not derived from generic anatomy proportions. If the reference
+  image ever changes, the overlay coordinates need to be recalibrated the same way (composite a
+  labeled grid over the new image, read it, redraw the regions); they will not line up with a
+  differently-proportioned figure. `DELT_L/R`, `ARM_L/R`, `THIGH_L/R`, `CALF_L/R` path constants
+  are reused between the front and back views since those limb silhouettes are identical either
+  way — only which muscle they're tagged with changes. The component renders its own
+  `#f7f3ee` background card behind the image (the source art has a white background, which reads
+  badly floating directly on this app's otherwise all-dark UI), sized via `objectFit: contain` +
+  matching SVG `viewBox`/`preserveAspectRatio` so the overlay and image always scale identically
+  regardless of the two images' slightly different aspect ratios. There's no live-app screenshot
+  tool reliably available in every sandbox — verifying a change here by extracting the rendered
+  SVG's live DOM markup and compositing it back onto the source PNG with `sharp` in a scratch
+  script, then reading the resulting PNG, has worked when the harness's own screenshot action
+  hangs.
 - **`src/data/exercisePhotos.ts`** + **`public/exercise-photos/*.jpg`** — real reference photos,
   sourced from `free-exercise-db` (github.com/yuhonas/free-exercise-db, public domain/Unlicense).
   `EXERCISE_PHOTO_IDS` is the allowlist of exercise ids that have a bundled photo (137 of 151 as
@@ -113,6 +120,34 @@ that source later:
   (`https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/...`); each new
   exercise matched from there should get a matching photo added to both `EXERCISE_PHOTO_IDS` and
   `public/exercise-photos/`.
+
+### Exercise/warm-up "how to" content + video tutorials
+
+Every exercise's `cue` field (in `EXLIB`) and every warm-up move's `howTo` field (in
+`WARMUP_LIBRARY`, `src/data/warmups.ts`) is a real, multi-sentence instructional write-up, and
+most also carry a `videoId` (YouTube video id, embedded via `src/components/VideoEmbed.tsx` using
+the `youtube-nocookie.com` domain) — a real, individually-verified tutorial video, not a
+placeholder or a search-results link. **Every single `videoId` in this codebase was obtained by
+actually calling WebSearch per exercise/move (restricted to `youtube.com`) and extracting the id
+from a real returned URL — never guessed or pattern-generated.** If more exercises are added
+later and need videos, follow the same process; do not fabricate a plausible-looking video id, a
+wrong/dead video is worse than no embed (see `VideoEmbed`'s empty-state handling — callers check
+`videoId` truthiness before rendering it, so a missing id just omits the embed cleanly).
+
+Warm-up moves have two separate text fields — don't conflate them: `cue` is the short dosage
+shown inline in the Day View warm-up list (e.g. `"20 sec each direction"`), `howTo` is the longer
+instructional text shown when a move is tapped for detail
+(`DayViewScreen.tsx` warm-up row → `WarmupDetailModal.tsx`). Exercises only have `cue` (used as
+the full "how to" write-up in `ExerciseDetailModal.tsx`/`LibraryExerciseDetailModal.tsx`) — there
+was no separate dosage field to preserve there.
+
+Sourcing ~151 exercises' + 15 warm-up moves' videos and write-ups in one pass was done via 9
+parallel background research agents (one per ~19-exercise batch, one for all warm-ups), each
+independently running one WebSearch call per item and writing its own `{id, videoId, howTo}[]`
+JSON result file, which were then merged into `exercises.ts`/`warmups.ts` with a small Node script
+matching on id. Worth reusing that batched-parallel-agent pattern again for any similarly-sized
+"look up N real things and write content about them" task — doing it as 150 sequential tool calls
+in the main conversation would be far slower.
 
 ### Session-scoped vs. permanent program edits
 
@@ -243,7 +278,15 @@ the *original* ~90 hand-curated exercises too (137 of 151 now have a real photo,
 weekday headers instead of an unlabeled rolling window that silently assumed a fixed weekday
 training schedule (broken by the week-rollover-on-completion change in phase 7), and redrew the
 body diagram again with every region's shape deliberately overlapping its neighbor so it reads as
-one continuous figure instead of disconnected floating parts.
+one continuous figure instead of disconnected floating parts; (9) another same-session follow-up
+— the body diagram now renders the actual reference image itself (cropped front/back PNGs) with a
+calibrated shading overlay, instead of a hand-drawn approximation of it, since phase 8's
+from-scratch redraw still wasn't judged a faithful use of the reference; matched a real,
+individually-verified YouTube tutorial video to all ~151 exercises and all 15 warm-up moves
+(`VideoEmbed.tsx`), sourced via 9 parallel background research agents; every exercise's "how to"
+text and every warm-up move's new `howTo` field rewritten as a real multi-sentence write-up
+instead of a one-line cue; warm-up moves are now tappable for a detail view
+(`WarmupDetailModal.tsx`) with that write-up + video.
 
 No open/pending feature work as of this handoff — the app is in a complete, deployed state.
 Ask the user what's next.

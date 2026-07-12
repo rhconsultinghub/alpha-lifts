@@ -55,10 +55,10 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {d.warmups.map((wu: any, i: number) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                  <span style={{ font: "500 12px 'Inter'", color: 'rgba(245,240,234,.8)' }}>{wu.name}</span>
+                <button key={i} onClick={wu.open} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, background: 'none', border: 'none', padding: '4px 0', textAlign: 'left', cursor: 'pointer' }}>
+                  <span style={{ font: "500 12px 'Inter'", color: 'rgba(245,240,234,.8)' }}>{wu.name} <span style={{ color: 'rgba(245,240,234,.3)' }}>›</span></span>
                   <span style={{ flex: 'none', font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)' }}>{wu.cue}</span>
-                </div>
+                </button>
               ))}
             </div>
           </div>

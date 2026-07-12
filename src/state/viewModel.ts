@@ -1,5 +1,6 @@
 import { EXLIB, DAY_THEMES, MUSCLE_TARGETS, TRAINING_LABELS, TRAINING_TYPE_DESCS, EQUIP_CATALOG } from '../data/exercises';
 import { SPLIT_PRESETS, DAY_TYPE_LABELS } from '../data/wizard';
+import { WARMUP_LIBRARY } from '../data/warmups';
 import type { AppState, HistoryEntry, Muscle, TrainingType } from '../data/types';
 import type { Actions } from './useApp';
 import {
@@ -210,7 +211,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       toggleSkip: () => actions.toggleSkipDay(dayKey),
       diagramRanks: ranks,
       muscleBars: w.bars, hasWarning: w.level !== 'good', warningColor: w.color, warningText: w.text,
-      warmups: warmupForDay(s, dayKey),
+      warmups: warmupForDay(s, dayKey).map(wu => ({ ...wu, open: () => actions.openWarmupDetail(wu.id) })),
       exercises: day.exercises.map((ex, i) => {
         const lib = EXLIB[ex.id];
         const equip = lib.equip[ex.equipIdx];
@@ -354,6 +355,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const equip = lib.equip[ex.equipIdx];
       detail = {
         open: true, id: ex.id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label, cue: lib.cue,
+        videoId: lib.videoId,
         secondaryText: lib.secondary.length ? lib.secondary.join(', ') : 'None',
         close: actions.closeDetail,
         openSwap: () => { actions.closeDetail(); actions.openSwap(dayKey, s.detail!.exIndex, 'equip', false); }
@@ -508,6 +510,18 @@ export function buildViewModel(state: AppState, actions: Actions) {
     return { open: true, name, pctText: bar.pctText, color: bar.color, rows, alsoTargets, rec };
   })();
 
+  // ---------- warm-up detail ----------
+  const warmupDetail = (() => {
+    const id = s.warmupDetailId;
+    if (!id) return { open: false };
+    const move = WARMUP_LIBRARY.find(m => m.id === id);
+    if (!move) return { open: false };
+    return {
+      open: true, name: move.name, cue: move.cue, howTo: move.howTo, videoId: move.videoId,
+      close: actions.closeWarmupDetail
+    };
+  })();
+
   const planPrompt = s.pendingPlanUpdate ? {
     show: true,
     text: s.pendingPlanUpdate.changedCount + (s.pendingPlanUpdate.changedCount === 1 ? ' change was' : ' changes were') + ' made to this workout’s exercises (added, removed, or swapped). Update your plan to use them going forward, or keep this as a one-time change?',
@@ -549,6 +563,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     openBodyModal: actions.openBodyModal, closeBodyModal: actions.closeBodyModal, showBodyModal: s.showBodyModal,
     setBodyView: actions.setBodyView, bodyView: s.bodyView,
     muscleDrill, closeMuscleDrill: actions.closeMuscleDrill,
+    warmupDetail,
     planPrompt,
     completeSubtitle,
     showResume, resumeText, resumeElapsedText, resumeWorkout: actions.resumeWorkout,
@@ -579,6 +594,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const isCustom = id in s.customExercises;
       return {
         open: true, id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern,
+        videoId: lib.videoId,
         secondaryText: lib.secondary.length ? lib.secondary.join(', ') : 'None',
         equipChips: lib.equip,
         restText: lib.restBase + 's',

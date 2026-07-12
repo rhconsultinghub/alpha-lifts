@@ -211,7 +211,7 @@ export function dayMuscleRanks(state: AppState, dayKey: string): Record<string, 
 
 // Picks a handful of simple warm-up moves that cover the muscles a training day targets most,
 // using a greedy set-cover so a few moves address as many target muscles as possible.
-export function warmupForDay(state: AppState, dayKey: string): { name: string; cue: string }[] {
+export function warmupForDay(state: AppState, dayKey: string): { id: string; name: string; cue: string }[] {
   const day = state.program[dayKey];
   if (!day || (day.kind || 'training') === 'rest' || !day.exercises.length) return [];
   const ranks = dayMuscleRanks(state, dayKey);
@@ -232,7 +232,7 @@ export function warmupForDay(state: AppState, dayKey: string): { name: string; c
     picked.push(best);
     best.muscles.forEach(m => remaining.delete(m));
   }
-  return picked.map(m => ({ name: m.name, cue: m.cue }));
+  return picked.map(m => ({ id: m.id, name: m.name, cue: m.cue }));
 }
 
 // True once every training day (kind !== 'rest') has been completed or skipped on or after
