@@ -55,19 +55,26 @@ buildViewModel(state, actions) (src/state/viewModel.ts)
   bundled photo (see below). Single accent color, duotone body-line strokes for visual weight.
 - **`src/components/BodyDiagram.tsx`** — anatomical body map (front/back). This renders a real
   reference image (`public/body-front.png` / `body-back.png`, 482x973 / 470x966px — cropped and
-  auto-trimmed from a user-supplied front+back anatomy chart, then palette-compressed) with a
-  semi-transparent SVG shading overlay on top; it does **not** hand-draw the body. Opacity per
-  region = how much that muscle is worked, same as before. Overlay `<path>`/ellipse coordinates
+  auto-trimmed from a user-supplied front+back anatomy chart) with a semi-transparent SVG shading
+  overlay on top; it does **not** hand-draw the body. Opacity per region = how much that muscle is
+  worked, same as before. The source images are **color-inverted** (`sharp().negate()`, then
+  palette-compressed) so they render as light line art on a near-black `#0a0908` background
+  instead of dark lines on a white card — the white card was previously called out by the user as
+  looking like "a white square that sticks out" against this app's otherwise all-dark UI; inverting
+  the art itself (rather than just recoloring the wrapper behind it) was the fix, since the
+  original source art's background *was* the white square. Overlay `<path>`/ellipse coordinates
   were calibrated directly against these exact images — a coordinate grid was composited over each
   cropped image with `sharp`, read back visually, and each region's shape hand-placed to align
-  with that specific artwork — not derived from generic anatomy proportions. If the reference
-  image ever changes, the overlay coordinates need to be recalibrated the same way (composite a
-  labeled grid over the new image, read it, redraw the regions); they will not line up with a
-  differently-proportioned figure. `DELT_L/R`, `ARM_L/R`, `THIGH_L/R`, `CALF_L/R` path constants
-  are reused between the front and back views since those limb silhouettes are identical either
-  way — only which muscle they're tagged with changes. The component renders its own
-  `#f7f3ee` background card behind the image (the source art has a white background, which reads
-  badly floating directly on this app's otherwise all-dark UI), sized via `objectFit: contain` +
+  with that specific artwork — not derived from generic anatomy proportions. This calibration has
+  gone through two passes: the first pass got the coordinate *space* right but left several
+  regions genuinely mispositioned (front shoulders overlapping the neck, front/back arm regions
+  bleeding past the elbow into the forearm, back rear-delts/traps/triceps overlapping each other
+  heavily); the second pass tightened all of those per user feedback that highlights weren't
+  staying inside the muscle outlines. If the reference image ever changes, the overlay coordinates
+  need to be recalibrated the same way (composite a labeled grid over the new image, read it,
+  redraw the regions, then composite the *exact* region paths back over the image and visually
+  confirm containment before trusting it — a coordinate grid read by eye alone was not precise
+  enough on its own in either pass). The component sizes the image via `objectFit: contain` +
   matching SVG `viewBox`/`preserveAspectRatio` so the overlay and image always scale identically
   regardless of the two images' slightly different aspect ratios. There's no live-app screenshot
   tool reliably available in every sandbox — verifying a change here by extracting the rendered
@@ -298,16 +305,17 @@ collage), so all 151 exercises now have a real photo, none left on the icon fall
 exercise search to the Exercises tab (`exerciseSearchQuery` in `AppState`) — a single text input
 that matches against both exercise name and muscle name (case-insensitive substring), so e.g.
 typing "row" finds every row variant and typing "chest" finds every chest exercise via muscle
-match, satisfying "search by name or muscle" with one field rather than two separate controls.
+match, satisfying "search by name or muscle" with one field rather than two separate controls;
+added user-supplied photos for the last 14 gap exercises (13 cropped from one labeled collage,
+1 standalone), so all 151 exercises now have a real bundled photo; re-calibrated the muscles-worked
+diagram overlay a second time (shoulders/arms/rear-delts/traps/triceps were still bleeding past
+their outlines after phase 9's first calibration pass) and inverted the reference images to light
+line art on a dark background, replacing the white background card the user flagged as sticking
+out against the rest of the UI (see `BodyDiagram.tsx` notes above).
 
 ## Open/pending work as of this handoff
 
 Working a punch list from user feedback on phases 8-10 above. Still open:
-- **Muscles-worked diagram polish** — the calibrated shading overlay (see `BodyDiagram.tsx` notes
-  above) still doesn't stay inside the actual muscle outlines in every region per user feedback;
-  needs another, tighter calibration pass. Also replace the `#f7f3ee` background card — user
-  wants it to not look like "a white square that sticks out" against the dark UI; consider
-  recoloring/keying the source image instead of (or in addition to) changing the card color.
 - **Adaptive workout time estimate** — `estimateDayTime()` in `logic.ts` is currently a static
   formula that never changes. User wants it to start from that formula as a default and then
   evolve based on the user's actual logged `durationMin` history for that program day over time.

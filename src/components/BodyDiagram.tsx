@@ -1,11 +1,17 @@
 // Anatomical body map — this renders the user-supplied reference anatomy chart itself
 // (public/body-front.png / body-back.png, cropped from their original front+back composite
-// image) with a semi-transparent SVG shading overlay on top, rather than a hand-drawn
-// approximation of it. Overlay shape coordinates were calibrated directly against these exact
-// images (front is 482x973px, back is 470x966px — a coordinate grid was composited over each and
-// read back to place every region), not derived from generic anatomy proportions, so they track
-// this specific artwork's pose/proportions. Opacity per region encodes how much that muscle is
-// worked, same as before.
+// image, then color-inverted so it's light line art on a dark background instead of a white
+// square that clashed with the rest of this app's dark UI) with a semi-transparent SVG shading
+// overlay on top, rather than a hand-drawn approximation of it. Opacity per region = how much
+// that muscle is worked, same as before.
+//
+// Overlay `<path>`/ellipse coordinates were calibrated directly against these exact images
+// (front is 482x973px, back is 470x966px) by compositing each candidate shape onto the real
+// image with `sharp` and visually checking containment, iterating until each region sat inside
+// its muscle's outline instead of bleeding across it — a coordinate grid alone wasn't precise
+// enough for this (an earlier pass left shoulders overlapping the neck and the arm regions
+// running well past the elbow into the forearm). If the reference image ever changes, redo the
+// same composite-and-check loop rather than trusting grid-reading alone.
 const ACCENT_BASE = 'oklch(0.65 0.19 35';
 
 interface Region { d: string; muscle: string; }
@@ -14,12 +20,12 @@ const FRONT_W = 482, FRONT_H = 973;
 const BACK_W = 470, BACK_H = 966;
 
 const FRONT_REGIONS: Region[] = [
-  { d: 'M118,149 A52,58 0 1 1 118,265 A52,58 0 1 1 118,149', muscle: 'Shoulders' },
-  { d: 'M364,149 A52,58 0 1 1 364,265 A52,58 0 1 1 364,149', muscle: 'Shoulders' },
-  { d: 'M238,178 Q160,182 148,225 Q143,260 175,288 Q210,295 238,290 Z', muscle: 'Chest' },
-  { d: 'M244,178 Q322,182 334,225 Q339,260 307,288 Q272,295 244,290 Z', muscle: 'Chest' },
-  { d: 'M108,250 A42,85 0 1 1 108,420 A42,85 0 1 1 108,250', muscle: 'Biceps' },
-  { d: 'M374,250 A42,85 0 1 1 374,420 A42,85 0 1 1 374,250', muscle: 'Biceps' },
+  { d: 'M118,205 A38,44 0 1 1 118,293 A38,44 0 1 1 118,205', muscle: 'Shoulders' },
+  { d: 'M364,205 A38,44 0 1 1 364,293 A38,44 0 1 1 364,205', muscle: 'Shoulders' },
+  { d: 'M236,200 Q178,203 168,232 Q164,256 188,278 Q214,286 236,282 Z', muscle: 'Chest' },
+  { d: 'M246,200 Q304,203 314,232 Q318,256 294,278 Q268,286 246,282 Z', muscle: 'Chest' },
+  { d: 'M108,208 A33,70 0 1 1 108,348 A33,70 0 1 1 108,208', muscle: 'Biceps' },
+  { d: 'M374,208 A33,70 0 1 1 374,348 A33,70 0 1 1 374,208', muscle: 'Biceps' },
   { d: 'M175,292 L307,292 Q315,340 300,400 Q280,440 241,462 Q202,440 182,400 Q167,340 175,292 Z', muscle: 'Core' },
   { d: 'M172,498 Q238,492 236,560 Q234,620 220,672 Q195,678 178,650 Q165,580 172,498 Z', muscle: 'Quads' },
   { d: 'M310,498 Q244,492 246,560 Q248,620 262,672 Q287,678 304,650 Q317,580 310,498 Z', muscle: 'Quads' },
@@ -28,19 +34,19 @@ const FRONT_REGIONS: Region[] = [
 ];
 
 const BACK_REGIONS: Region[] = [
-  { d: 'M235,92 Q295,105 280,190 Q260,220 235,215 Q210,220 190,190 Q175,105 235,92 Z', muscle: 'Back' },
-  { d: 'M105,147 A48,58 0 1 1 105,263 A48,58 0 1 1 105,147', muscle: 'Rear Delts' },
-  { d: 'M365,147 A48,58 0 1 1 365,263 A48,58 0 1 1 365,147', muscle: 'Rear Delts' },
-  { d: 'M172,232 Q180,300 165,370 Q150,410 95,418 Q75,390 82,320 Q90,255 172,232 Z', muscle: 'Back' },
-  { d: 'M298,232 Q290,300 305,370 Q320,410 375,418 Q395,390 388,320 Q380,255 298,232 Z', muscle: 'Back' },
-  { d: 'M108,250 A42,85 0 1 1 108,420 A42,85 0 1 1 108,250', muscle: 'Triceps' },
-  { d: 'M374,250 A42,85 0 1 1 374,420 A42,85 0 1 1 374,250', muscle: 'Triceps' },
-  { d: 'M205,230 Q195,300 205,380 Q220,400 235,398 Q250,400 265,380 Q275,300 265,230 Q235,215 205,230 Z', muscle: 'Back' },
-  { d: 'M150,395 Q235,382 320,395 Q335,435 320,465 Q235,485 150,465 Q135,435 150,395 Z', muscle: 'Glutes' },
-  { d: 'M168,498 Q228,492 226,560 Q224,620 210,668 Q185,672 170,640 Q162,570 168,498 Z', muscle: 'Hamstrings' },
-  { d: 'M302,498 Q242,492 244,560 Q246,620 260,668 Q285,672 300,640 Q308,570 302,498 Z', muscle: 'Hamstrings' },
-  { d: 'M178,692 Q228,698 224,750 Q220,790 202,818 Q180,810 176,772 Q170,725 178,692 Z', muscle: 'Calves' },
-  { d: 'M292,692 Q242,698 246,750 Q250,790 268,818 Q290,810 294,772 Q300,725 292,692 Z', muscle: 'Calves' }
+  { d: 'M235,72 Q283,88 268,165 Q252,192 235,188 Q218,192 202,165 Q187,88 235,72 Z', muscle: 'Back' },
+  { d: 'M140,163 A42,52 0 1 1 140,267 A42,52 0 1 1 140,163', muscle: 'Rear Delts' },
+  { d: 'M330,163 A42,52 0 1 1 330,267 A42,52 0 1 1 330,163', muscle: 'Rear Delts' },
+  { d: 'M172,258 Q178,312 166,368 Q150,405 105,412 Q88,388 93,330 Q98,270 172,258 Z', muscle: 'Back' },
+  { d: 'M298,258 Q292,312 304,368 Q320,405 365,412 Q382,388 377,330 Q372,270 298,258 Z', muscle: 'Back' },
+  { d: 'M115,268 A38,62 0 1 1 115,392 A38,62 0 1 1 115,268', muscle: 'Triceps' },
+  { d: 'M355,268 A38,62 0 1 1 355,392 A38,62 0 1 1 355,268', muscle: 'Triceps' },
+  { d: 'M208,220 Q198,300 208,395 Q220,412 235,410 Q250,412 262,395 Q272,300 262,220 Q235,205 208,220 Z', muscle: 'Back' },
+  { d: 'M140,405 Q235,395 330,405 Q350,462 330,512 Q235,536 140,512 Q120,462 140,405 Z', muscle: 'Glutes' },
+  { d: 'M168,528 Q228,522 226,590 Q224,640 210,678 Q185,682 170,655 Q162,590 168,528 Z', muscle: 'Hamstrings' },
+  { d: 'M302,528 Q242,522 244,590 Q246,640 260,678 Q285,682 300,655 Q308,590 302,528 Z', muscle: 'Hamstrings' },
+  { d: 'M178,700 Q228,706 224,755 Q220,795 202,822 Q180,814 176,778 Q170,733 178,700 Z', muscle: 'Calves' },
+  { d: 'M292,700 Q242,706 246,755 Q250,795 268,822 Q290,814 294,778 Q300,733 292,700 Z', muscle: 'Calves' }
 ];
 
 export function fillForMuscle(muscle: string | null, ranks: Record<string, number>): string {
@@ -61,7 +67,7 @@ export function BodyDiagram({ view, ranks, width = 34, height = 63 }: {
   const vbW = isFront ? FRONT_W : BACK_W;
   const vbH = isFront ? FRONT_H : BACK_H;
   return (
-    <div style={{ width, height, position: 'relative', borderRadius: 8, overflow: 'hidden', background: '#f7f3ee', flex: 'none' }}>
+    <div style={{ width, height, position: 'relative', borderRadius: 8, overflow: 'hidden', background: '#0a0908', flex: 'none' }}>
       <img src={src} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }} />
       <svg viewBox={`0 0 ${vbW} ${vbH}`} preserveAspectRatio="xMidYMid meet" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
         {regions.map((r, i) => <path key={i} d={r.d} fill={fillForMuscle(r.muscle, ranks)} />)}
