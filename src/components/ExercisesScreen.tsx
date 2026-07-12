@@ -8,7 +8,20 @@ export function ExercisesScreen({ vm }: { vm: ViewModel }) {
         <div className="num" style={{ fontSize: 30, fontWeight: 700 }}>Exercises</div>
         <button onClick={vm.openAddExerciseForm} style={{ background: 'oklch(0.65 0.19 35)', border: 'none', color: '#0d0c0b', width: 36, height: 36, borderRadius: '50%', fontSize: 18, fontWeight: 700, lineHeight: 1 }}>+</button>
       </div>
-      <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.45)', marginBottom: 22 }}>Every exercise in your library, grouped by primary muscle.</div>
+      <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.45)', marginBottom: 16 }}>Every exercise in your library, grouped by primary muscle.</div>
+
+      <input
+        value={vm.exerciseSearchQuery}
+        onChange={e => vm.setExerciseSearchQuery(e.target.value)}
+        placeholder="Search by name or muscle (e.g. 'row' or 'chest')"
+        style={{ width: '100%', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.12)', color: '#f5f0ea', font: "400 13px 'Inter'", padding: '11px 14px', borderRadius: 12, marginBottom: 22 }}
+      />
+
+      {vm.exerciseSearchQuery && vm.exerciseLibraryGroups.length === 0 && (
+        <div style={{ font: "400 13px 'Inter'", color: 'rgba(245,240,234,.45)', textAlign: 'center', padding: '30px 0' }}>
+          No exercises match “{vm.exerciseSearchQuery}”.
+        </div>
+      )}
 
       {vm.exerciseLibraryGroups.map(g => (
         <div key={g.muscle} style={{ marginBottom: 22 }}>

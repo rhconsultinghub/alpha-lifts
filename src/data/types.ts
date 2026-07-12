@@ -232,6 +232,7 @@ export interface AppState {
   history: HistoryEntry[];
   customExercises: Record<string, ExerciseDef>;
   libraryDetailId: string | null;
+  exerciseSearchQuery: string;
   confirmDeleteExId: string | null;
   exerciseForm: ExerciseFormState | null;
   newProgramWizard: NewProgramWizardState | null;

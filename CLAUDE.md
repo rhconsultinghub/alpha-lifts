@@ -294,13 +294,15 @@ text and every warm-up move's new `howTo` field rewritten as a real multi-senten
 instead of a one-line cue; warm-up moves are now tappable for a detail view
 (`WarmupDetailModal.tsx`) with that write-up + video; (10) filled the last exercise-photo gap —
 the 14 exercises with no free-exercise-db match got user-supplied photos (cropped from a labeled
-collage), so all 151 exercises now have a real photo, none left on the icon fallback.
+collage), so all 151 exercises now have a real photo, none left on the icon fallback; (11) added
+exercise search to the Exercises tab (`exerciseSearchQuery` in `AppState`) — a single text input
+that matches against both exercise name and muscle name (case-insensitive substring), so e.g.
+typing "row" finds every row variant and typing "chest" finds every chest exercise via muscle
+match, satisfying "search by name or muscle" with one field rather than two separate controls.
 
 ## Open/pending work as of this handoff
 
 Working a punch list from user feedback on phases 8-10 above. Still open:
-- **Exercise search** — add a search box under the Exercises tab, filterable by exercise name and
-  by muscle group. No implementation started yet.
 - **Muscles-worked diagram polish** — the calibrated shading overlay (see `BodyDiagram.tsx` notes
   above) still doesn't stay inside the actual muscle outlines in every region per user feedback;
   needs another, tighter calibration pass. Also replace the `#f7f3ee` background card — user

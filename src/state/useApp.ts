@@ -281,6 +281,7 @@ export function useApp() {
   // ---------- exercise library ----------
   const openLibraryDetail = useCallback((id: string) => setState(s => ({ ...s, libraryDetailId: id })), []);
   const closeLibraryDetail = useCallback(() => setState(s => ({ ...s, libraryDetailId: null })), []);
+  const setExerciseSearchQuery = useCallback((q: string) => setState(s => ({ ...s, exerciseSearchQuery: q })), []);
 
   const openAddExerciseForm = useCallback(() => {
     setState(s => ({
@@ -794,7 +795,7 @@ export function useApp() {
       completeOnboarding,
       setBodyView, openBodyModal, closeBodyModal, openDetail, closeDetail,
       openMuscleDrill, closeMuscleDrill, openWarmupDetail, closeWarmupDetail,
-      openLibraryDetail, closeLibraryDetail, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,
+      openLibraryDetail, closeLibraryDetail, setExerciseSearchQuery, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,
       setExerciseFormField, toggleFormMuscle, toggleFormSecondary, toggleFormEquip, saveExerciseForm,
       requestDeleteExercise, deleteExercise,
       openSwap, closeSwap, swapTab, swapToggleAll, swapStageEquip, swapStageEx, swapConfirm, removeWorkoutExercise,

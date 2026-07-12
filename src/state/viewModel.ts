@@ -575,18 +575,28 @@ export function buildViewModel(state: AppState, actions: Actions) {
 
     // ---------- exercise library ----------
     openAddExerciseForm: actions.openAddExerciseForm,
-    exerciseLibraryGroups: (Object.keys(MUSCLE_TARGETS) as Muscle[]).map(muscle => {
-      const ids = Object.keys(EXLIB).filter(id => EXLIB[id].muscle === muscle).sort((a, b) => EXLIB[a].name.localeCompare(EXLIB[b].name));
-      return {
-        muscle, muscleUpper: muscle.toUpperCase(),
-        items: ids.map(id => ({
-          id, name: EXLIB[id].name, pattern: EXLIB[id].pattern,
-          equipSummary: EXLIB[id].equip.map(e => e.label).join(' · '),
-          isCustom: id in s.customExercises,
-          openDetail: () => actions.openLibraryDetail(id)
-        }))
+    exerciseSearchQuery: s.exerciseSearchQuery || '',
+    setExerciseSearchQuery: actions.setExerciseSearchQuery,
+    exerciseLibraryGroups: (() => {
+      const query = (s.exerciseSearchQuery || '').trim().toLowerCase();
+      const matches = (id: string) => {
+        if (!query) return true;
+        const lib = EXLIB[id];
+        return lib.name.toLowerCase().includes(query) || lib.muscle.toLowerCase().includes(query);
       };
-    }).filter(g => g.items.length),
+      return (Object.keys(MUSCLE_TARGETS) as Muscle[]).map(muscle => {
+        const ids = Object.keys(EXLIB).filter(id => EXLIB[id].muscle === muscle && matches(id)).sort((a, b) => EXLIB[a].name.localeCompare(EXLIB[b].name));
+        return {
+          muscle, muscleUpper: muscle.toUpperCase(),
+          items: ids.map(id => ({
+            id, name: EXLIB[id].name, pattern: EXLIB[id].pattern,
+            equipSummary: EXLIB[id].equip.map(e => e.label).join(' · '),
+            isCustom: id in s.customExercises,
+            openDetail: () => actions.openLibraryDetail(id)
+          }))
+        };
+      }).filter(g => g.items.length);
+    })(),
     libraryDetail: (() => {
       const id = s.libraryDetailId;
       if (!id || !EXLIB[id]) return { open: false };

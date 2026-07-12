@@ -35,6 +35,7 @@ export function createInitialState(): AppState {
     archiveDetailId: null,
     customExercises: {},
     libraryDetailId: null,
+    exerciseSearchQuery: '',
     confirmDeleteExId: null,
     exerciseForm: null,
     // pre-populated so the onboarding screen has a wizard to render immediately on first launch —
