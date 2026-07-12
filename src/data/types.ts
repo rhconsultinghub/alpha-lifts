@@ -32,11 +32,15 @@ export interface ExerciseLast {
   weight: number;
   reps: number;
   hitTop: boolean;
+  // reps-in-reserve on the top set, if logged — undefined for sessions logged before RIR existed
+  // or where the lifter skipped it (it's an optional per-set input, not required).
+  rir?: number;
 }
 
 export interface SetHistoryRow {
   weight: number;
   reps: number;
+  rir?: number;
 }
 
 export interface ProgramExercise {
@@ -46,6 +50,9 @@ export interface ProgramExercise {
   last: ExerciseLast;
   baseline: { weight: number; reps: number };
   lastSets?: SetHistoryRow[];
+  // two exercises sharing the same group id are performed as an adjacent-pair superset (see
+  // toggleSuperset in useApp.ts) — undefined/null means not linked.
+  supersetGroup?: string | null;
 }
 
 export interface ProgramDay {
@@ -79,6 +86,7 @@ export interface WorkoutSetRow {
   weight: number;
   reps: number;
   done: boolean;
+  rir?: number;
 }
 
 export interface WorkoutState {
@@ -120,6 +128,7 @@ export interface CompleteSummaryRow {
   badgeText: string;
   badgeBg: string;
   badgeColor: string;
+  isPR?: boolean;
 }
 
 export interface SwapState {
@@ -236,4 +245,26 @@ export interface AppState {
   confirmDeleteExId: string | null;
   exerciseForm: ExerciseFormState | null;
   newProgramWizard: NewProgramWizardState | null;
+
+  // ---------- rest-timer alerts ----------
+  restAlertSound: boolean;
+  restAlertVibrate: boolean;
+
+  // ---------- Progress tab: weight vs. estimated-1RM chart metric ----------
+  progressMetric: 'weight' | 'e1rm';
+
+  // ---------- body-weight tracking ----------
+  bodyWeightLog: { date: string; weightKg: number }[];
+  bodyWeightInput: string;
+
+  // ---------- deload suggestion (dismissal is per-week, like other week-scoped state) ----------
+  deloadDismissedWeek: number | null;
+
+  // ---------- reminder notifications (local-only, best-effort — see state/reminders.ts) ----------
+  remindersEnabled: boolean;
+  reminderTime: string;
+  lastReminderFiredDate: string | null;
+
+  // ---------- backup export/import ----------
+  pendingBackupImport: Partial<AppState> | null;
 }

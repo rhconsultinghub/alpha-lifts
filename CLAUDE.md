@@ -338,8 +338,69 @@ split-preset x training-type combination: only one unavoidable duplicate remains
 has two Rear-Delts-primary exercises total), and weekly volume %/day-time numbers are byte-for-byte
 identical to before the change, confirming the fix only reshuffles which exercise fills a slot.
 
-All items from that punch list are done as of this handoff — nothing currently open. If new
-feedback comes in, add it here the same way phases 7-12 were captured, and re-run a
-`.verify/`-style per-split/per-training-type audit script (volume % + day time, see phase 7) after
-any change that touches exercise selection or set counts, since those two interact and can regress
-each other silently.
+All items from that punch list are done as of this handoff. If new feedback comes in, add it here
+the same way phases 7-12 were captured, and re-run a `.verify/`-style per-split/per-training-type
+audit script (volume % + day time, see phase 7) after any change that touches exercise selection or
+set counts, since those two interact and can regress each other silently.
+
+(13) nine feature additions from a codebase-recommendations pass, all schema changes added as
+optional/defaulted `AppState` fields so `loadInitial()`'s existing shallow-merge-over-defaults
+pattern (see "Architecture" above) carried old sessions through with no explicit migration:
+- **Backup export/import** (`src/data/backup.ts`) — full-state JSON download/upload, since
+  everything still lives in one `localStorage` key with no server; import is staged
+  (`pendingBackupImport`) behind a "this replaces everything" confirm, mirroring the app's existing
+  confirm-before-destructive-action pattern (`confirmDeleteProgId` etc.).
+- **Rest-timer sound/vibration** (`src/state/alerts.ts`) — `navigator.vibrate` + a WebAudio beep
+  (no bundled audio asset), feature-detected and silently no-op where unsupported; toggleable in
+  Settings under "Rest Alerts".
+- **Estimated 1RM + PR detection** — `estimatedOneRepMax()`/`bestSetScore()` in `logic.ts` (Epley
+  formula, reps-only score for time/bodyweight exercises). PR badges compute in `completeWorkout()`
+  by comparing this session's best set against `exerciseHistory` *before* this session's entry is
+  appended, and only fire when prior history exists (a first-ever log is a baseline, not a
+  "record"). Progress tab's Exercise Progress and Compare Lifts charts share a `progressMetric`
+  toggle (Weight / Est. 1RM).
+- **RIR (reps-in-reserve) logging** — optional per-set field (`WorkoutSetRow.rir`), 0-4+ pill
+  picker in `WorkoutScreen`. `recommendation()` in `logic.ts` gained one narrow rule: a hit-top set
+  logged at RIR 0 (true failure) holds the weight next time instead of the usual +weight bump, on
+  the theory that a set with zero reserve shouldn't get more load piled onto it even though the rep
+  target was technically met.
+- **Body-weight tracking** — `AppState.bodyWeightLog`, logged via a text-input-through-global-state
+  field (`bodyWeightInput`) like every other input in this app, charted with the same
+  points/`linePoints`/`deltaText` sparkline shape `exerciseProgressData()` already used (new
+  `bodyWeightChartData()` in `logic.ts`).
+- **Plate calculator** (`platesBreakdown()` in `logic.ts`) — standard 45 lb/20 kg bar, plate math
+  done entirely in *display* units (a lb-tracked session uses lb plates on a 45 lb bar, a kg-tracked
+  session uses kg plates on a 20 kg bar) rather than converting the internally-stored kg value,
+  since that's how a bar is actually loaded at a gym. Shown inline in `WorkoutScreen` only for
+  `equip.v === 'barbell'` — dumbbell/machine/cable don't plate-load the same way, and Smith machines
+  vary too much in counterweight to guess reliably.
+- **Deload suggestion** (`deloadSuggestion()` in `logic.ts`) — flags a lift as "plateaued" if its
+  latest `bestSetScore` isn't meaningfully above the score from two sessions back, only considering
+  **compound** lifts in the active program with 3+ logged sessions (isolation work is noisier).
+  Suggests a deload once at least half of the considered compounds are plateaued. Dismissal
+  (`deloadDismissedWeek`) is per-week, like other week-scoped state in this app, so it resurfaces
+  next week if still true.
+- **Supersets/circuits** — scoped deliberately to **adjacent pairs**
+  (`ProgramExercise.supersetGroup`), not arbitrary N-exercise circuits, since `WorkoutState` assumes
+  one active exercise at a time and a full circuit rework would be a much bigger change. Linked via
+  a "🔗 Link Next" toggle in `DayBuilderScreen`. Mid-workout, `toggleSetDone()` in `useApp.ts` jumps
+  straight to the linked partner with no rest when a set is marked done and the partner's
+  matching-index set isn't done yet; only once both halves of a round are done does rest fire, using
+  the longer of the two exercises' `restForExercise()` values (`restTotalFor()` helper). Every place
+  an exercise can be removed or swapped (`removeExercise`, `removeWorkoutExercise`, both
+  `swapConfirm` paths, `muscleSwapConfirm`) clears the remaining partner's `supersetGroup` so no
+  group id ever dangles pointing at an exercise that's no longer there.
+- **Reminder notifications** (`src/state/reminders.ts`) — explicitly best-effort and documented as
+  such directly in the Settings UI copy: with no backend push service, a 60s `setInterval` in
+  `useApp.ts` (reading latest state via a ref, not a closure, so the interval doesn't need
+  recreating on every unrelated state change) can only fire a local `Notification` while the PWA is
+  open in some form — it will not fire if the app has been fully closed all day, which is the
+  honest ceiling on what's possible without a backend.
+
+All nine were verified end-to-end via the harness's browser-automation tools against `npm run dev`
+(a `.claude/launch.json` dev-server config was added for this, since none existed before) —
+including the superset skip-rest/shared-rest behavior, PR badge + e1RM metric toggle producing
+genuinely different numbers (not just a label swap), the plate breakdown appearing/disappearing
+correctly by equipment and weight, backup export/import round-tripping a real state object, and the
+deload banner both appearing (synthetic flat-history test data) and dismissing correctly. Zero
+console or dev-server errors throughout.

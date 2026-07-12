@@ -49,6 +49,22 @@ export function createInitialState(): AppState {
     weekReviewOpen: false,
     weekReviewSelected: null,
     exerciseHistory: {},
-    history: []
+    history: [],
+
+    restAlertSound: true,
+    restAlertVibrate: true,
+
+    progressMetric: 'weight',
+
+    bodyWeightLog: [],
+    bodyWeightInput: '',
+
+    deloadDismissedWeek: null,
+
+    remindersEnabled: false,
+    reminderTime: '18:00',
+    lastReminderFiredDate: null,
+
+    pendingBackupImport: null
   };
 }

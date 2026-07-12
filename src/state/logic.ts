@@ -8,6 +8,28 @@ export function fmtWeight(kg: number, units: Units): string {
   return Math.round(kg * 2) / 2 + ' kg';
 }
 
+const LB_BAR = 45;
+const KG_BAR = 20;
+const LB_PLATES = [45, 35, 25, 10, 5, 2.5];
+const KG_PLATES = [25, 20, 15, 10, 5, 2.5, 1.25];
+
+// Standard-bar plate breakdown, worked entirely in display units (a bar loaded for a session
+// tracked in lb uses a 45 lb bar + lb plates; tracked in kg uses a 20 kg bar + kg plates) — this
+// matches how a gym actually loads a bar, rather than converting a kg-stored value into odd
+// fractional lb plates or vice versa. Returns null when there's nothing to plate-load (at/under
+// bar weight).
+export function platesBreakdown(displayWeight: number, units: Units): number[] | null {
+  const bar = units === 'lb' ? LB_BAR : KG_BAR;
+  const plateSet = units === 'lb' ? LB_PLATES : KG_PLATES;
+  let perSide = (displayWeight - bar) / 2;
+  if (perSide < plateSet[plateSet.length - 1] - 0.01) return null;
+  const result: number[] = [];
+  for (const p of plateSet) {
+    while (perSide >= p - 0.01) { result.push(p); perSide -= p; }
+  }
+  return result.length ? result : null;
+}
+
 export function weightStep(units: Units): number {
   return units === 'lb' ? KG_PER_LB_STEP : 2.5;
 }
@@ -110,6 +132,23 @@ export interface Recommendation {
   note: string;
 }
 
+// Epley formula — good enough for a relative trend line/PR check, not meant as a literal max-
+// effort prediction. Only meaningful for weighted, rep-based sets (see bestSetScore).
+export function estimatedOneRepMax(weight: number, reps: number): number {
+  if (reps <= 0) return 0;
+  return weight * (1 + reps / 30);
+}
+
+// Single comparable "how good was this set" number, shared by PR detection and the e1RM chart
+// metric so both agree on what counts as an improvement. Time-tracked exercises (planks) compare
+// on seconds held; bodyweight/assisted exercises (no meaningful external load) compare on reps;
+// everything else compares on estimated 1RM so a heavier-lower-rep set can beat a lighter-higher-
+// rep one, matching how lifters actually judge progress.
+export function bestSetScore(weight: number, reps: number, isTime: boolean, isBodyweight: boolean): number {
+  if (isTime || isBodyweight) return reps;
+  return estimatedOneRepMax(weight, reps);
+}
+
 export function formatSetTime(sec: number): string {
   if (sec >= 60) { const m = Math.floor(sec / 60), s = sec % 60; return m + ':' + String(s).padStart(2, '0'); }
   return sec + 's';
@@ -142,6 +181,16 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
   }
   const inc = incrementForEquip(equip.v) ?? 2.5;
   if (ex.last.hitTop) {
+    // hit the rep target but that top set was already to true failure (RIR 0) — hold the weight
+    // rather than piling more load onto a set that had no reserve left, even though the rep
+    // target was technically met.
+    if (ex.last.rir === 0) {
+      return {
+        weight: ex.last.weight, reps: lib.repHi,
+        title: phrase('Repeat weight', 'Repeat the weight, build a buffer', 'Hold steady — same weight! 💪'),
+        note: 'Last time: ' + w1 + ' × ' + fmtVal(ex.last.reps) + ', but that set was to failure (RIR 0). Repeat the weight and build a rep buffer before increasing.'
+      };
+    }
     const w = ex.last.weight + inc;
     const incWord = fmtWeight(inc, units);
     return {
@@ -258,6 +307,44 @@ export function warmupForDay(state: AppState, dayKey: string): { id: string; nam
 // True once every training day (kind !== 'rest') has been completed or skipped on or after
 // weekStartedAt — the trigger useApp.ts uses to roll into the next week immediately, rather than
 // waiting for 7 calendar days to pass regardless of whether the user actually trained.
+export interface DeloadSuggestion {
+  show: boolean;
+  text: string;
+  names: string[];
+}
+
+// Looks only at compound lifts currently in the program (isolation work is noisier and less
+// telling of overall systemic fatigue) with enough logged history to judge a trend. A lift counts
+// as "plateaued" if its most recent session's best set isn't meaningfully above the session from
+// two sessions back — flat or declining rather than a single off day. Suggests a deload once at
+// least half of the compound lifts with enough history are plateaued.
+export function deloadSuggestion(state: AppState): DeloadSuggestion {
+  const compoundIds = new Set<string>();
+  state.dayOrder.forEach(k => {
+    const day = state.program[k];
+    if (!day || (day.kind || 'training') === 'rest') return;
+    day.exercises.forEach(ex => { if (EXLIB[ex.id]?.compound) compoundIds.add(ex.id); });
+  });
+  let considered = 0;
+  const plateaued: string[] = [];
+  compoundIds.forEach(id => {
+    const entries = state.exerciseHistory[id] || [];
+    if (entries.length < 3) return;
+    considered++;
+    const lib = EXLIB[id];
+    const isTime = lib.trackingMode === 'time';
+    const score = (e: ExerciseHistoryEntry) => (isTime ? e.reps : e.weight > 0 ? estimatedOneRepMax(e.weight, e.reps) : e.reps);
+    const recent = entries.slice(-3);
+    if (score(recent[2]) <= score(recent[0]) * 1.02) plateaued.push(lib.name);
+  });
+  if (considered < 2 || plateaued.length / considered < 0.5) return { show: false, text: '', names: [] };
+  return {
+    show: true,
+    names: plateaued,
+    text: plateaued.join(', ') + (plateaued.length > 1 ? ' have' : ' has') + ' been flat for a few sessions — consider a lighter deload week before pushing for more weight.'
+  };
+}
+
 export function isWeekComplete(program: ProgramDays, dayOrder: string[], weekStartedAt: string): boolean {
   const trainingKeys = dayOrder.filter(k => program[k] && (program[k].kind || 'training') !== 'rest');
   if (!trainingKeys.length) return false;
@@ -369,7 +456,7 @@ export function weeklyHeatmapData(state: AppState, bars: MuscleBar[]) {
 
 // every exercise in the library (including custom ones) is selectable here, not just ones in
 // the active program — grouped by muscle for an expandable picker rather than one long chip row.
-export function exerciseProgressData(state: AppState, selectId: (id: string) => void) {
+export function exerciseProgressData(state: AppState, selectId: (id: string) => void, metric: 'weight' | 'e1rm' = 'weight') {
   const allIds = Object.keys(EXLIB).sort((a, b) => EXLIB[a].name.localeCompare(EXLIB[b].name));
   if (!allIds.length) return { hasData: false, empty: true, pickerGroups: [], selectedName: '', deltaText: '' };
   const selectedId = allIds.includes(state.selectedProgressEx || '') ? (state.selectedProgressEx as string) : allIds[0];
@@ -387,10 +474,13 @@ export function exerciseProgressData(state: AppState, selectId: (id: string) => 
   }));
 
   const isTime = EXLIB[selectedId].trackingMode === 'time';
+  const usingE1rm = metric === 'e1rm' && !isTime;
   const selectedName = EXLIB[selectedId].name;
   const entries = state.exerciseHistory[selectedId] || [];
-  if (!entries.length) return { hasData: false, empty: true, pickerGroups, selectedName, deltaText: '', isTime };
-  const valueOf = (e: ExerciseHistoryEntry) => (isTime ? e.reps : e.weight);
+  if (!entries.length) return { hasData: false, empty: true, pickerGroups, selectedName, deltaText: '', isTime, usingE1rm };
+  // e1RM only makes sense for weighted sets — a bodyweight-equipment entry logs weight 0, so fall
+  // back to reps for that entry even while the e1RM metric is toggled on.
+  const valueOf = (e: ExerciseHistoryEntry) => (isTime ? e.reps : usingE1rm ? (e.weight > 0 ? estimatedOneRepMax(e.weight, e.reps) : e.reps) : e.weight);
   const maxW = Math.max(1, ...entries.map(valueOf));
   const minW = Math.min(...entries.map(valueOf));
   const range = Math.max(1, maxW - minW);
@@ -406,7 +496,7 @@ export function exerciseProgressData(state: AppState, selectId: (id: string) => 
   const deltaText = entries.length > 1
     ? (deltaVal >= 0 ? '+' : '-') + (isTime ? formatSetTime(Math.abs(deltaVal)) : fmtWeight(Math.abs(deltaVal), state.units)) + ' since ' + first.date
     : 'First logged ' + first.date;
-  return { hasData: true, empty: false, pickerGroups, points, linePoints, selectedName, deltaText, isTime };
+  return { hasData: true, empty: false, pickerGroups, points, linePoints, selectedName, deltaText, isTime, usingE1rm };
 }
 
 // The picker shows a sensible default (top exercises with history) until the user explicitly
@@ -420,7 +510,7 @@ export function defaultCompareLiftIds(state: AppState): string[] {
 
 // every exercise in the library is selectable (not just ones with logged history) — grouped by
 // muscle for an expandable picker, capped at 3 selected at once.
-export function compareLiftsData(state: AppState, toggle: (id: string) => void) {
+export function compareLiftsData(state: AppState, toggle: (id: string) => void, metric: 'weight' | 'e1rm' = 'weight') {
   const allIds = Object.keys(EXLIB).sort((a, b) => EXLIB[a].name.localeCompare(EXLIB[b].name));
   const colors = ['oklch(0.65 0.19 35)', 'oklch(0.7 0.13 230)', 'oklch(0.7 0.15 145)'];
   const selected = (state.compareLiftIds && state.compareLiftIds.length ? state.compareLiftIds : defaultCompareLiftIds(state)).filter(id => allIds.includes(id));
@@ -445,7 +535,8 @@ export function compareLiftsData(state: AppState, toggle: (id: string) => void) 
     const entries = state.exerciseHistory[id] || [];
     if (entries.length < 2) return null;
     const isTime = EXLIB[id].trackingMode === 'time';
-    const valueOf = (e: ExerciseHistoryEntry) => (isTime ? e.reps : e.weight);
+    const usingE1rm = metric === 'e1rm' && !isTime;
+    const valueOf = (e: ExerciseHistoryEntry) => (isTime ? e.reps : usingE1rm ? (e.weight > 0 ? estimatedOneRepMax(e.weight, e.reps) : e.reps) : e.weight);
     const first = valueOf(entries[0]) || 1;
     const n = entries.length;
     const pts = entries.map((e, k) => ({ x: n > 1 ? Math.round((k / (n - 1)) * 260 + 10) : 140, pctChange: Math.round(((valueOf(e) - first) / first) * 100) }));
@@ -531,6 +622,29 @@ export function volumeDonutData(state: AppState) {
   });
   const gradientCss = segments.length ? 'conic-gradient(' + segments.map(sg => sg.color + ' ' + sg.start + '% ' + sg.end + '%').join(', ') + ')' : 'rgba(255,255,255,.06)';
   return { gradientCss, segments, hasData: entries.length > 0 };
+}
+
+// Same points/linePoints/deltaText shape exerciseProgressData() produces, so ProgressScreen can
+// reuse the exact same inline <svg><polyline> sparkline markup for both.
+export function bodyWeightChartData(state: AppState) {
+  const entries = (state.bodyWeightLog || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  if (!entries.length) return { hasData: false, empty: true, points: [] as { x: number; y: number; date: string }[], linePoints: '', deltaText: '', latestText: '' };
+  const maxW = Math.max(1, ...entries.map(e => e.weightKg));
+  const minW = Math.min(...entries.map(e => e.weightKg));
+  const range = Math.max(1, maxW - minW);
+  const n = entries.length;
+  const points = entries.map((e, i) => ({
+    x: n > 1 ? Math.round((i / (n - 1)) * 260 + 10) : 140,
+    y: Math.round(90 - ((e.weightKg - minW) / range) * 70),
+    date: e.date
+  }));
+  const linePoints = points.map(p => p.x + ',' + p.y).join(' ');
+  const first = entries[0], latest = entries[entries.length - 1];
+  const deltaKg = latest.weightKg - first.weightKg;
+  const deltaText = entries.length > 1
+    ? (deltaKg >= 0 ? '+' : '-') + fmtWeight(Math.abs(deltaKg), state.units) + ' since ' + first.date
+    : 'First logged ' + first.date;
+  return { hasData: true, empty: false, points, linePoints, deltaText, latestText: fmtWeight(latest.weightKg, state.units) };
 }
 
 export function durationTrendData(state: AppState) {

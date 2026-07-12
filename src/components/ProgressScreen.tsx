@@ -5,6 +5,7 @@ const SECTION_LABEL: CSSProperties = { font: "500 11px 'Inter'", color: 'rgba(24
 const CARD: CSSProperties = { background: 'rgba(255,255,255,.03)', borderRadius: 14, padding: 14, marginBottom: 26 };
 
 export function ProgressScreen({ vm }: { vm: ViewModel }) {
+  const bw = vm.bodyWeight as any;
   const vc = vm.volumeChart as any;
   const heat = vm.weeklyHeatmap as any;
   const ep = vm.exerciseProgress as any;
@@ -18,6 +19,32 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
       <div style={{ padding: '24px 20px 0' }}>
         <div className="num" style={{ fontSize: 30, fontWeight: 700, marginBottom: 4 }}>Progress</div>
         <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.45)', marginBottom: 22 }}>Analytics on your training over time.</div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+          <div style={SECTION_LABEL}>BODY WEIGHT</div>
+          {bw.hasData && <div style={{ font: "600 11px 'Inter'", color: 'oklch(0.72 0.17 35)' }}>{bw.latestText}</div>}
+        </div>
+        <div style={CARD}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: bw.hasData ? 10 : 0 }}>
+            <input
+              type="number" value={bw.inputValue} onChange={e => bw.setInput(e.target.value)}
+              placeholder={`Log weight (${bw.unitsLabel.toLowerCase()})`}
+              style={{ flex: 1, background: 'rgba(255,255,255,.07)', border: 'none', borderRadius: 10, padding: '10px 12px', color: '#f5f0ea', font: "600 13px 'Inter'" }}
+            />
+            <button onClick={bw.log} style={{ font: "700 12px 'Inter'", padding: '0 16px', borderRadius: 10, border: 'none', background: 'oklch(0.65 0.19 35)', color: '#0d0c0b' }}>Log</button>
+          </div>
+          {bw.hasData ? (
+            <>
+              <svg viewBox="0 0 280 110" style={{ width: '100%', height: 90, display: 'block' }}>
+                <polyline points={bw.linePoints} fill="none" stroke="oklch(0.65 0.19 35)" strokeWidth={2} />
+                {bw.points.map((pt: any, i: number) => <circle key={i} cx={pt.x} cy={pt.y} r={3.5} fill="oklch(0.65 0.19 35)" />)}
+              </svg>
+              <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.45)', marginTop: 4 }}>{bw.deltaText}</div>
+            </>
+          ) : (
+            <div style={{ padding: '10px 0 2px', textAlign: 'center', font: "400 12px 'Inter'", color: 'rgba(245,240,234,.4)' }}>Log your weight to start a trend.</div>
+          )}
+        </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
           <div style={SECTION_LABEL}>VOLUME TREND</div>
@@ -59,7 +86,13 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
           </div>
         </div>
 
-        <div style={SECTION_LABEL}>EXERCISE PROGRESS</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+          <div style={SECTION_LABEL}>EXERCISE PROGRESS</div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button onClick={vm.setProgressMetricWeight} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: 'none', background: vm.progressMetricWeightBg, color: vm.progressMetricWeightColor }}>Weight</button>
+            <button onClick={vm.setProgressMetricE1rm} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: 'none', background: vm.progressMetricE1rmBg, color: vm.progressMetricE1rmColor }}>Est. 1RM</button>
+          </div>
+        </div>
         <button onClick={vm.toggleProgressPicker} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 12, padding: '10px 14px', marginBottom: vm.progressPickerOpen ? 8 : 12 }}>
           <span style={{ font: "600 13px 'Inter'", color: '#f5f0ea' }}>{ep.selectedName}</span>
           <span style={{ color: 'rgba(245,240,234,.5)', fontSize: 12, transform: vm.progressPickerOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}>▾</span>

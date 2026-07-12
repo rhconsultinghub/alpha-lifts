@@ -33,6 +33,17 @@ export function ProgramScreen({ vm }: { vm: ViewModel }) {
         ))}
       </div>
 
+      {vm.deload.show && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '12px 14px', borderRadius: 14, background: 'oklch(0.7 0.13 230 / 0.1)', border: '1px solid oklch(0.7 0.13 230 / 0.35)', marginBottom: 20 }}>
+          <span style={{ fontSize: 15 }}>😴</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ font: "600 12px 'Inter'", color: 'oklch(0.78 0.13 230)', marginBottom: 2 }}>Consider a deload</div>
+            <div style={{ font: "400 12px/1.4 'Inter'", color: 'rgba(245,240,234,.8)' }}>{vm.deload.text}</div>
+            <button onClick={vm.deload.dismiss} style={{ marginTop: 8, font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: '1px solid oklch(0.7 0.13 230 / 0.5)', background: 'none', color: 'oklch(0.78 0.13 230)' }}>Dismiss for this week</button>
+          </div>
+        </div>
+      )}
+
       <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>TRAINING DAYS</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {vm.programDays.map(d => (

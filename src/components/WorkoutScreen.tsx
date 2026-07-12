@@ -46,6 +46,13 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
           </div>
         </div>
 
+        {w.supersetPartnerName && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 14px', borderRadius: 14, background: 'oklch(0.7 0.13 230 / 0.1)', border: '1px solid oklch(0.7 0.13 230 / 0.35)', marginBottom: 14 }}>
+            <span style={{ fontSize: 14 }}>⚡</span>
+            <span style={{ font: "500 12px/1.4 'Inter'", color: 'oklch(0.78 0.13 230)' }}>Paired with {w.supersetPartnerName} — no rest between until both sets are done.</span>
+          </div>
+        )}
+
         <button onClick={w.viewHistory} style={{ width: '100%', textAlign: 'left', padding: '12px 14px', borderRadius: 14, background: 'oklch(0.65 0.19 35 / 0.12)', border: '1px solid oklch(0.65 0.19 35 / 0.4)', marginBottom: 18 }}>
           <div style={{ font: "600 12px 'Inter'", color: 'oklch(0.8 0.15 35)' }}>{w.recTitle}</div>
           <div style={{ font: "400 12px/1.4 'Inter'", color: 'rgba(245,240,234,.75)', marginTop: 2 }}>{w.recNote} <span style={{ textDecoration: 'underline', color: 'oklch(0.8 0.15 35)' }}>View history</span></div>
@@ -89,6 +96,9 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
                   <input type="number" value={s.weight} onChange={e => s.setWeight(parseFloat(e.target.value) || 0)} style={{ width: 56, fontSize: 17 }} />
                   <button onClick={s.incWeight} style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea', fontSize: 17 }}>+</button>
                 </div>
+                {s.platesText && (
+                  <div style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)', textAlign: 'center', marginTop: 4 }}>🏋 {s.platesText}</div>
+                )}
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 6, textAlign: 'center' }}>{s.isTime ? 'TIME (SEC)' : 'REPS'}</div>
@@ -109,6 +119,12 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
                   </div>
                 )}
               </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
+              <span style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em' }}>RIR</span>
+              {s.rirOptions.map((o: any) => (
+                <button key={o.v} onClick={o.select} style={{ width: 26, height: 26, borderRadius: '50%', border: 'none', background: o.bg, color: o.color, font: "700 10px 'Inter'" }}>{o.label}</button>
+              ))}
             </div>
           </div>
         ))}

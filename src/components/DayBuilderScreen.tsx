@@ -41,6 +41,9 @@ export function DayBuilderScreen({ vm }: { vm: ViewModel }) {
               </div>
               <button onClick={ex.openEquip} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.75)' }}>{ex.equipLabel} ▾</button>
               <button onClick={ex.openReplace} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: 'none', background: 'none', color: 'oklch(0.72 0.15 35)' }}>⇄ Replace</button>
+              {ex.canLinkNext && (
+                <button onClick={ex.toggleLinkNext} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: `1px solid ${ex.isLinkedToNext ? 'oklch(0.7 0.13 230 / 0.6)' : 'rgba(255,255,255,.2)'}`, background: ex.isLinkedToNext ? 'oklch(0.7 0.13 230 / 0.15)' : 'none', color: ex.isLinkedToNext ? 'oklch(0.78 0.13 230)' : 'rgba(245,240,234,.6)' }}>{ex.isLinkedToNext ? '🔗✓ Linked' : '🔗 Link Next'}</button>
+              )}
             </div>
           </div>
         ))}

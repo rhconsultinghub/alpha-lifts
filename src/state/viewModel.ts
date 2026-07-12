@@ -7,7 +7,7 @@ import {
   muscleBarsList, dayWarning, recommendation, estimateDayTime, formatDuration,
   warmupInfo, dayMuscleRanks, formatElapsed, fmtWeight, weightStep, formatSetTime,
   volumeChartData, weeklyHeatmapData, exerciseProgressData, compareLiftsData, consistencyData,
-  volumeDonutData, durationTrendData, warmupForDay
+  volumeDonutData, durationTrendData, warmupForDay, bodyWeightChartData, platesBreakdown, deloadSuggestion
 } from './logic';
 
 const ACCENT = 'oklch(0.65 0.19 35)';
@@ -23,6 +23,7 @@ export interface ExerciseRowVM {
   targetText: string;
   openDetail: () => void;
   openSwap: () => void;
+  supersetBadge: boolean;
 }
 
 function sessionRowVM(h: HistoryEntry, s: AppState, actions: Actions) {
@@ -91,7 +92,21 @@ export function buildViewModel(state: AppState, actions: Actions) {
       label: v, select: () => actions.setWarmupStyle(v),
       bg: s.warmupStyle === v ? ACCENT : 'rgba(255,255,255,.06)', color: s.warmupStyle === v ? '#0d0c0b' : 'rgba(245,240,234,.7)'
     })),
-    warmupStyleDesc: 'Minimal skips warm-up suggestions entirely; Cautious adds an extra ramp-up set on heavy lifts.'
+    warmupStyleDesc: 'Minimal skips warm-up suggestions entirely; Cautious adds an extra ramp-up set on heavy lifts.',
+    restAlertSound: s.restAlertSound,
+    restAlertVibrate: s.restAlertVibrate,
+    toggleRestAlertSound: () => actions.setRestAlertSound(!s.restAlertSound),
+    toggleRestAlertVibrate: () => actions.setRestAlertVibrate(!s.restAlertVibrate),
+    exportBackup: actions.exportBackup,
+    pendingBackupImport: !!s.pendingBackupImport,
+    confirmBackupImport: actions.confirmBackupImport,
+    cancelBackupImport: actions.cancelBackupImport,
+    stageBackupImport: actions.stageBackupImport,
+    remindersEnabled: s.remindersEnabled,
+    reminderTime: s.reminderTime,
+    reminderPermissionDenied: typeof Notification !== 'undefined' && Notification.permission === 'denied',
+    toggleReminders: () => actions.setRemindersEnabled(!s.remindersEnabled),
+    setReminderTime: (v: string) => actions.setReminderTime(v)
   };
 
   const newProgramWizard = (() => {
@@ -222,7 +237,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
           setsText: ex.sets + ' × ' + (isTime ? formatSetTime(lib.repLo) + '-' + formatSetTime(lib.repHi) : lib.repLo + '-' + lib.repHi),
           targetText: r.weight > 0 ? fmtWeight(r.weight, s.units) : isTime ? formatSetTime(r.reps) : r.reps + ' reps',
           openDetail: () => actions.openDetail(dayKey, i),
-          openSwap: () => actions.openSwap(dayKey, i, 'equip', false)
+          openSwap: () => actions.openSwap(dayKey, i, 'equip', false),
+          supersetBadge: !!ex.supersetGroup
         } as ExerciseRowVM;
       })
     };
@@ -236,6 +252,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
     builderExercises = day.exercises.map((ex, i) => {
       const lib = EXLIB[ex.id];
       const equip = lib.equip[ex.equipIdx];
+      const next = day.exercises[i + 1];
+      const isLinkedToNext = !!(ex.supersetGroup && next && ex.supersetGroup === next.supersetGroup);
       return {
         id: ex.id, name: lib.name, muscle: lib.muscle, equipLabel: equip.label, sets: ex.sets,
         repText: lib.trackingMode === 'time' ? formatSetTime(lib.repLo) + '-' + formatSetTime(lib.repHi) + ' hold' : lib.repLo + '-' + lib.repHi + ' reps',
@@ -244,7 +262,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
         remove: () => actions.removeExercise(dayKey, i),
         openDetail: () => actions.openDetail(dayKey, i),
         openEquip: () => actions.openSwap(dayKey, i, 'equip', false),
-        openReplace: () => actions.openSwap(dayKey, i, 'replace', false)
+        openReplace: () => actions.openSwap(dayKey, i, 'replace', false),
+        canLinkNext: !!next,
+        isLinkedToNext,
+        toggleLinkNext: () => actions.toggleSuperset(dayKey, i)
       };
     });
   }
@@ -274,20 +295,23 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const doneCount = es ? es.filter(r => r.done).length : 0;
       const total = es ? es.length : e2.sets;
       const complete = !!es && es.every(r => r.done);
+      const linked = !!(ex.supersetGroup && e2.supersetGroup === ex.supersetGroup);
       return {
         id: e2.id, name: l2.name, pattern: l2.pattern, go: () => actions.switchExercise(i),
         statusText: complete ? '✓' : (es ? doneCount + '/' + total : total + ' sets'),
         bg: i === exIndex ? ACCENT : (complete ? 'oklch(0.7 0.15 145 / 0.12)' : 'rgba(255,255,255,.05)'),
         color: i === exIndex ? '#0d0c0b' : (complete ? 'oklch(0.75 0.15 145)' : 'rgba(245,240,234,.7)'),
-        border: i === exIndex ? ACCENT : (complete ? 'oklch(0.7 0.15 145 / 0.4)' : 'rgba(255,255,255,.1)')
+        border: linked ? 'oklch(0.7 0.13 230)' : i === exIndex ? ACCENT : (complete ? 'oklch(0.7 0.15 145 / 0.4)' : 'rgba(255,255,255,.1)')
       };
     });
     const workoutAllDone = dayExercises.every((_e, i) => s.workout!.exSets[i] && s.workout!.exSets[i].every(r => r.done));
+    const supersetPartner = ex.supersetGroup ? dayExercises.find((e2, i2) => i2 !== exIndex && e2.supersetGroup === ex.supersetGroup) : null;
+    const supersetPartnerName = supersetPartner ? EXLIB[supersetPartner.id].name : null;
 
     workout = {
       progressText: 'Exercise ' + (exIndex + 1) + ' of ' + dayExercises.length,
       elapsedText: formatElapsed(Date.now() - (s.workout.startedAt || Date.now())),
-      navList, workoutAllDone,
+      navList, workoutAllDone, supersetPartnerName,
       completeWorkout: actions.completeWorkout,
       endEarly: actions.requestEndEarly,
       endEarlyLabel: s.confirmEndEarly ? 'Tap again to confirm ending' : 'End Workout Early',
@@ -316,6 +340,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
         const isTime = lib.trackingMode === 'time';
         const step = weightStep(s.units);
         const dispWeight = s.units === 'lb' ? Math.round((row.weight * 2.20462) / 5) * 5 : Math.round(row.weight * 2) / 2;
+        const plates = equip.v === 'barbell' ? platesBreakdown(dispWeight, s.units) : null;
+        const platesText = plates ? plates.join(' + ') + ' per side' : '';
         const lastSetsArr = (ex.lastSets && ex.lastSets.length) ? ex.lastSets : (ex.last ? Array(ex.sets).fill({ weight: ex.last.weight, reps: ex.last.reps }) : []);
         const lastRow = lastSetsArr[i] || lastSetsArr[lastSetsArr.length - 1];
         return {
@@ -338,7 +364,14 @@ export function buildViewModel(state: AppState, actions: Actions) {
           doneBg: row.done ? 'oklch(0.7 0.15 145)' : 'rgba(255,255,255,.08)',
           doneColor: row.done ? '#0d0c0b' : 'rgba(245,240,234,.4)',
           cardBg: row.done ? 'oklch(0.7 0.15 145 / 0.07)' : 'rgba(255,255,255,.045)',
-          cardBorder: row.done ? 'oklch(0.7 0.15 145 / 0.35)' : 'rgba(255,255,255,.06)'
+          cardBorder: row.done ? 'oklch(0.7 0.15 145 / 0.35)' : 'rgba(255,255,255,.06)',
+          platesText,
+          rirOptions: [0, 1, 2, 3, 4].map(v => ({
+            v, label: v === 4 ? '4+' : String(v), sel: row.rir === v,
+            bg: row.rir === v ? ACCENT : 'rgba(255,255,255,.07)',
+            color: row.rir === v ? '#0d0c0b' : 'rgba(245,240,234,.55)',
+            select: () => actions.setSetRir(i, v)
+          }))
         };
       })
     };
@@ -554,6 +587,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
     trainingTypes,
     muscleBars: bars.map(m => ({ ...m, drill: () => actions.openMuscleDrill(m.name) })),
     programDays, newProgramWizard,
+    deload: (() => {
+      const raw = deloadSuggestion(s);
+      return { ...raw, show: raw.show && s.deloadDismissedWeek !== s.weekNumber, dismiss: actions.dismissDeloadSuggestion };
+    })(),
     currentDay, builderExercises,
     openDayBuilder: actions.openDayBuilder, closeDayBuilder: actions.closeDayBuilder,
     startWorkout: actions.startWorkout, exitWorkout: actions.exitWorkout,
@@ -685,7 +722,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
           const sets = e.sets && e.sets.length ? e.sets : [{ weight: e.weight, reps: e.reps }];
           return {
             date: e.date, day: e.day || '',
-            sets: sets.map((st, i) => ({ num: i + 1, text: isTime ? formatSetTime(st.reps) : fmtWeight(st.weight, s.units) + ' × ' + st.reps + ' reps' }))
+            sets: sets.map((st, i) => ({ num: i + 1, text: (isTime ? formatSetTime(st.reps) : fmtWeight(st.weight, s.units) + ' × ' + st.reps + ' reps') + (st.rir != null ? ' · RIR ' + st.rir : '') }))
           };
         }),
         empty: entries.length === 0,
@@ -694,12 +731,26 @@ export function buildViewModel(state: AppState, actions: Actions) {
     })(),
 
     // ---------- Progress tab ----------
+    bodyWeight: {
+      ...bodyWeightChartData(s),
+      inputValue: s.bodyWeightInput,
+      setInput: (v: string) => actions.setBodyWeightInput(v),
+      log: actions.logBodyWeight,
+      unitsLabel: currentUnitsLabel
+    },
     volumeChart: volumeChartData(s),
     weeklyHeatmap: weeklyHeatmapData(s, bars),
-    exerciseProgress: exerciseProgressData(s, actions.selectExerciseProgress),
+    exerciseProgress: exerciseProgressData(s, actions.selectExerciseProgress, s.progressMetric),
     progressPickerOpen: !!s.progressPickerOpen,
     toggleProgressPicker: actions.toggleProgressPicker,
-    compareLifts: compareLiftsData(s, actions.toggleCompareLift),
+    progressMetric: s.progressMetric,
+    progressMetricWeightBg: s.progressMetric === 'weight' ? ACCENT : 'rgba(255,255,255,.06)',
+    progressMetricWeightColor: s.progressMetric === 'weight' ? '#0d0c0b' : 'rgba(245,240,234,.7)',
+    progressMetricE1rmBg: s.progressMetric === 'e1rm' ? ACCENT : 'rgba(255,255,255,.06)',
+    progressMetricE1rmColor: s.progressMetric === 'e1rm' ? '#0d0c0b' : 'rgba(245,240,234,.7)',
+    setProgressMetricWeight: () => actions.setProgressMetric('weight'),
+    setProgressMetricE1rm: () => actions.setProgressMetric('e1rm'),
+    compareLifts: compareLiftsData(s, actions.toggleCompareLift, s.progressMetric),
     compareLiftPickerOpen: !!s.compareLiftPickerOpen,
     toggleCompareLiftPicker: actions.toggleCompareLiftPicker,
     consistency: consistencyData(s),

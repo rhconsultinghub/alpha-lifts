@@ -1,11 +1,15 @@
 import type { ViewModel } from '../state/viewModel';
 
 export function CompleteScreen({ vm }: { vm: ViewModel }) {
+  const prCount = vm.completeSummary.filter(c => c.isPR).length;
   return (
     <div style={{ padding: '60px 24px 40px', textAlign: 'center' }}>
       <div style={{ fontSize: 44, marginBottom: 12 }}>🏁</div>
       <div className="num" style={{ fontSize: 28, fontWeight: 700, marginBottom: 6 }}>Workout Complete</div>
-      <div style={{ font: "400 13px 'Inter'", color: 'rgba(245,240,234,.5)', marginBottom: 28 }}>{vm.completeSubtitle}</div>
+      <div style={{ font: "400 13px 'Inter'", color: 'rgba(245,240,234,.5)', marginBottom: prCount > 0 ? 10 : 28 }}>{vm.completeSubtitle}</div>
+      {prCount > 0 && (
+        <div style={{ font: "700 13px 'Inter'", color: 'oklch(0.8 0.16 90)', marginBottom: 28 }}>🏆 {prCount} new record{prCount > 1 ? 's' : ''} this session!</div>
+      )}
 
       {vm.planPrompt.show && (
         <div style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'flex-start', padding: 14, borderRadius: 14, background: 'oklch(0.65 0.19 35 / 0.1)', border: '1px solid oklch(0.65 0.19 35 / 0.35)', marginBottom: 24 }}>
@@ -22,7 +26,7 @@ export function CompleteScreen({ vm }: { vm: ViewModel }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, textAlign: 'left', marginBottom: 28 }}>
         {vm.completeSummary.map((c, i) => (
-          <div key={i} style={{ background: 'rgba(255,255,255,.04)', borderRadius: 14, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div key={i} style={{ background: c.isPR ? 'oklch(0.78 0.15 90 / 0.08)' : 'rgba(255,255,255,.04)', border: c.isPR ? '1px solid oklch(0.78 0.15 90 / 0.4)' : '1px solid transparent', borderRadius: 14, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ font: "600 14px 'Inter'" }}>{c.name}</div>
               <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.45)', marginTop: 2 }}>{c.resultText}</div>

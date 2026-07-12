@@ -85,6 +85,9 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
               <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                 <span style={{ font: "500 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'rgba(255,255,255,.08)' }}>{ex.setsText}</span>
                 <span style={{ font: "600 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'oklch(0.65 0.19 35)', color: '#0d0c0b' }}>{ex.targetText}</span>
+                {ex.supersetBadge && (
+                  <span style={{ font: "600 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'oklch(0.7 0.13 230 / 0.15)', color: 'oklch(0.78 0.13 230)' }}>⚡ Superset</span>
+                )}
               </div>
               <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginTop: 8 }}>🔒 {ex.equipLabel} · {ex.muscle}</div>
             </div>
