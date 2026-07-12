@@ -62,6 +62,73 @@ export const SPLIT_PRESETS: SplitPreset[] = [
     days: [{ type: 'push' }, { type: 'pull' }, { type: 'legs' }, { type: 'rest' }, { type: 'upper' }, { type: 'lower' }, { type: 'rest' }] }
 ];
 
+// All exercise ids that appear anywhere in DAY_TYPE_EXERCISES, grouped by muscle — the vetted
+// base pool used by dedupeWeekExerciseIds() below to substitute a same-muscle alternate for a
+// repeated exercise, rather than introducing an entirely new, unvetted pick.
+const POOL_BY_MUSCLE: Record<string, string[]> = {};
+Object.values(DAY_TYPE_EXERCISES).forEach(ids => {
+  ids.forEach(id => {
+    const m = EXLIB[id].muscle;
+    if (!POOL_BY_MUSCLE[m]) POOL_BY_MUSCLE[m] = [];
+    if (!POOL_BY_MUSCLE[m].includes(id)) POOL_BY_MUSCLE[m].push(id);
+  });
+});
+// A handful of muscles only have one or two exercises across all of DAY_TYPE_EXERCISES combined
+// (e.g. Core is only ever represented by 'plank'), which isn't enough alternates to de-duplicate
+// splits where that muscle is trained 3-4x in one week (full_body x3, ppl6's pull+legs both
+// touching Core, etc). These extend the substitution pool for exactly those muscles with other
+// solid, well-known exercises from the wider library — Rear Delts is left alone since face_pull
+// and rear_delt_fly are the *only* two Rear-Delts-primary exercises in the entire library, so a
+// third occurrence in the same week has no possible alternate and will legitimately repeat.
+const EXTRA_POOL_MUSCLES: Partial<Record<string, string[]>> = {
+  Core: ['hanging_leg_raise', 'cable_crunch', 'ab_wheel_rollout'],
+  Calves: ['seated_calf_raise', 'calf_press'],
+  Glutes: ['glute_bridge', 'single_leg_glute_bridge'],
+  Quads: ['front_squat', 'leg_extension'],
+  Hamstrings: ['back_extension'],
+  Biceps: ['incline_curl'],
+  Triceps: ['overhead_triceps_ext'],
+  // "pull" alone has 3 Back slots (deadlift/lat_pulldown/seated_row) and occurs twice in the PPL6
+  // split, so 6 distinct Back picks are needed in that one week — the base pool only has 4.
+  Back: ['barbell_row', 'chinup']
+};
+Object.entries(EXTRA_POOL_MUSCLES).forEach(([m, ids]) => {
+  (POOL_BY_MUSCLE[m] = POOL_BY_MUSCLE[m] || []).push(...(ids || []).filter(id => !POOL_BY_MUSCLE[m].includes(id)));
+});
+
+// Walks a week's day types in order and returns each day's exercise id list with same-muscle
+// substitutions applied wherever an id would otherwise repeat within the week — so e.g. a 6-day
+// PPL split's two Push days no longer land on the exact same five exercises, and a hybrid split
+// mixing day types (e.g. push + upper, both of which include triceps_pushdown) doesn't repeat an
+// exercise across two different-themed days either. Substitutions always come from
+// POOL_BY_MUSCLE for the *same* muscle the original exercise targeted, so day themes and the
+// per-muscle set-count balancing above are unaffected — only which specific exercise fills a
+// slot changes. Tracks used-this-day separately from used-across-week so that substituting one
+// colliding slot can never collide with a *different* slot still to come later in the same day
+// (a day type can have more than one exercise for the same muscle, e.g. "arms" has two Biceps
+// slots — swapping the first for the pool's other Biceps pick must not leave the second slot,
+// which was already that same pick, duplicated within that single day). Falls back to the
+// original id if every same-muscle alternate is already spoken for (can happen for a muscle with
+// very few library exercises, like Rear Delts), so a slot is never left without an exercise.
+function dedupeWeekExerciseIds(weekDayTypes: string[]): string[][] {
+  const usedAcrossWeek = new Set<string>();
+  return weekDayTypes.map(type => {
+    const ids = DAY_TYPE_EXERCISES[type] || [];
+    const usedThisDay = new Set<string>();
+    return ids.map(id => {
+      if (!usedAcrossWeek.has(id) && !usedThisDay.has(id)) {
+        usedAcrossWeek.add(id); usedThisDay.add(id);
+        return id;
+      }
+      const m = EXLIB[id].muscle;
+      const alt = (POOL_BY_MUSCLE[m] || []).find(cand => !usedAcrossWeek.has(cand) && !usedThisDay.has(cand));
+      const chosen = alt || id;
+      usedAcrossWeek.add(chosen); usedThisDay.add(chosen);
+      return chosen;
+    });
+  });
+}
+
 // "recommended" prefill calibrates each exercise's set count so that, added up across every
 // training day in the week that also hits the same primary muscle, the week lands close to
 // that muscle's target volume for the chosen training type — rather than always defaulting to
@@ -69,8 +136,12 @@ export const SPLIT_PRESETS: SplitPreset[] = [
 // per-exercise split below is only a starting guess (rounding/clamping it to a sane per-exercise
 // set count can drift the weekly sum away from target); balanceWeeklyVolume() below reconciles
 // the whole week's actual totals against target afterward.
-function generateRecommendedDayExercises(type: string, trainingType: TrainingType, weekDayTypes: string[]): ProgramExercise[] {
-  const exerciseIds = DAY_TYPE_EXERCISES[type] || [];
+//
+// exerciseIds is passed in already deduped for the week (see dedupeWeekExerciseIds) rather than
+// read directly from DAY_TYPE_EXERCISES[type], but occurrencesThisWeek below still keys off
+// DAY_TYPE_EXERCISES[dt] (the type's canonical muscle composition) since substitution never
+// changes which muscle a slot targets, only which specific exercise fills it.
+function generateRecommendedDayExercises(exerciseIds: string[], trainingType: TrainingType, weekDayTypes: string[]): ProgramExercise[] {
   const byMuscle: Record<string, string[]> = {};
   exerciseIds.forEach(id => { const m = EXLIB[id].muscle; (byMuscle[m] = byMuscle[m] || []).push(id); });
   const mult = TRAINING_MULT[trainingType];
@@ -164,13 +235,17 @@ function balanceWeeklyVolume(days: ProgramDays, dayOrder: string[], trainingType
 export function buildProgramFromPreset(preset: SplitPreset, trainingType: TrainingType, prefill: WizardPrefill = 'recommended'): { days: ProgramDays; dayOrder: string[] } {
   const days: ProgramDays = {}; const dayOrder: string[] = [];
   const weekDayTypes = preset.days.map(d => d.type).filter(t => t !== 'rest');
+  const dedupedIdsByTrainingDay = dedupeWeekExerciseIds(weekDayTypes);
+  let trainingDayIdx = 0;
   preset.days.forEach((d, i) => {
     const key = preset.id + '_' + i;
+    const isRest = d.type === 'rest';
+    const dayExerciseIds = isRest ? [] : dedupedIdsByTrainingDay[trainingDayIdx++];
     days[key] = {
       key, label: DAY_TYPE_LABELS[d.type] || 'Training Day', dow: WEEKDAYS[i % 7],
-      kind: d.type === 'rest' ? 'rest' : 'training', skipped: false,
+      kind: isRest ? 'rest' : 'training', skipped: false,
       theme: DAY_TYPE_THEME[d.type] || (Object.keys(MUSCLE_TARGETS) as Muscle[]),
-      exercises: (d.type === 'rest' || prefill === 'scratch') ? [] : generateRecommendedDayExercises(d.type, trainingType, weekDayTypes)
+      exercises: (isRest || prefill === 'scratch') ? [] : generateRecommendedDayExercises(dayExerciseIds, trainingType, weekDayTypes)
     };
     dayOrder.push(key);
   });

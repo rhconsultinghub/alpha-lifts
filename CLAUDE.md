@@ -320,17 +320,26 @@ as a sample if every exercise in it was actually logged (`badgeText === 'Logged'
 purely because exercises were skipped mid-session can never drag the estimate down, while an
 exercise genuinely removed from the day's plan changes the exercise count, drops all pre-removal
 history out of the sample pool, and the estimate correctly shrinks via the formula recomputing
-with one fewer exercise.
+with one fewer exercise; (12) default-plan exercise variety — premade splits previously let the
+same exercise land on more than one day in a week (e.g. a 6-day PPL split's two Push days used the
+exact same five exercises, since `DAY_TYPE_EXERCISES[type]` in `wizard.ts` is a fixed list keyed
+only by day type). `buildProgramFromPreset()` now runs `dedupeWeekExerciseIds()` across the whole
+week before generating each day, substituting a same-muscle alternate from `POOL_BY_MUSCLE`
+(every exercise id used anywhere in `DAY_TYPE_EXERCISES`, plus `EXTRA_POOL_MUSCLES` — a few
+muscles like Core/Calves/Glutes only had one exercise in the base pool, not enough to de-duplicate
+a muscle trained 3-4x in one week) whenever an id would otherwise repeat, so day themes and the
+phase-7 set-count balancing are unaffected — only which specific exercise fills a slot changes.
+Tracks used-this-day separately from used-across-week to avoid a subtle bug where fixing a
+cross-day collision could introduce a new duplicate *within* the day being generated (a day type
+can have two slots for the same muscle, e.g. "arms" has two Biceps exercises). Verified via a
+scratch `.verify/` audit script (deleted after use, per the pattern below) across every
+split-preset x training-type combination: only one unavoidable duplicate remains anywhere
+(`face_pull` on the Full Body split, which trains Rear Delts 3x/week against a library that only
+has two Rear-Delts-primary exercises total), and weekly volume %/day-time numbers are byte-for-byte
+identical to before the change, confirming the fix only reshuffles which exercise fills a slot.
 
-## Open/pending work as of this handoff
-
-Working a punch list from user feedback on phases 8-10 above. Still open:
-- **Default-plan exercise variety** — premade splits currently allow the same exercise to be
-  selected for more than one day in the same plan (`DAY_TYPE_EXERCISES` in `wizard.ts`). User
-  wants more deliberate/varied exercise selection per day so plans don't repeat the same movement
-  needlessly. Re-run the `.verify/`-style per-split/per-training-type audit (volume % + day time,
-  see phase 7 above) after any change here, since exercise selection interacts with the
-  set-count-rebalancing logic from phase 7 and could regress it.
-
-Ask the user before starting any of the above if picking this up cold — confirm which item(s)
-they want next, since this list was captured mid-session and priority order wasn't specified.
+All items from that punch list are done as of this handoff — nothing currently open. If new
+feedback comes in, add it here the same way phases 7-12 were captured, and re-run a
+`.verify/`-style per-split/per-training-type audit script (volume % + day time, see phase 7) after
+any change that touches exercise selection or set counts, since those two interact and can regress
+each other silently.
