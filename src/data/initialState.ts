@@ -53,6 +53,7 @@ export function createInitialState(): AppState {
 
     restAlertSound: true,
     restAlertVibrate: true,
+    restAlertNotify: false,
 
     progressMetric: 'weight',
 

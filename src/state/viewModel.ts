@@ -95,8 +95,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
     warmupStyleDesc: 'Minimal skips warm-up suggestions entirely; Cautious adds an extra ramp-up set on heavy lifts.',
     restAlertSound: s.restAlertSound,
     restAlertVibrate: s.restAlertVibrate,
+    restAlertNotify: s.restAlertNotify,
     toggleRestAlertSound: () => actions.setRestAlertSound(!s.restAlertSound),
     toggleRestAlertVibrate: () => actions.setRestAlertVibrate(!s.restAlertVibrate),
+    toggleRestAlertNotify: () => actions.setRestAlertNotify(!s.restAlertNotify),
     exportBackup: actions.exportBackup,
     pendingBackupImport: !!s.pendingBackupImport,
     confirmBackupImport: actions.confirmBackupImport,
@@ -230,7 +232,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       exercises: day.exercises.map((ex, i) => {
         const lib = EXLIB[ex.id];
         const equip = lib.equip[ex.equipIdx];
-        const r = recommendation(ex, s.units, s.coachVoice);
+        const r = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id]);
         const isTime = lib.trackingMode === 'time';
         return {
           id: ex.id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label,
@@ -252,8 +254,16 @@ export function buildViewModel(state: AppState, actions: Actions) {
     builderExercises = day.exercises.map((ex, i) => {
       const lib = EXLIB[ex.id];
       const equip = lib.equip[ex.equipIdx];
+      const prev = day.exercises[i - 1];
       const next = day.exercises[i + 1];
+      const isLinkedToPrev = !!(ex.supersetGroup && prev && ex.supersetGroup === prev.supersetGroup);
       const isLinkedToNext = !!(ex.supersetGroup && next && ex.supersetGroup === next.supersetGroup);
+      // linked to something other than the immediate neighbor shown by the Prev/Next pills — call
+      // it out by name so re-linking via those pills doesn't silently steal the exercise away from
+      // a pairing the user can't otherwise see from this row.
+      const elsewherePartner = (ex.supersetGroup && !isLinkedToPrev && !isLinkedToNext)
+        ? day.exercises.find((e, k) => k !== i && e.supersetGroup === ex.supersetGroup)
+        : null;
       return {
         id: ex.id, name: lib.name, muscle: lib.muscle, equipLabel: equip.label, sets: ex.sets,
         repText: lib.trackingMode === 'time' ? formatSetTime(lib.repLo) + '-' + formatSetTime(lib.repHi) + ' hold' : lib.repLo + '-' + lib.repHi + ' reps',
@@ -263,9 +273,13 @@ export function buildViewModel(state: AppState, actions: Actions) {
         openDetail: () => actions.openDetail(dayKey, i),
         openEquip: () => actions.openSwap(dayKey, i, 'equip', false),
         openReplace: () => actions.openSwap(dayKey, i, 'replace', false),
+        canLinkPrev: !!prev,
+        isLinkedToPrev,
+        toggleLinkPrev: () => actions.toggleSuperset(dayKey, i - 1, i),
         canLinkNext: !!next,
         isLinkedToNext,
-        toggleLinkNext: () => actions.toggleSuperset(dayKey, i)
+        toggleLinkNext: () => actions.toggleSuperset(dayKey, i, i + 1),
+        linkedElsewhereName: elsewherePartner ? EXLIB[elsewherePartner.id].name : null
       };
     });
   }
@@ -279,7 +293,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
     const ex = dayExercises[exIndex];
     const lib = EXLIB[ex.id];
     const equip = lib.equip[ex.equipIdx];
-    const rec = recommendation(ex, s.units, s.coachVoice);
+    const exHistory = s.exerciseHistory[ex.id];
+    const rec = recommendation(ex, s.units, s.coachVoice, exHistory);
     const warmupRaw = warmupInfo(ex, s.warmupStyle);
     const warmup = warmupRaw ? {
       show: true, note: warmupRaw.note,
@@ -336,13 +351,20 @@ export function buildViewModel(state: AppState, actions: Actions) {
       addSet: actions.addSet,
       warmup, unitsLabel: currentUnitsLabel,
       isTime: lib.trackingMode === 'time',
-      sets: currentSets.map((row, i) => {
+      sets: (() => {
+        // same cross-day preference as effectiveLast()/recommendation() above: the most recent
+        // logged session for this exercise, regardless of which program day it was done on, beats
+        // this slot's own (possibly stale) lastSets.
+        const latestHistoryEntry = exHistory && exHistory.length ? exHistory[exHistory.length - 1] : null;
+        const lastSetsArr = (latestHistoryEntry && latestHistoryEntry.sets && latestHistoryEntry.sets.length)
+          ? latestHistoryEntry.sets
+          : (ex.lastSets && ex.lastSets.length) ? ex.lastSets : (ex.last ? Array(ex.sets).fill({ weight: ex.last.weight, reps: ex.last.reps }) : []);
+        return currentSets.map((row, i) => {
         const isTime = lib.trackingMode === 'time';
         const step = weightStep(s.units);
         const dispWeight = s.units === 'lb' ? Math.round((row.weight * 2.20462) / 5) * 5 : Math.round(row.weight * 2) / 2;
         const plates = equip.v === 'barbell' ? platesBreakdown(dispWeight, s.units) : null;
         const platesText = plates ? plates.join(' + ') + ' per side' : '';
-        const lastSetsArr = (ex.lastSets && ex.lastSets.length) ? ex.lastSets : (ex.last ? Array(ex.sets).fill({ weight: ex.last.weight, reps: ex.last.reps }) : []);
         const lastRow = lastSetsArr[i] || lastSetsArr[lastSetsArr.length - 1];
         return {
           num: i + 1,
@@ -373,7 +395,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
             select: () => actions.setSetRir(i, v)
           }))
         };
-      })
+        });
+      })()
     };
   }
 
@@ -423,7 +446,16 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const sel = id === staged;
       return { label: lib.name, muscle: lib.muscle, check: sel ? '●' : '', bg: sel ? 'oklch(0.65 0.19 35 / 0.15)' : 'rgba(255,255,255,.04)', border: sel ? 'oklch(0.65 0.19 35 / 0.6)' : 'rgba(255,255,255,.08)', stage: () => actions.swapStageEx(id) };
     };
-    const allIds = Object.keys(EXLIB).filter(id => id !== excludeId && theme.includes(EXLIB[id].muscle));
+    // search matches by exercise name or muscle (e.g. typing "row" finds every row variant,
+    // typing "chest" finds every chest exercise) — filters within the existing variant/same-
+    // muscle/other-muscle groupings rather than replacing them.
+    const swapQuery = (s.swap.query || '').trim().toLowerCase();
+    const matchesSwapQuery = (id: string) => {
+      if (!swapQuery) return true;
+      const lib = EXLIB[id];
+      return lib.name.toLowerCase().includes(swapQuery) || lib.muscle.toLowerCase().includes(swapQuery);
+    };
+    const allIds = Object.keys(EXLIB).filter(id => id !== excludeId && theme.includes(EXLIB[id].muscle) && matchesSwapQuery(id));
     const variantIds = isAdd ? [] : allIds.filter(id => EXLIB[id].pattern === excludePattern);
     const variantOptions = variantIds.map(mkOpt);
     const nonVariantIds = allIds.filter(id => !variantIds.includes(id));
@@ -449,9 +481,12 @@ export function buildViewModel(state: AppState, actions: Actions) {
       variantOptions,
       sameMuscleOptions: replaceSame,
       otherMuscleOptions: replaceOther,
-      showAll: isAdd || s.swap.showAll,
+      showAll: isAdd || s.swap.showAll || !!swapQuery,
       showAllLabel: s.swap.showAll ? 'Hide other muscle groups' : 'Show all muscle groups',
       toggleAll: actions.swapToggleAll,
+      query: s.swap.query || '',
+      setQuery: (v: string) => actions.setSwapQuery(v),
+      noMatches: !!swapQuery && !variantOptions.length && !replaceSame.length && !replaceOther.length,
       confirmDisabled, confirm: actions.swapConfirm,
       confirmBg: confirmDisabled ? 'rgba(255,255,255,.15)' : ACCENT,
       confirmLabel: isAdd ? 'Add to Day' : (tab === 'equip' ? 'Confirm Equipment Change' : 'Confirm Exercise Swap')
@@ -484,7 +519,13 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const sel = id === staged;
       return { label: lib.name, muscle: lib.muscle, check: sel ? '●' : '', bg: sel ? 'oklch(0.65 0.19 35 / 0.15)' : 'rgba(255,255,255,.04)', border: sel ? 'oklch(0.65 0.19 35 / 0.6)' : 'rgba(255,255,255,.08)', stage: () => actions.muscleSwapStageEx(id) };
     };
-    const allIds = Object.keys(EXLIB).filter(id => id !== ms.exId && theme.has(EXLIB[id].muscle));
+    const muscleSwapQuery = (ms.query || '').trim().toLowerCase();
+    const matchesMuscleSwapQuery = (id: string) => {
+      if (!muscleSwapQuery) return true;
+      const lib = EXLIB[id];
+      return lib.name.toLowerCase().includes(muscleSwapQuery) || lib.muscle.toLowerCase().includes(muscleSwapQuery);
+    };
+    const allIds = Object.keys(EXLIB).filter(id => id !== ms.exId && theme.has(EXLIB[id].muscle) && matchesMuscleSwapQuery(id));
     const variantIds = allIds.filter(id => EXLIB[id].pattern === currentLib.pattern);
     const variantOptions = variantIds.map(mkOpt);
     const nonVariantIds = allIds.filter(id => !variantIds.includes(id));
@@ -500,7 +541,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
       hasVariants: variantOptions.length > 0,
       variantOptions,
       sameMuscleOptions, otherMuscleOptions,
-      showAll: ms.showAll,
+      query: ms.query || '',
+      setQuery: (v: string) => actions.muscleSwapSetQuery(v),
+      noMatches: !!muscleSwapQuery && !variantOptions.length && !sameMuscleOptions.length && !otherMuscleOptions.length,
+      showAll: ms.showAll || !!muscleSwapQuery,
       showAllLabel: ms.showAll ? 'Hide other muscle groups' : 'Show all muscle groups',
       toggleAll: actions.muscleSwapToggleAll,
       confirmDisabled: !staged,

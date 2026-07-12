@@ -101,10 +101,13 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
           </div>
 
           <div style={{ font: "500 12px 'Inter'", color: 'rgba(245,240,234,.75)', marginBottom: 4 }}>Rest Alerts</div>
-          <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginBottom: 8 }}>Get a nudge when your rest timer runs out, even if you're not looking at the screen.</div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+          <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginBottom: 8 }}>Sound and Vibrate only work while Alpha Lifts is the app you're actively looking at — that's a browser restriction, not a setting. Notify is the one that can still reach you if you've switched to another app during your rest period.</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <button onClick={st.toggleRestAlertSound} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: st.restAlertSound ? 'oklch(0.65 0.19 35)' : 'rgba(255,255,255,.06)', color: st.restAlertSound ? '#0d0c0b' : 'rgba(245,240,234,.7)' }}>{st.restAlertSound ? '🔊 Sound On' : '🔇 Sound Off'}</button>
             <button onClick={st.toggleRestAlertVibrate} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: st.restAlertVibrate ? 'oklch(0.65 0.19 35)' : 'rgba(255,255,255,.06)', color: st.restAlertVibrate ? '#0d0c0b' : 'rgba(245,240,234,.7)' }}>{st.restAlertVibrate ? '📳 Vibrate On' : 'Vibrate Off'}</button>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+            <button onClick={st.toggleRestAlertNotify} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: st.restAlertNotify ? 'oklch(0.65 0.19 35)' : 'rgba(255,255,255,.06)', color: st.restAlertNotify ? '#0d0c0b' : 'rgba(245,240,234,.7)' }}>{st.restAlertNotify ? '🔔 Notify On' : '🔕 Notify Off'}</button>
           </div>
 
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>REMINDERS</div>

@@ -98,6 +98,11 @@ export interface WorkoutState {
   resting: boolean;
   restRemaining: number;
   restTotal: number;
+  // absolute epoch-ms the rest period ends — restRemaining is derived from this rather than
+  // decremented tick-by-tick, so a throttled/delayed interval (backgrounded tab, minimized PWA)
+  // still resolves to the correct remaining time the moment it's next able to run, instead of
+  // drifting based on how many 1s ticks it actually got to fire.
+  restEndAt: number | null;
   startedAt: number;
 }
 
@@ -139,6 +144,7 @@ export interface SwapState {
   stagedExId: string | null;
   showAll: boolean;
   isAdd: boolean;
+  query: string;
 }
 
 // quick "switch exercise" from the muscle drill-down: unlike SwapState (single day/exercise
@@ -150,6 +156,7 @@ export interface MuscleSwapState {
   selectedDayKeys: string[];
   stagedExId: string | null;
   showAll: boolean;
+  query: string;
 }
 
 export interface PendingPlanUpdate {
@@ -249,6 +256,10 @@ export interface AppState {
   // ---------- rest-timer alerts ----------
   restAlertSound: boolean;
   restAlertVibrate: boolean;
+  // separate from Sound/Vibrate: a Notification can display even while the app is backgrounded (as
+  // long as its JS is still running to trigger it), unlike vibrate (browser-restricted to visible
+  // documents) or WebAudio (suspended in background tabs on most browsers) — see state/alerts.ts.
+  restAlertNotify: boolean;
 
   // ---------- Progress tab: weight vs. estimated-1RM chart metric ----------
   progressMetric: 'weight' | 'e1rm';

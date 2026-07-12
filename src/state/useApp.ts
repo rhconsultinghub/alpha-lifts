@@ -12,7 +12,7 @@ import {
   recommendation, restForExercise, dayMuscleRanks, isWeekComplete, fmtWeight,
   nextIncompleteIndex, defaultCompareLiftIds, bestSetScore
 } from './logic';
-import { vibrateRestEnd, playRestEndSound } from './alerts';
+import { vibrateRestEnd, playRestEndSound, notifyRestEnd } from './alerts';
 import { shouldFireReminder, fireReminder } from './reminders';
 
 const STORAGE_KEY = 'fitness-app-state-v1';
@@ -164,6 +164,12 @@ export function useApp() {
   // ---------- rest-timer alerts ----------
   const setRestAlertSound = useCallback((v: boolean) => setState(s => ({ ...s, restAlertSound: v })), []);
   const setRestAlertVibrate = useCallback((v: boolean) => setState(s => ({ ...s, restAlertVibrate: v })), []);
+  const setRestAlertNotify = useCallback((v: boolean) => {
+    if (v && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+    setState(s => ({ ...s, restAlertNotify: v }));
+  }, []);
 
   // ---------- reminder notifications ----------
   const setRemindersEnabled = useCallback((v: boolean) => {
@@ -476,9 +482,10 @@ export function useApp() {
 
   // ---------- swap modal ----------
   const openSwap = useCallback((dayKey: string, exIndex: number, tab: 'equip' | 'replace', isAdd: boolean) => {
-    setState(s => ({ ...s, swap: { dayKey, exIndex, tab, stagedEquipIdx: null, stagedExId: null, showAll: false, isAdd: !!isAdd } }));
+    setState(s => ({ ...s, swap: { dayKey, exIndex, tab, stagedEquipIdx: null, stagedExId: null, showAll: false, isAdd: !!isAdd, query: '' } }));
   }, []);
   const closeSwap = useCallback(() => setState(s => ({ ...s, swap: null })), []);
+  const setSwapQuery = useCallback((q: string) => setState(s => (s.swap ? { ...s, swap: { ...s.swap, query: q } } : s)), []);
   const swapTab = useCallback((tab: 'equip' | 'replace') => setState(s => (s.swap ? { ...s, swap: { ...s.swap, tab, stagedEquipIdx: null, stagedExId: null } } : s)), []);
   const swapToggleAll = useCallback(() => setState(s => (s.swap ? { ...s, swap: { ...s.swap, showAll: !s.swap.showAll } } : s)), []);
   const swapStageEquip = useCallback((idx: number) => setState(s => (s.swap ? { ...s, swap: { ...s.swap, stagedEquipIdx: idx } } : s)), []);
@@ -488,7 +495,7 @@ export function useApp() {
   const openMuscleSwap = useCallback((dayKey: string, exId: string) => {
     setState(s => {
       const dayKeys = s.dayOrder.filter(k => s.program[k] && s.program[k].exercises.some(e => e.id === exId));
-      return { ...s, muscleSwap: { exId, dayKeys, selectedDayKeys: [dayKey], stagedExId: null, showAll: false } };
+      return { ...s, muscleSwap: { exId, dayKeys, selectedDayKeys: [dayKey], stagedExId: null, showAll: false, query: '' } };
     });
   }, []);
   const closeMuscleSwap = useCallback(() => setState(s => ({ ...s, muscleSwap: null })), []);
@@ -502,6 +509,7 @@ export function useApp() {
     });
   }, []);
   const muscleSwapToggleAll = useCallback(() => setState(s => (s.muscleSwap ? { ...s, muscleSwap: { ...s.muscleSwap, showAll: !s.muscleSwap.showAll } } : s)), []);
+  const muscleSwapSetQuery = useCallback((q: string) => setState(s => (s.muscleSwap ? { ...s, muscleSwap: { ...s.muscleSwap, query: q } } : s)), []);
   const muscleSwapStageEx = useCallback((id: string) => setState(s => (s.muscleSwap ? { ...s, muscleSwap: { ...s.muscleSwap, stagedExId: id } } : s)), []);
   const muscleSwapConfirm = useCallback(() => {
     setState(s => {
@@ -536,14 +544,14 @@ export function useApp() {
           const newEx = mkEx(swap.stagedExId, 3, 0, { weight: 0, reps: lib.repHi, hitTop: true });
           const dayExercises = [...s.workout.dayExercises, newEx];
           const newIdx = dayExercises.length - 1;
-          const rec = recommendation(newEx, s.units, s.coachVoice);
+          const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id]);
           const sets: WorkoutSetRow[] = [];
           for (let i = 0; i < newEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
           const exSets = { ...s.workout.exSets, [newIdx]: sets };
           const restTotal = restTotalFor(dayExercises, newIdx, s.restPacing);
           return {
             ...s,
-            workout: { ...s.workout, dayExercises, exIndex: newIdx, exSets, changesMade: s.workout.changesMade + 1, resting: false, restRemaining: 0, restTotal },
+            workout: { ...s.workout, dayExercises, exIndex: newIdx, exSets, changesMade: s.workout.changesMade + 1, resting: false, restRemaining: 0, restEndAt: null, restTotal },
             swap: null
           };
         }
@@ -560,7 +568,7 @@ export function useApp() {
         if (swap.tab === 'replace' && oldEx.supersetGroup) {
           dayExercises = dayExercises.map(e => (e.supersetGroup === oldEx.supersetGroup ? { ...e, supersetGroup: null } : e));
         }
-        const rec = recommendation(newEx, s.units, s.coachVoice);
+        const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id]);
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < newEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         const exSets = { ...s.workout.exSets, [idx]: sets };
@@ -612,13 +620,13 @@ export function useApp() {
       // would otherwise show an empty working-sets list — build its default sets now.
       if (!exSets[exIndex]) {
         const landedEx = dayExercises[exIndex];
-        const rec = recommendation(landedEx, s.units, s.coachVoice);
+        const rec = recommendation(landedEx, s.units, s.coachVoice, s.exerciseHistory[landedEx.id]);
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < landedEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         exSets[exIndex] = sets;
       }
       const restTotal = restTotalFor(dayExercises, exIndex, s.restPacing);
-      return { ...s, workout: { ...s.workout, dayExercises, exSets, exIndex, resting: false, restRemaining: 0, restTotal, changesMade: s.workout.changesMade + 1 } };
+      return { ...s, workout: { ...s.workout, dayExercises, exSets, exIndex, resting: false, restRemaining: 0, restEndAt: null, restTotal, changesMade: s.workout.changesMade + 1 } };
     });
   }, []);
 
@@ -627,18 +635,32 @@ export function useApp() {
   // group id) — or unlinks both if they're already linked. Scoped to pairs, not arbitrary
   // N-exercise circuits, to keep the workout-flow state machine (one active exercise at a time)
   // tractable — see toggleSetDone below for how the pairing changes rest behavior mid-workout.
-  const toggleSuperset = useCallback((dayKey: string, idx: number) => {
+  // Links exercise idxA with idxB (any two slots in the day, not just adjacent ones — the workout-
+  // flow logic in toggleSetDone/restTotalFor below only ever looks up a partner by matching
+  // supersetGroup, never by position, so non-adjacent pairing already works with no further
+  // changes needed there). Calling this again on the same pair unlinks both. Calling it when either
+  // side is already linked to a *different* exercise re-links: the old pair is broken first, so an
+  // exercise is never a member of more than one pair at a time.
+  const toggleSuperset = useCallback((dayKey: string, idxA: number, idxB: number) => {
     setState(s => {
       const program = JSON.parse(JSON.stringify(s.program));
       const exercises = program[dayKey].exercises;
-      const a = exercises[idx], b = exercises[idx + 1];
+      const a = exercises[idxA], b = exercises[idxB];
       if (!a || !b) return s;
       if (a.supersetGroup && a.supersetGroup === b.supersetGroup) {
         a.supersetGroup = null; b.supersetGroup = null;
-      } else {
-        const gid = 'ss' + Date.now();
-        a.supersetGroup = gid; b.supersetGroup = gid;
+        return { ...s, program };
       }
+      if (a.supersetGroup) {
+        const oldPartner = exercises.find((e: ProgramExercise, i: number) => i !== idxA && e.supersetGroup === a.supersetGroup);
+        if (oldPartner) oldPartner.supersetGroup = null;
+      }
+      if (b.supersetGroup) {
+        const oldPartner = exercises.find((e: ProgramExercise, i: number) => i !== idxB && e.supersetGroup === b.supersetGroup);
+        if (oldPartner) oldPartner.supersetGroup = null;
+      }
+      const gid = 'ss' + Date.now();
+      a.supersetGroup = gid; b.supersetGroup = gid;
       return { ...s, program };
     });
   }, []);
@@ -673,19 +695,48 @@ export function useApp() {
       let exSets = prevExSets;
       if (!exSets[exIndex]) {
         const ex = s.workout.dayExercises[exIndex];
-        const rec = recommendation(ex, s.units, s.coachVoice);
+        const rec = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id]);
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < ex.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         exSets = { ...prevExSets, [exIndex]: sets };
       }
       const restTotal = restTotalFor(s.workout.dayExercises, exIndex, s.restPacing);
-      return { ...s, workout: { ...s.workout, exIndex, exSets, resting: false, restRemaining: 0, restTotal }, confirmEndEarly: false };
+      return { ...s, workout: { ...s.workout, exIndex, exSets, resting: false, restRemaining: 0, restEndAt: null, restTotal }, confirmEndEarly: false };
     });
   }, []);
 
   const stopRest = useCallback(() => {
     if (restInterval.current) { window.clearInterval(restInterval.current); restInterval.current = null; }
   }, []);
+
+  // Shared by the 1s interval and the visibilitychange resync below, so a throttled/suspended
+  // interval (backgrounded tab, minimized PWA) still resolves correctly the moment either one next
+  // gets to run — remaining time is always derived from the absolute restEndAt, never decremented,
+  // so there's nothing to drift or double-count between the two call sites.
+  const restTick = useCallback(() => {
+    setState(s => {
+      if (!s.workout || !s.workout.resting || s.workout.restEndAt == null) return s;
+      const remainingMs = s.workout.restEndAt - Date.now();
+      if (remainingMs <= 0) {
+        if (restInterval.current) { window.clearInterval(restInterval.current); restInterval.current = null; }
+        if (s.restAlertVibrate) vibrateRestEnd();
+        if (s.restAlertSound) playRestEndSound();
+        if (s.restAlertNotify) notifyRestEnd();
+        return { ...s, workout: { ...s.workout, resting: false, restRemaining: 0, restEndAt: null } };
+      }
+      return { ...s, workout: { ...s.workout, restRemaining: Math.round(remainingMs / 1000) } };
+    });
+  }, []);
+
+  // Vibrate/WebAudio are both restricted to a visible document by the browser (vibrate no-ops
+  // outright when hidden; WebAudio typically self-suspends) — resyncing on visibilitychange is
+  // mainly what makes the Notification alert (the one channel that *can* reach a backgrounded app)
+  // fire promptly rather than only whenever the throttled interval next happens to tick.
+  useEffect(() => {
+    const onVisibilityChange = () => { if (document.visibilityState === 'visible') restTick(); };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [restTick]);
 
   const switchExercise = useCallback((exIndex: number) => {
     stopRest();
@@ -701,14 +752,14 @@ export function useApp() {
       program[dayKey].lastCompletedAt = null;
       const dayExercises: ProgramExercise[] = JSON.parse(JSON.stringify(program[dayKey].exercises));
       const ex0 = dayExercises[0];
-      const rec0 = recommendation(ex0, s.units, s.coachVoice);
+      const rec0 = recommendation(ex0, s.units, s.coachVoice, s.exerciseHistory[ex0.id]);
       const sets0: WorkoutSetRow[] = [];
       for (let i = 0; i < ex0.sets; i++) sets0.push({ weight: rec0.weight, reps: rec0.reps, done: false });
       return {
         ...s, program, screen: 'workout' as Screen,
         workout: {
           dayKey, exIndex: 0, exSets: { 0: sets0 }, dayExercises, changesMade: 0,
-          resting: false, restRemaining: 0, restTotal: restTotalFor(dayExercises, 0, s.restPacing), startedAt: Date.now()
+          resting: false, restRemaining: 0, restEndAt: null, restTotal: restTotalFor(dayExercises, 0, s.restPacing), startedAt: Date.now()
         }
       };
     });
@@ -717,32 +768,25 @@ export function useApp() {
 
   const startRest = useCallback(() => {
     stopRest();
-    setState(s => (s.workout ? { ...s, workout: { ...s.workout, resting: true, restRemaining: s.workout.restTotal } } : s));
-    restInterval.current = window.setInterval(() => {
-      setState(s => {
-        if (!s.workout || !s.workout.resting) return s;
-        const r = s.workout.restRemaining - 1;
-        if (r <= 0) {
-          if (restInterval.current) { window.clearInterval(restInterval.current); restInterval.current = null; }
-          if (s.restAlertVibrate) vibrateRestEnd();
-          if (s.restAlertSound) playRestEndSound();
-          return { ...s, workout: { ...s.workout, resting: false, restRemaining: 0 } };
-        }
-        return { ...s, workout: { ...s.workout, restRemaining: r } };
-      });
-    }, 1000);
-  }, [stopRest]);
+    setState(s => {
+      if (!s.workout) return s;
+      const restEndAt = Date.now() + s.workout.restTotal * 1000;
+      return { ...s, workout: { ...s.workout, resting: true, restRemaining: s.workout.restTotal, restEndAt } };
+    });
+    restInterval.current = window.setInterval(restTick, 1000);
+  }, [stopRest, restTick]);
 
   const restAdjust = useCallback((delta: number) => {
     setState(s => {
       if (!s.workout) return s;
       const restRemaining = Math.max(0, s.workout.restRemaining + delta);
-      return { ...s, workout: { ...s.workout, restRemaining, restTotal: Math.max(s.workout.restTotal, restRemaining) } };
+      const restEndAt = s.workout.restEndAt != null ? s.workout.restEndAt + delta * 1000 : null;
+      return { ...s, workout: { ...s.workout, restRemaining, restTotal: Math.max(s.workout.restTotal, restRemaining), restEndAt } };
     });
   }, []);
   const restSkip = useCallback(() => {
     stopRest();
-    setState(s => (s.workout ? { ...s, workout: { ...s.workout, resting: false, restRemaining: 0 } } : s));
+    setState(s => (s.workout ? { ...s, workout: { ...s.workout, resting: false, restRemaining: 0, restEndAt: null } } : s));
   }, [stopRest]);
 
   const setSetField = useCallback((i: number, field: 'weight' | 'reps', val: number) => {
@@ -846,7 +890,11 @@ export function useApp() {
           const isBodyweight = equip.v === 'bodyweight' || equip.v === 'assisted';
           const isTime = lib.trackingMode === 'time';
           const prior = s.exerciseHistory[ex.id] || [];
-          if (prior.length > 0) {
+          // a first-ever log has nothing to beat, so it's a PR by default — otherwise compare
+          // against the best prior session the same way bestSetScore is used for the e1RM metric.
+          if (prior.length === 0) {
+            isPR = true;
+          } else {
             const bestThisSession = Math.max(...doneSets.map(r => bestSetScore(r.weight, r.reps, isTime, isBodyweight)));
             const bestPrior = Math.max(...prior.map(p => bestSetScore(p.weight, p.reps, isTime, isBodyweight)));
             isPR = bestThisSession > bestPrior;
@@ -949,7 +997,7 @@ export function useApp() {
       setTrainingType, openSettings, closeSettings, setUnits, setRestPacing, setCoachVoice, setWarmupStyle,
       renameProgram, toggleSkipDay, dismissDeloadSuggestion,
       exportBackup, stageBackupImport, cancelBackupImport, confirmBackupImport,
-      setRestAlertSound, setRestAlertVibrate, setRemindersEnabled, setReminderTime,
+      setRestAlertSound, setRestAlertVibrate, setRestAlertNotify, setRemindersEnabled, setReminderTime,
       setBodyWeightInput, logBodyWeight,
       switchProgram, newProgram, requestRemoveProgram, renameSavedProgram,
       openNewProgramWizard, closeNewProgramWizard, setWizardField, setWizardPrefill, selectWizardSplit,
@@ -960,8 +1008,8 @@ export function useApp() {
       openLibraryDetail, closeLibraryDetail, setExerciseSearchQuery, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,
       setExerciseFormField, toggleFormMuscle, toggleFormSecondary, toggleFormEquip, saveExerciseForm,
       requestDeleteExercise, deleteExercise,
-      openSwap, closeSwap, swapTab, swapToggleAll, swapStageEquip, swapStageEx, swapConfirm, removeWorkoutExercise,
-      openMuscleSwap, closeMuscleSwap, toggleMuscleSwapDay, muscleSwapToggleAll, muscleSwapStageEx, muscleSwapConfirm,
+      openSwap, closeSwap, swapTab, swapToggleAll, swapStageEquip, swapStageEx, swapConfirm, removeWorkoutExercise, setSwapQuery,
+      openMuscleSwap, closeMuscleSwap, toggleMuscleSwapDay, muscleSwapToggleAll, muscleSwapStageEx, muscleSwapConfirm, muscleSwapSetQuery,
       removeExercise, changeSets, toggleSuperset,
       startWorkout, switchExercise, setSetField, setSetRir, bumpSetField, toggleSetDone, addSet, removeSet,
       restAdjust, restSkip, advance, applyPlanUpdate, discardPlanUpdate,

@@ -31,19 +31,37 @@ export function MuscleSwapModal({ vm }: { vm: ViewModel }) {
             ))}
           </div>
 
-          {ms.hasVariants && (
+          <input
+            value={ms.query}
+            onChange={e => ms.setQuery(e.target.value)}
+            placeholder="Search by exercise or muscle…"
+            style={{ width: '100%', background: 'rgba(255,255,255,.07)', border: 'none', borderRadius: 10, padding: '10px 12px', color: '#f5f0ea', font: "500 13px 'Inter'", marginBottom: 12 }}
+          />
+          {ms.noMatches ? (
+            <div style={{ padding: '16px 0', textAlign: 'center', font: "500 12px 'Inter'", color: 'rgba(245,240,234,.4)' }}>No exercises match "{ms.query}".</div>
+          ) : (
             <>
-              <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>SAME MOVEMENT, DIFFERENT EQUIPMENT</div>
-              {ms.variantOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
-            </>
-          )}
-          <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>SAME MUSCLE GROUP</div>
-          {ms.sameMuscleOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
-          <button onClick={ms.toggleAll} style={{ background: 'none', border: 'none', color: 'oklch(0.72 0.15 35)', font: "600 12px 'Inter'", padding: '6px 0 10px' }}>{ms.showAllLabel}</button>
-          {ms.showAll && (
-            <>
-              <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>OTHER MUSCLE GROUPS</div>
-              {ms.otherMuscleOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+              {ms.hasVariants && (
+                <>
+                  <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>SAME MOVEMENT, DIFFERENT EQUIPMENT</div>
+                  {ms.variantOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+                </>
+              )}
+              {ms.sameMuscleOptions.length > 0 && (
+                <>
+                  <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>SAME MUSCLE GROUP</div>
+                  {ms.sameMuscleOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+                </>
+              )}
+              {!ms.query && (
+                <button onClick={ms.toggleAll} style={{ background: 'none', border: 'none', color: 'oklch(0.72 0.15 35)', font: "600 12px 'Inter'", padding: '6px 0 10px' }}>{ms.showAllLabel}</button>
+              )}
+              {ms.showAll && ms.otherMuscleOptions.length > 0 && (
+                <>
+                  <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>OTHER MUSCLE GROUPS</div>
+                  {ms.otherMuscleOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+                </>
+              )}
             </>
           )}
         </div>

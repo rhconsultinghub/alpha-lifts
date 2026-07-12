@@ -404,3 +404,98 @@ genuinely different numbers (not just a label swap), the plate breakdown appeari
 correctly by equipment and weight, backup export/import round-tripping a real state object, and the
 deload banner both appearing (synthetic flat-history test data) and dismissing correctly. Zero
 console or dev-server errors throughout.
+
+(14) same-session follow-up round on user feedback about phase 13:
+- **Superset linking generalized** — `toggleSuperset(dayKey, idxA, idxB)` in `useApp.ts` now takes
+  two explicit indices instead of always assuming `idx+1`; the workout-flow partner lookup
+  (`toggleSetDone`, `restTotalFor`) already matched by `supersetGroup` rather than position, so this
+  needed no changes there. `DayBuilderScreen` now shows both "Link Previous" and "Link Next" pills
+  per row (previously next-only), and re-linking either side of an existing pair breaks the old pair
+  first so an exercise is never in two groups at once.
+- **Rest alerts while backgrounded** — `WorkoutState.restEndAt` (absolute epoch-ms) replaced tick-
+  by-tick countdown decrementing, so a throttled/delayed interval (backgrounded tab) still resolves
+  the correct remaining time whenever it next runs, and a `visibilitychange` listener resyncs
+  immediately on refocus. Added a third "Notify" toggle (`restAlertNotify`) using the `Notification`
+  API, since it's the one channel of the three that can actually reach the user while the app is
+  backgrounded — vibrate is spec-restricted to visible documents and WebAudio self-suspends in
+  background tabs, both disclosed directly in the Settings copy rather than silently not working.
+  None of the three can survive the OS fully suspending a minimized PWA, same ceiling as the
+  reminders feature.
+- **Search in Replace Exercise** — `SwapState`/`MuscleSwapState` gained a `query` field; both
+  `SwapModal` and `MuscleSwapModal` got a text input that filters by exercise name or muscle
+  (matching the same substring pattern the Exercises tab search already used) within the existing
+  variant/same-muscle/other-muscle groupings, auto-expanding "other muscle groups" while a query is
+  active and showing a "no exercises match" state when nothing does.
+- **Cross-day last-time/recommendation** — `recommendation()` and the per-set "Last time" display
+  previously read `ex.last`/`ex.lastSets`, which are per-program-day-slot fields — an exercise that
+  appears on two different days (e.g. Face Pull on both a Push and Pull day) tracked two independent
+  copies, so doing it on one day didn't update what the *other* day showed as "last time." Both now
+  prefer `state.exerciseHistory[exId]`'s most recent entry (already accumulated across every day the
+  exercise appears on) via a new `effectiveLast()` helper in `logic.ts`, falling back to the slot's
+  own `ex.last` only when no cross-day history exists yet. Verified with a synthetic two-day program
+  sharing one exercise: the day with the older/lower slot value correctly showed the other day's more
+  recent, heavier session as its target and "Last time" text.
+
+(15) same-session micro follow-up: PR detection (`completeWorkout()` in `useApp.ts`, phase 13) only
+fired when prior history existed for that exercise, deliberately, on the reasoning that a first-ever
+log is a baseline rather than a "record." User feedback disagreed — a first log has nothing to beat,
+so it counts as a PR by default now (`prior.length === 0` short-circuits `isPR` to `true`, skipping
+the score comparison entirely). Verified live: an exercise with zero prior `exerciseHistory` now
+shows the 🏆 badge and "1 new record" banner on its first-ever logged session.
+
+The "back volume" muscle-attribution concern from that same round was confirmed by the user to be
+`deadlift`'s `SECONDARY` tag (`['Hamstrings', 'Glutes']`) — real biomechanics, not a data bug. No
+code change needed; left as-is.
+
+(16) body-diagram recalibration, third pass. The first two passes (see "Architecture" above) were
+done by reading a coordinate grid composited over the image by eye — this pass instead installed
+`sharp` locally (`npm install --no-save sharp`, not committed to `package.json`) and rendered the
+*actual* `BACK_REGIONS`/`FRONT_REGIONS` path data directly onto the real `body-back.png` at full
+1:1 resolution with a pixel grid overlay, viewed via the `Read` tool — a strictly more precise
+technique than eyeballing a grid, since it renders the exact production coordinates rather than an
+approximation, and confirmed a real, specific bug: the back view's `Triceps` region (an arm ellipse)
+and `Back` "lat wing" region overlapped substantially — `Triceps` was centered too far medial
+(`cx=115, rx=38`, right edge at x=153) while `Back`'s lat shape's own left edge reached to x=88-105,
+so the two shapes' fills fought over the same ~60px-wide strip of the actual back/armpit area
+instead of sitting side by side the way the real lat and triceps muscles do. Front view
+(`Chest`/`Biceps`, the analogous pair) was checked the same way and found *not* to have this
+problem — confirms it was a specific back-view regression, not a systemic issue. Fixed by narrowing
+and outward-shifting `Triceps` (`cx 115→98, rx 38→32, ry 62→55`) and pulling the `Back` lat shape's
+medial edge in (`105,412`/`88,388`/`93,330`/`98,270` → `135,405`/`125,385`/`128,330`/`130,275`, and
+mirror on the right side), re-rendered and re-verified containment before touching the source file.
+Verified the fix landed live via HMR by reading the rendered `<path d>` attributes back out of the
+DOM, not just re-running the build. If this needs another pass later, reuse this
+render-the-real-coordinates-onto-the-real-image approach (a throwaway script, run from the project
+root so `sharp` resolves, output viewed with `Read` — not composited externally) rather than
+eyeballing a grid; it's what actually found the bug this time after two prior passes missed it.
+
+(17) same-session fourth calibration pass, prompted by the user sending a cleanly labeled reference
+anatomy chart (front+back, color-coded by muscle group with a legend) and asking to use it for
+"refining the shading for muscle targeting." That reference is a *different* image from the app's
+own `body-front.png`/`body-back.png` (different pose, proportions, art style) so its coordinates
+aren't directly transferable — it was used qualitatively (which muscle groups border which,
+roughly how far the lat/tricep/bicep boundaries extend) while the actual pixel measurements still
+came from the app's real images via the same sharp-render-and-read approach as phase 16. Re-auditing
+phase 16's already-fixed `Triceps` region against a fresh, more precise pixel measurement (extracted
+a tight crop of just the arm with a fine grid) found it was *still* off — centered too far medial
+(`cx=98`) and too narrow (`rx=32`), missing roughly the outer half of the real triceps muscle
+(measured outer edge at x≈15, inner edge at x≈115 at y=300, vs. the shape's actual x=66-130).
+Corrected `Triceps` to `cx=65, rx=48` (and vertically as part of the same edit). Applied the same
+outward-widening correction to the front view's `Biceps` region (`cx=108,rx=33` → `cx=97,rx=50`),
+which hadn't been audited in phase 16 (only `Chest`/`Biceps` had been spot-checked, not measured) —
+checking it this time surfaced the same "too narrow" pattern, just not the severe torso-overlap
+`Triceps` had.
+
+Caught and fixed a real mistake mid-pass: this file's SVG arc region format is
+`M{cx},{topY} A{rx},{ry} 0 1 1 {cx},{bottomY} A{rx},{ry} 0 1 1 {cx},{topY}` — the two y-values in
+the path are the ellipse's **top and bottom edges**, not center+radius. A first attempt at both the
+`Triceps` and `Biceps` fixes used the intended *center* y-value in the top-edge slot, which silently
+shifted both regions ~80px too low (extending into the forearm/wrist) — caught by re-rendering and
+comparing against the wrist band position in the real image before it shipped, not after. Worth
+remembering if editing these paths again: the two y-coordinates in each `A...A...` pair are edges,
+always sanity-check top/bottom against landmarks after any edit to these regions, not just cx/rx.
+
+This session hit a transient infrastructure outage (the safety-classifier backing `Write`/`Edit`/
+`Bash` was unavailable for several minutes, unrelated to anything in this repo) mid-fix — mentioned
+here only in case a half-applied intermediate coordinate is ever found in git history; the final
+committed state is the corrected, re-verified one described above.

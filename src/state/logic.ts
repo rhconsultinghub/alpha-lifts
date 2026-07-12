@@ -1,7 +1,7 @@
 import { EXLIB, MUSCLE_TARGETS, TRAINING_MULT, TRAINING_LABELS, incrementForEquip, KG_PER_LB_STEP } from '../data/exercises';
 import { clamp, roundTo } from '../data/program';
 import { WARMUP_LIBRARY, type WarmupMove } from '../data/warmups';
-import type { AppState, ProgramDays, ProgramExercise, Muscle, Units, TrainingType, ExerciseHistoryEntry, HistoryEntry } from '../data/types';
+import type { AppState, ProgramDays, ProgramExercise, Muscle, Units, TrainingType, ExerciseHistoryEntry, HistoryEntry, ExerciseLast } from '../data/types';
 
 export function fmtWeight(kg: number, units: Units): string {
   if (units === 'lb') return Math.round((kg * 2.20462) / 5) * 5 + ' lb';
@@ -158,10 +158,29 @@ export type CoachVoice = 'Direct' | 'Encouraging' | 'Hype';
 export type RestPacing = 'Relaxed' | 'Standard' | 'Aggressive';
 export type WarmupStyle = 'Minimal' | 'Standard' | 'Cautious';
 
-export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVoice = 'Encouraging'): Recommendation {
+// Prefers the most recent cross-day history for this exact exercise (state.exerciseHistory[exId],
+// which accumulates from every program day the exercise appears on — see completeWorkout() in
+// useApp.ts) over the program slot's own ex.last. Without this, "last time" and the weight/rep
+// recommendation would only reflect whichever day-specific copy of the exercise you last opened,
+// even when you did the same exercise on a *different* day more recently (e.g. an exercise that
+// appears on both a Push and an Upper day tracks two independent ex.last fields, one per slot).
+export function effectiveLast(ex: ProgramExercise, history?: ExerciseHistoryEntry[]): ExerciseLast {
+  if (history && history.length) {
+    const lib = EXLIB[ex.id];
+    const latest = history[history.length - 1];
+    const sets = latest.sets && latest.sets.length ? latest.sets : [{ weight: latest.weight, reps: latest.reps }];
+    const topSet = sets[sets.length - 1];
+    const hitTop = sets.every(r => r.reps >= lib.repHi);
+    return { weight: topSet.weight, reps: topSet.reps, hitTop, rir: topSet.rir };
+  }
+  return ex.last;
+}
+
+export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVoice = 'Encouraging', history?: ExerciseHistoryEntry[]): Recommendation {
   const lib = EXLIB[ex.id];
   const equip = lib.equip[ex.equipIdx];
-  const w1 = fmtWeight(ex.last.weight, units);
+  const last = effectiveLast(ex, history);
+  const w1 = fmtWeight(last.weight, units);
   const isTime = lib.trackingMode === 'time';
   const unitWord = isTime ? '' : ' reps';
   const fmtVal = (v: number) => (isTime ? formatSetTime(v) : String(v) + unitWord);
@@ -170,39 +189,39 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
   if (equip.v === 'bodyweight' || equip.v === 'assisted') {
     const bump = isTime ? 5 : 1;
     const bumpWord = isTime ? bump + 's' : '1 rep';
-    const val = ex.last.hitTop ? ex.last.reps + bump : ex.last.reps;
+    const val = last.hitTop ? last.reps + bump : last.reps;
     return {
       weight: 0, reps: val,
-      title: ex.last.hitTop
+      title: last.hitTop
         ? phrase('+' + bumpWord + ' today', 'Push for +' + bumpWord + ' today', 'LET’S GO — +' + bumpWord + ' today! 🔥')
         : phrase('Match last time', 'Match last time', 'Hold the line — match it! 💪'),
-      note: 'Last time: ' + fmtVal(ex.last.reps) + '. Aim for ' + fmtVal(val) + (isTime ? '.' : ' across your sets.')
+      note: 'Last time: ' + fmtVal(last.reps) + '. Aim for ' + fmtVal(val) + (isTime ? '.' : ' across your sets.')
     };
   }
   const inc = incrementForEquip(equip.v) ?? 2.5;
-  if (ex.last.hitTop) {
+  if (last.hitTop) {
     // hit the rep target but that top set was already to true failure (RIR 0) — hold the weight
     // rather than piling more load onto a set that had no reserve left, even though the rep
     // target was technically met.
-    if (ex.last.rir === 0) {
+    if (last.rir === 0) {
       return {
-        weight: ex.last.weight, reps: lib.repHi,
+        weight: last.weight, reps: lib.repHi,
         title: phrase('Repeat weight', 'Repeat the weight, build a buffer', 'Hold steady — same weight! 💪'),
-        note: 'Last time: ' + w1 + ' × ' + fmtVal(ex.last.reps) + ', but that set was to failure (RIR 0). Repeat the weight and build a rep buffer before increasing.'
+        note: 'Last time: ' + w1 + ' × ' + fmtVal(last.reps) + ', but that set was to failure (RIR 0). Repeat the weight and build a rep buffer before increasing.'
       };
     }
-    const w = ex.last.weight + inc;
+    const w = last.weight + inc;
     const incWord = fmtWeight(inc, units);
     return {
       weight: w, reps: lib.repHi,
       title: phrase('+' + incWord + ' today', 'Push for +' + incWord + ' today', 'PUSH IT — +' + incWord + ' today! 🔥'),
-      note: 'Last time: ' + w1 + ' × ' + fmtVal(ex.last.reps) + ', all sets hit target. Try ' + fmtWeight(w, units) + '.'
+      note: 'Last time: ' + w1 + ' × ' + fmtVal(last.reps) + ', all sets hit target. Try ' + fmtWeight(w, units) + '.'
     };
   }
   return {
-    weight: ex.last.weight, reps: lib.repHi,
+    weight: last.weight, reps: lib.repHi,
     title: phrase('Repeat weight, +1 rep', 'Match last time, add a rep', 'Almost there — +1 rep! 💪'),
-    note: 'Last time: ' + w1 + ' × ' + fmtVal(ex.last.reps) + '. Repeat the weight and aim for ' + fmtVal(lib.repHi) + '.'
+    note: 'Last time: ' + w1 + ' × ' + fmtVal(last.reps) + '. Repeat the weight and aim for ' + fmtVal(lib.repHi) + '.'
   };
 }
 
