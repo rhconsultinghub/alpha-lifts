@@ -104,6 +104,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
     confirmBackupImport: actions.confirmBackupImport,
     cancelBackupImport: actions.cancelBackupImport,
     stageBackupImport: actions.stageBackupImport,
+    confirmResetApp: s.confirmResetApp,
+    requestResetApp: actions.requestResetApp,
+    cancelResetApp: actions.cancelResetApp,
+    resetApp: actions.resetApp,
     remindersEnabled: s.remindersEnabled,
     reminderTime: s.reminderTime,
     reminderPermissionDenied: typeof Notification !== 'undefined' && Notification.permission === 'denied',
@@ -270,6 +274,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
         decSets: () => actions.changeSets(dayKey, i, -1),
         incSets: () => actions.changeSets(dayKey, i, 1),
         remove: () => actions.removeExercise(dayKey, i),
+        canMoveUp: i > 0,
+        moveUp: () => actions.moveExercise(dayKey, i, 'up'),
+        canMoveDown: i < day.exercises.length - 1,
+        moveDown: () => actions.moveExercise(dayKey, i, 'down'),
         openDetail: () => actions.openDetail(dayKey, i),
         openEquip: () => actions.openSwap(dayKey, i, 'equip', false),
         openReplace: () => actions.openSwap(dayKey, i, 'replace', false),
@@ -338,6 +346,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
       openAddExercise: () => actions.openSwap(dayKey, -1, 'replace', true),
       canRemoveExercise: dayExercises.length > 1,
       removeExercise: () => actions.removeWorkoutExercise(exIndex),
+      canMoveUp: exIndex > 0,
+      moveUp: () => actions.moveWorkoutExercise('up'),
+      canMoveDown: exIndex < dayExercises.length - 1,
+      moveDown: () => actions.moveWorkoutExercise('down'),
       resting: s.workout.resting,
       restText: mm + ':' + ss,
       restPct: s.workout.restTotal > 0 ? Math.round((s.workout.restRemaining / s.workout.restTotal) * 100) : 0,
@@ -455,7 +467,11 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const lib = EXLIB[id];
       return lib.name.toLowerCase().includes(swapQuery) || lib.muscle.toLowerCase().includes(swapQuery);
     };
-    const allIds = Object.keys(EXLIB).filter(id => id !== excludeId && theme.includes(EXLIB[id].muscle) && matchesSwapQuery(id));
+    // a search query overrides the day-theme restriction entirely — typing "squat" on a Chest day
+    // should still find Squat, since the whole point of a search box is to reach exercises the
+    // default theme-scoped browse view deliberately hides. No query = same theme-scoped behavior
+    // as before.
+    const allIds = Object.keys(EXLIB).filter(id => id !== excludeId && matchesSwapQuery(id) && (swapQuery ? true : theme.includes(EXLIB[id].muscle)));
     const variantIds = isAdd ? [] : allIds.filter(id => EXLIB[id].pattern === excludePattern);
     const variantOptions = variantIds.map(mkOpt);
     const nonVariantIds = allIds.filter(id => !variantIds.includes(id));
@@ -525,7 +541,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const lib = EXLIB[id];
       return lib.name.toLowerCase().includes(muscleSwapQuery) || lib.muscle.toLowerCase().includes(muscleSwapQuery);
     };
-    const allIds = Object.keys(EXLIB).filter(id => id !== ms.exId && theme.has(EXLIB[id].muscle) && matchesMuscleSwapQuery(id));
+    // same override as SwapModal above: an active search query bypasses the day-theme restriction.
+    const allIds = Object.keys(EXLIB).filter(id => id !== ms.exId && matchesMuscleSwapQuery(id) && (muscleSwapQuery ? true : theme.has(EXLIB[id].muscle)));
     const variantIds = allIds.filter(id => EXLIB[id].pattern === currentLib.pattern);
     const variantOptions = variantIds.map(mkOpt);
     const nonVariantIds = allIds.filter(id => !variantIds.includes(id));
@@ -601,7 +618,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
 
   const planPrompt = s.pendingPlanUpdate ? {
     show: true,
-    text: s.pendingPlanUpdate.changedCount + (s.pendingPlanUpdate.changedCount === 1 ? ' change was' : ' changes were') + ' made to this workout’s exercises (added, removed, or swapped). Update your plan to use them going forward, or keep this as a one-time change?',
+    text: s.pendingPlanUpdate.changedCount + (s.pendingPlanUpdate.changedCount === 1 ? ' change was' : ' changes were') + ' made to this workout’s exercises (added, removed, reordered, or swapped). Update your plan to use them going forward, or keep this as a one-time change?',
     apply: actions.applyPlanUpdate, discard: actions.discardPlanUpdate
   } : { show: false };
 

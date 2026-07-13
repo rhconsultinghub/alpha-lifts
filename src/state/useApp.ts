@@ -141,6 +141,20 @@ export function useApp() {
   const setTrainingType = useCallback((t: TrainingType) => setState(s => ({ ...s, trainingType: t })), []);
   const openSettings = useCallback(() => setState(s => ({ ...s, showSettings: true })), []);
   const closeSettings = useCallback(() => setState(s => ({ ...s, showSettings: false })), []);
+  // Wipes localStorage and every EXLIB entry a prior session added, dropping straight back to
+  // onboarding — mainly so "does a genuinely fresh install look right" can actually be tested
+  // without needing to clear site data from the browser's own settings UI.
+  const requestResetApp = useCallback(() => setState(s => ({ ...s, confirmResetApp: true })), []);
+  const cancelResetApp = useCallback(() => setState(s => ({ ...s, confirmResetApp: false })), []);
+  const resetApp = useCallback(() => {
+    setState(s => {
+      try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage unavailable */ }
+      // only drop the custom exercises this session merged into the EXLIB singleton — the ~151
+      // built-in exercises live in exercises.ts, not localStorage, and must survive a reset.
+      Object.keys(s.customExercises || {}).forEach(id => { delete EXLIB[id]; });
+      return createInitialState();
+    });
+  }, []);
   const setUnits = useCallback((u: Units) => setState(s => ({ ...s, units: u })), []);
   const setRestPacing = useCallback((v: RestPacing) => setState(s => ({ ...s, restPacing: v })), []);
   const setCoachVoice = useCallback((v: CoachVoice) => setState(s => ({ ...s, coachVoice: v })), []);
@@ -630,6 +644,26 @@ export function useApp() {
     });
   }, []);
 
+  // Reorders the currently active exercise relative to its neighbor, mid-session — like the
+  // add/remove/swap actions above, this only touches the session's working copy
+  // (workout.dayExercises), counts toward changesMade, and only reaches the saved plan if the
+  // user confirms the "update your plan?" prompt at workout completion (see completeWorkout()).
+  const moveWorkoutExercise = useCallback((direction: 'up' | 'down') => {
+    setState(s => {
+      if (!s.workout) return s;
+      const idx = s.workout.exIndex;
+      const target = idx + (direction === 'up' ? -1 : 1);
+      if (target < 0 || target >= s.workout.dayExercises.length) return s;
+      const dayExercises = [...s.workout.dayExercises];
+      [dayExercises[idx], dayExercises[target]] = [dayExercises[target], dayExercises[idx]];
+      const exSets: Record<number, WorkoutSetRow[]> = { ...s.workout.exSets };
+      const displaced = exSets[idx];
+      if (exSets[target] !== undefined) exSets[idx] = exSets[target]; else delete exSets[idx];
+      if (displaced !== undefined) exSets[target] = displaced; else delete exSets[target];
+      return { ...s, workout: { ...s.workout, dayExercises, exSets, exIndex: target, changesMade: s.workout.changesMade + 1 } };
+    });
+  }, []);
+
   // ---------- day builder ----------
   // Links exercise `idx` with the exercise right after it as an adjacent-pair superset (shared
   // group id) — or unlinks both if they're already linked. Scoped to pairs, not arbitrary
@@ -683,6 +717,20 @@ export function useApp() {
       const program = JSON.parse(JSON.stringify(s.program));
       const ex = program[dayKey].exercises[idx];
       ex.sets = Math.max(1, Math.min(8, ex.sets + delta));
+      return { ...s, program };
+    });
+  }, []);
+  // Reordering doesn't touch supersetGroup at all — links are matched by group id, not position
+  // (see toggleSuperset above), so a linked pair stays linked even if reordering makes them non-
+  // adjacent; DayBuilderScreen's "linked elsewhere" label already handles showing that case.
+  const moveExercise = useCallback((dayKey: string, idx: number, direction: 'up' | 'down') => {
+    setState(s => {
+      const target = idx + (direction === 'up' ? -1 : 1);
+      const exercises = s.program[dayKey].exercises;
+      if (target < 0 || target >= exercises.length) return s;
+      const program = JSON.parse(JSON.stringify(s.program));
+      const arr = program[dayKey].exercises;
+      [arr[idx], arr[target]] = [arr[target], arr[idx]];
       return { ...s, program };
     });
   }, []);
@@ -987,6 +1035,65 @@ export function useApp() {
     }
   }, [state.confirmEndEarly, completeWorkout]);
 
+  // ---------- hardware/gesture back button navigates in-app instead of exiting ----------
+  // Installed PWAs have no browser chrome, so the only way "back" reaches the OS (minimizing the
+  // app) is when there's no history entry left for it to consume — which is always, since this is
+  // a single-URL SPA that never otherwise touches history. Fix: keep exactly one extra history
+  // entry pushed whenever the user is away from the "resting" state (program screen, no modal
+  // open); consume it by closing whatever's topmost instead of letting the browser/OS handle it.
+  // Deliberately a *binary* one-entry model rather than one push per modal/screen level — simpler
+  // and far less prone to desync than tracking exact depth, at the cost of occasionally consuming
+  // a back-press that does nothing visible (e.g. if a modal was already closed via its own ✕
+  // button, leaving one stale entry) rather than closing two things at once. That trade favors
+  // robustness: the failure mode is "press back once more than expected," never "back exits the
+  // app early."
+  const isAnyModalOpen = useCallback((s: AppState) => !!(
+    s.showSettings || s.swap || s.muscleSwap || s.detail || s.muscleDrill || s.warmupDetailId ||
+    s.libraryDetailId || s.exerciseForm || s.exerciseHistoryModalId || s.archiveDetailId ||
+    s.newProgramWizard || s.weekReviewOpen || s.showBodyModal
+  ), []);
+  const closeTopmost = useCallback(() => {
+    setState(s => {
+      if (s.archiveDetailId) return { ...s, archiveDetailId: null };
+      if (s.exerciseHistoryModalId) return { ...s, exerciseHistoryModalId: null };
+      if (s.newProgramWizard) return { ...s, newProgramWizard: null };
+      if (s.exerciseForm) return { ...s, exerciseForm: null };
+      if (s.muscleSwap) return { ...s, muscleSwap: null };
+      if (s.weekReviewOpen) return { ...s, weekReviewOpen: false };
+      if (s.warmupDetailId) return { ...s, warmupDetailId: null };
+      if (s.swap) return { ...s, swap: null };
+      if (s.muscleDrill) return { ...s, muscleDrill: null };
+      if (s.showBodyModal) return { ...s, showBodyModal: false };
+      if (s.showSettings) return { ...s, showSettings: false };
+      if (s.libraryDetailId) return { ...s, libraryDetailId: null };
+      if (s.detail) return { ...s, detail: null };
+      // nothing open — fall back to screen-level back.
+      if (s.screen === 'dayBuilder') return { ...s, screen: 'dayView' as Screen };
+      if (s.screen === 'dayView') return { ...s, screen: 'program' as Screen, activeDayKey: null };
+      if (s.screen === 'workout') return { ...s, screen: 'program' as Screen };
+      if (s.screen === 'complete' || s.screen === 'progress' || s.screen === 'exercises') return { ...s, screen: 'program' as Screen };
+      return s; // already at rest — let the next back press through to the OS
+    });
+  }, []);
+  const hasPushedNavEntry = useRef(false);
+  useEffect(() => {
+    const atRest = state.screen === 'program' && !isAnyModalOpen(state);
+    if (!atRest && !hasPushedNavEntry.current) {
+      window.history.pushState({ appNav: true }, '');
+      hasPushedNavEntry.current = true;
+    } else if (atRest) {
+      hasPushedNavEntry.current = false;
+    }
+  }, [state, isAnyModalOpen]);
+  useEffect(() => {
+    const onPopState = () => {
+      hasPushedNavEntry.current = false;
+      closeTopmost();
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [closeTopmost]);
+
   return {
     state, setState,
     actions: {
@@ -997,6 +1104,7 @@ export function useApp() {
       setTrainingType, openSettings, closeSettings, setUnits, setRestPacing, setCoachVoice, setWarmupStyle,
       renameProgram, toggleSkipDay, dismissDeloadSuggestion,
       exportBackup, stageBackupImport, cancelBackupImport, confirmBackupImport,
+      requestResetApp, cancelResetApp, resetApp,
       setRestAlertSound, setRestAlertVibrate, setRestAlertNotify, setRemindersEnabled, setReminderTime,
       setBodyWeightInput, logBodyWeight,
       switchProgram, newProgram, requestRemoveProgram, renameSavedProgram,
@@ -1008,9 +1116,9 @@ export function useApp() {
       openLibraryDetail, closeLibraryDetail, setExerciseSearchQuery, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,
       setExerciseFormField, toggleFormMuscle, toggleFormSecondary, toggleFormEquip, saveExerciseForm,
       requestDeleteExercise, deleteExercise,
-      openSwap, closeSwap, swapTab, swapToggleAll, swapStageEquip, swapStageEx, swapConfirm, removeWorkoutExercise, setSwapQuery,
+      openSwap, closeSwap, swapTab, swapToggleAll, swapStageEquip, swapStageEx, swapConfirm, removeWorkoutExercise, moveWorkoutExercise, setSwapQuery,
       openMuscleSwap, closeMuscleSwap, toggleMuscleSwapDay, muscleSwapToggleAll, muscleSwapStageEx, muscleSwapConfirm, muscleSwapSetQuery,
-      removeExercise, changeSets, toggleSuperset,
+      removeExercise, changeSets, moveExercise, toggleSuperset,
       startWorkout, switchExercise, setSetField, setSetRir, bumpSetField, toggleSetDone, addSet, removeSet,
       restAdjust, restSkip, advance, applyPlanUpdate, discardPlanUpdate,
       exitWorkout, resumeWorkout, requestEndEarly, completeWorkout, stopRest

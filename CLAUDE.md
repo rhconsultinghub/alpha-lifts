@@ -499,3 +499,61 @@ This session hit a transient infrastructure outage (the safety-classifier backin
 `Bash` was unavailable for several minutes, unrelated to anything in this repo) mid-fix — mentioned
 here only in case a half-applied intermediate coordinate is ever found in git history; the final
 committed state is the corrected, re-verified one described above.
+
+(18) another feedback round, five items:
+- **Exercise reordering** — `moveExercise(dayKey, idx, direction)` in `useApp.ts` for permanent
+  reordering from `DayBuilderScreen` (↑/↓ pills per row, swaps two array entries; doesn't touch
+  `supersetGroup` since links are matched by group id, not position — see phase 12's
+  "linked elsewhere" fallback for what a reordered-apart pair looks like in the builder).
+  `moveWorkoutExercise(direction)` is the mid-workout equivalent, operating on
+  `workout.exIndex`/`dayExercises` and — like the existing add/remove/swap actions — counts toward
+  `changesMade`, so reordering during an active session now correctly triggers the "update your
+  plan?" prompt at completion via the same `pendingPlanUpdate` mechanism (its copy was updated to
+  say "reordered" alongside "added, removed, swapped").
+- **Muscle diagram: real muscle contours, not circles.** The only regions that were still literal
+  circles/ellipses — `Shoulders`/`Rear Delts` (deltoid) and `Biceps`/`Triceps` (upper arm) — were
+  replaced with hand-traced multi-point bezier shapes, the same style already used for
+  `Chest`/`Back`/`Glutes`/etc. Traced by zooming into the real `body-front.png`/`body-back.png`
+  with a fine pixel grid (same sharp-based throwaway-script technique as phases 16-17), reading
+  off boundary points along the actual visible muscle-separation lines in the reference art, then
+  rendering the candidate path back onto the real image to check containment before committing —
+  one iteration got very close on the first attempt for all four shapes. User supplied a separate,
+  cleanly-labeled anatomy chart (front+back, color-coded, with a legend) partway through this
+  project as a *conceptual* reference for which muscle borders which — useful for knowing e.g.
+  where the trapezius/rhomboid/lat boundary roughly falls, but not a coordinate source itself,
+  since it's a different image (different pose/proportions/art style) than the app's own reference
+  photos; the actual pixel measurements always came from the app's real images, never the chart.
+- **Exercise search bypasses the day-theme filter.** `SwapModal`/`MuscleSwapModal`'s search (added
+  in phase 14) was ANDing the query match with the day's theme restriction, so searching "squat" or
+  "leg extension" on a Chest day always returned zero results — the whole point of a search box is
+  to reach exercises the theme-scoped default browse view deliberately hides. Fixed in
+  `viewModel.ts`: an active query now bypasses the theme filter entirely; browsing with no query
+  keeps the original theme-scoped behavior.
+- **Fresh-install test data** — investigated and confirmed clean: `defaultProgram()`/
+  `dumbbellProgram()`/`seededFrac()` in `src/data/program.ts` are dead code, not imported anywhere
+  in the live app; `createInitialState()` genuinely returns an empty program and `onboarded: false`.
+  A truly fresh `localStorage` always lands on the onboarding wizard. The most likely explanation
+  for the user seeing old data after a "fresh install" is that reinstalling a PWA's home-screen icon
+  on Android does *not* clear the underlying browser origin's `localStorage` — only explicitly
+  clearing site data does. Added a "Reset App" option to Settings (confirm-gated, same pattern as
+  backup import) specifically so this can be tested going forward without digging through browser
+  settings: `resetApp()` in `useApp.ts` clears `localStorage` and only the *custom* exercises this
+  session merged into the `EXLIB` singleton (not the ~151 built-in ones, which live in
+  `exercises.ts` and aren't stored in `localStorage` at all), then resets to `createInitialState()`.
+- **Hardware/gesture back button navigates in-app instead of exiting.** Installed PWAs have no
+  browser chrome, so an SPA that never touches `history` has nothing for the back gesture to
+  consume — it falls straight through to the OS, minimizing the app. Fixed with a deliberately
+  *binary* one-entry history model in `useApp.ts` (not one push per modal/screen level): whenever
+  the user is away from "resting" (program screen, no modal open) and no entry is currently
+  pushed, push exactly one (`history.pushState`); a `popstate` listener closes whatever's topmost
+  (checked in a fixed priority order covering every modal, then screen-level parents) and clears
+  the pushed-flag, and the state-watching effect re-arms (pushes again) if the result still isn't
+  at rest — so multi-level back-out (e.g. Day Builder → Day View → Program) correctly takes one
+  press per level despite the simpler one-entry-at-a-time bookkeeping. Deliberately not tracking
+  exact push-per-modal depth: it's simpler and far more resistant to desync than the alternative,
+  at the cost of occasionally consuming one "do-nothing" back-press if a modal was already closed
+  via its own ✕ button (a stale pushed entry with nothing left to close) — judged a fine trade,
+  since the failure mode is "press back once more than expected," never "back exits the app early."
+  Verified by simulating the gesture with `window.history.back()` against a live dev server: single
+  modal open→closed correctly, and Day View→Day Builder→(back)→Day View→(back)→Program correctly,
+  zero console errors either way.

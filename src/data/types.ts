@@ -278,4 +278,7 @@ export interface AppState {
 
   // ---------- backup export/import ----------
   pendingBackupImport: Partial<AppState> | null;
+
+  // ---------- reset ----------
+  confirmResetApp: boolean;
 }

@@ -39,6 +39,12 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <button onClick={w.openSwap} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.6)' }}>⇄ Swap</button>
               <button onClick={w.openDetail} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.6)' }}>▶ How-to</button>
+              {w.canMoveUp && (
+                <button onClick={w.moveUp} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.6)' }}>↑ Move Up</button>
+              )}
+              {w.canMoveDown && (
+                <button onClick={w.moveDown} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.6)' }}>↓ Move Down</button>
+              )}
               {w.canRemoveExercise && (
                 <button onClick={w.removeExercise} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'oklch(0.72 0.17 35)' }}>✕ Remove</button>
               )}

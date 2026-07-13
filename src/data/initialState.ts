@@ -66,6 +66,8 @@ export function createInitialState(): AppState {
     reminderTime: '18:00',
     lastReminderFiredDate: null,
 
-    pendingBackupImport: null
+    pendingBackupImport: null,
+
+    confirmResetApp: false
   };
 }
