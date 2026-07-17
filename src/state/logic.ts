@@ -688,4 +688,65 @@ export function durationTrendData(state: AppState) {
   };
 }
 
+// ---------- Achievements: pure, monotonically non-decreasing stats derived from state ----------
+// Every one of these only ever grows (or, for streaks, tracks the best-ever run rather than the
+// current one) — that's deliberate, not incidental: an achievement system needs "once earned,
+// always earned," and state.history/exerciseHistory only ever gain entries in normal use, never
+// lose them (exerciseHistory's per-exercise arrays are capped to the last 8 sessions, which is why
+// PR counting below reads the isPR flag already stored on each history entry at completion time,
+// rather than re-deriving PRs from the capped exerciseHistory arrays — re-deriving would let a PR
+// count silently drop if the entry that established it aged out of a capped array).
+
+export function completedWorkoutCount(state: AppState): number {
+  return state.history.filter(h => h.status === 'completed').length;
+}
+
+export function lifetimeVolumeKg(state: AppState): number {
+  return state.history.reduce((sum, h) => sum + (h.volumeKg || 0), 0);
+}
+
+// Longest run of consecutive completed sessions found *anywhere* in history, not just the current
+// run from most-recent — so breaking today's streak doesn't un-earn a badge for a longer streak
+// held in the past.
+export function bestEverStreak(state: AppState): number {
+  let best = 0, current = 0;
+  for (const h of state.history) {
+    if (h.status === 'completed') { current++; if (current > best) best = current; } else current = 0;
+  }
+  return best;
+}
+
+// A week counts as "clean" if it has at least one logged entry and none of them are skips — not a
+// guarantee every planned day that week was done (history alone can't confirm that in general),
+// just that nothing was explicitly marked skipped.
+export function cleanWeekCount(state: AppState): number {
+  const byWeek: Record<number, HistoryEntry[]> = {};
+  state.history.forEach(h => { const w = h.weekNumber || 1; (byWeek[w] = byWeek[w] || []).push(h); });
+  return Object.values(byWeek).filter(entries => entries.length > 0 && entries.every(e => e.status === 'completed')).length;
+}
+
+export function totalPRCount(state: AppState): number {
+  return state.history.reduce((sum, h) => sum + h.exercises.filter(e => e.isPR).length, 0);
+}
+
+export function distinctExercisesLoggedCount(state: AppState): number {
+  return Object.keys(state.exerciseHistory).filter(id => (state.exerciseHistory[id] || []).length > 0).length;
+}
+
+export function distinctMusclesTrainedCount(state: AppState): number {
+  const muscles = new Set<Muscle>();
+  Object.keys(state.exerciseHistory).forEach(id => {
+    if ((state.exerciseHistory[id] || []).length > 0 && EXLIB[id]) muscles.add(EXLIB[id].muscle);
+  });
+  return muscles.size;
+}
+
+export function hasLoggedTimeExercise(state: AppState): boolean {
+  return Object.keys(state.exerciseHistory).some(id => (state.exerciseHistory[id] || []).length > 0 && EXLIB[id]?.trackingMode === 'time');
+}
+
+export function customExerciseCount(state: AppState): number {
+  return Object.keys(state.customExercises || {}).length;
+}
+
 export type { Units, TrainingType };

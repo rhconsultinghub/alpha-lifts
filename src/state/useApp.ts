@@ -125,6 +125,11 @@ export function useApp() {
   const goProgram = useCallback(() => setState(s => ({ ...s, screen: 'program' as Screen, activeDayKey: null })), []);
   const goProgress = useCallback(() => setState(s => ({ ...s, screen: 'progress' as Screen })), []);
   const goExercises = useCallback(() => setState(s => ({ ...s, screen: 'exercises' as Screen })), []);
+  const goAchievements = useCallback(() => setState(s => ({ ...s, screen: 'achievements' as Screen })), []);
+  // deliberately NOT bundled into goAchievements — it needs to fire *after* the screen has
+  // already rendered once with the pre-visit seen set, or "NEW" badges would never be visible
+  // (see AchievementsScreen.tsx's mount effect, which calls this).
+  const markAchievementsSeen = useCallback((ids: string[]) => setState(s => ({ ...s, seenAchievementIds: Array.from(new Set([...s.seenAchievementIds, ...ids])) })), []);
 
   const openDay = useCallback((key: string) => {
     setState(s => {
@@ -1071,7 +1076,7 @@ export function useApp() {
       if (s.screen === 'dayBuilder') return { ...s, screen: 'dayView' as Screen };
       if (s.screen === 'dayView') return { ...s, screen: 'program' as Screen, activeDayKey: null };
       if (s.screen === 'workout') return { ...s, screen: 'program' as Screen };
-      if (s.screen === 'complete' || s.screen === 'progress' || s.screen === 'exercises') return { ...s, screen: 'program' as Screen };
+      if (s.screen === 'complete' || s.screen === 'progress' || s.screen === 'exercises' || s.screen === 'achievements') return { ...s, screen: 'program' as Screen };
       return s; // already at rest — let the next back press through to the OS
     });
   }, []);
@@ -1097,7 +1102,7 @@ export function useApp() {
   return {
     state, setState,
     actions: {
-      goProgram, goProgress, goExercises, openDay, openDayBuilder, closeDayBuilder,
+      goProgram, goProgress, goExercises, goAchievements, markAchievementsSeen, openDay, openDayBuilder, closeDayBuilder,
       openExerciseHistory, closeExerciseHistory, openArchiveDetail, closeArchiveDetail,
       selectExerciseProgress, toggleProgressPicker, toggleCompareLift, toggleCompareLiftPicker, setProgressMetric,
       openWeekReview, closeWeekReview, selectReviewWeek, backToWeekList,

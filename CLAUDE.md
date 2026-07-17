@@ -557,3 +557,56 @@ committed state is the corrected, re-verified one described above.
   Verified by simulating the gesture with `window.history.back()` against a live dev server: single
   modal open→closed correctly, and Day View→Day Builder→(back)→Day View→(back)→Program correctly,
   zero console errors either way.
+
+(19) gamification: achievements + points, requested with "ask questions if needed." Scoping
+questions (via `AskUserQuestion`) settled: a new dedicated "Achievements" tab (not a section
+bolted onto Progress or a modal), all four category types (consistency/streaks, personal records,
+volume/totals, variety/exploration), retroactive unlocking (badges you'd already qualify for
+unlock immediately, not just going forward), and a simple running point total + badges with no
+level/rank system layered on top.
+
+Core design decision: `src/data/achievements.ts` defines 22 `Achievement` objects (id, name,
+category, icon, points, description, a `metric(state) => number` function, and a `target`) but
+**stores no unlocked/earned state anywhere** — `unlocked` is computed fresh every render as
+`metric(state) >= target`. This is what makes "retroactive" free: an achievement someone already
+qualifies for shows unlocked the first time this code runs against their existing history, no
+migration or backfill pass needed. The only new persisted field is `seenAchievementIds: string[]`
+(`types.ts`/`initialState.ts`), which exists purely to drive the "NEW" badge/tab-dot UI — it's a
+*seen* list, never an *unlocked* list, so it can never desync into hiding an actually-earned badge.
+
+Because nothing is stored as "earned," every metric function backing an achievement has to be
+**monotonic** — only able to increase (or, for streaks, track the best-ever value rather than the
+current one) — otherwise a badge could be earned and then silently un-earned on a later render,
+which would be a confusing regression for a permanent-achievement system. This constraint drove
+one specific implementation choice: PR-counting achievements (`pr-1`/`pr-10`/`pr-25`/`pr-50`) read
+`state.history[].exercises[].isPR` (the uncapped, append-only session archive) rather than
+re-deriving PR count by walking `state.exerciseHistory[exId]`, which is capped to the last 8
+entries per exercise and would let old PRs silently age out of the count, making it *decrease*
+over time. Streaks similarly use a new `bestEverStreak()` helper (`state/logic.ts`) — longest
+run of consecutive completed sessions ever, not the current run — so a broken streak doesn't
+retract an already-shown badge. New derived-stat helpers added to `state/logic.ts`:
+`completedWorkoutCount`, `lifetimeVolumeKg`, `bestEverStreak`, `cleanWeekCount`, `totalPRCount`,
+`distinctExercisesLoggedCount`, `distinctMusclesTrainedCount`, `hasLoggedTimeExercise`,
+`customExerciseCount` — all pure functions of existing state, nothing new to track.
+
+The 22 achievements total 2025 possible points across the four categories (consistency: first
+workout, 3/7/14-session best-ever streaks, 1/4 fully-clean weeks; records: 1/10/25/50 total PRs;
+volume: 10/25/50/100 completed sessions, 1000/10000/50000 kg lifetime volume with unit-aware
+progress labels via the existing `fmtWeight()`; variety: 5/15 distinct exercises logged, all
+muscle groups trained at least once, one custom exercise created, one time-tracked exercise
+logged). `viewModel.ts` computes an `achievementsVM` (per-item unlocked/progress-%/progress-label/
+isNew, grouped by category, plus running totals) and exposes `vm.achievements`/
+`vm.hasNewAchievements`; `AchievementsScreen.tsx` renders it (locked items grayscale + progress
+bar, unlocked items full-color + accent border) and calls `markAchievementsSeen` in a
+mount-only `useEffect` — deliberately *not* bundled into the tab-nav action itself, since doing it
+there would clear the NEW state in the same render pass the user was meant to see it in.
+`TabBar.tsx` gets a 4th tab (🏅) with a small dot indicator when `hasNewAchievements` is true.
+
+Verified live with seeded synthetic `localStorage` history (12-then-14 completed sessions across
+4 clean weeks, 3 PRs via `isPR` flags, ~7320kg lifetime volume, 5 exercises across 5 muscles, 1
+custom exercise, 1 time-tracked log): point total and unlocked count matched hand-calculated
+values exactly at both session counts (370/2025 → 520/2025 after crossing the 14-streak
+threshold), every individual achievement's unlocked state/progress number matched, the NEW dot
+appeared for a freshly-unlocked badge and correctly cleared after visiting the tab without
+resetting previously-seen ids, and unit-aware volume progress labels displayed correctly in both
+kg and lb. Zero console/build errors throughout; `npx tsc -b` and `npm run build` both clean.

@@ -68,6 +68,8 @@ export function createInitialState(): AppState {
 
     pendingBackupImport: null,
 
-    confirmResetApp: false
+    confirmResetApp: false,
+
+    seenAchievementIds: []
   };
 }

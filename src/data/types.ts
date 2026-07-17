@@ -196,7 +196,7 @@ export interface NewProgramWizardState {
 
 export type Units = 'kg' | 'lb';
 export type BodyView = 'front' | 'back';
-export type Screen = 'program' | 'dayView' | 'dayBuilder' | 'workout' | 'complete' | 'progress' | 'exercises';
+export type Screen = 'program' | 'dayView' | 'dayBuilder' | 'workout' | 'complete' | 'progress' | 'exercises' | 'achievements';
 export type RestPacing = 'Relaxed' | 'Standard' | 'Aggressive';
 export type CoachVoice = 'Direct' | 'Encouraging' | 'Hype';
 export type WarmupStyle = 'Minimal' | 'Standard' | 'Cautious';
@@ -281,4 +281,11 @@ export interface AppState {
 
   // ---------- reset ----------
   confirmResetApp: boolean;
+
+  // ---------- achievements ----------
+  // ids the user has already seen unlocked (as of their last visit to the Achievements tab) — an
+  // unlocked id not in this set renders a "NEW" badge. Achievement unlocked/points state itself is
+  // never stored here; it's always derived fresh from history/exerciseHistory/etc. (see
+  // data/achievements.ts), which is what makes retroactive unlocking work for free.
+  seenAchievementIds: string[];
 }

@@ -1,6 +1,7 @@
 import { EXLIB, DAY_THEMES, MUSCLE_TARGETS, TRAINING_LABELS, TRAINING_TYPE_DESCS, EQUIP_CATALOG } from '../data/exercises';
 import { SPLIT_PRESETS, DAY_TYPE_LABELS } from '../data/wizard';
 import { WARMUP_LIBRARY } from '../data/warmups';
+import { ACHIEVEMENTS, CATEGORY_LABELS, TOTAL_POSSIBLE_POINTS, type AchievementCategory } from '../data/achievements';
 import type { AppState, HistoryEntry, Muscle, TrainingType } from '../data/types';
 import type { Actions } from './useApp';
 import {
@@ -41,6 +42,39 @@ function sessionRowVM(h: HistoryEntry, s: AppState, actions: Actions) {
 export function buildViewModel(state: AppState, actions: Actions) {
   const s = state;
   const bars = muscleBarsList(s);
+
+  // ---------- achievements ----------
+  // Unlocked/progress state is always recomputed fresh from state.history/exerciseHistory/etc (see
+  // data/achievements.ts) — nothing about "which achievements are unlocked" is ever stored, which
+  // is what makes this retroactive: a user with months of existing history sees the badges they've
+  // already earned the first time this ships, with no migration step. seenAchievementIds is the
+  // only bit of achievement-related state that's actually persisted, and it only controls the
+  // "NEW" badge, never unlock status itself.
+  const achievementsVM = (() => {
+    const items = ACHIEVEMENTS.map(a => {
+      const current = a.metric(s);
+      const unlocked = current >= a.target;
+      const progressPct = Math.max(0, Math.min(100, Math.round((current / a.target) * 100)));
+      const progressLabel = a.formatProgress ? a.formatProgress(current, a.target, s) : `${Math.min(current, a.target)} / ${a.target}`;
+      return {
+        id: a.id, name: a.name, category: a.category, icon: a.icon, points: a.points, description: a.description,
+        unlocked, progressPct, progressLabel, isNew: unlocked && !s.seenAchievementIds.includes(a.id)
+      };
+    });
+    const unlockedItems = items.filter(i => i.unlocked);
+    const categories = (Object.keys(CATEGORY_LABELS) as AchievementCategory[]).map(cat => ({
+      key: cat, label: CATEGORY_LABELS[cat], items: items.filter(i => i.category === cat)
+    }));
+    return {
+      categories,
+      totalPoints: unlockedItems.reduce((sum, i) => sum + i.points, 0),
+      totalPossiblePoints: TOTAL_POSSIBLE_POINTS,
+      unlockedCount: unlockedItems.length,
+      totalCount: items.length,
+      hasNew: items.some(i => i.isNew),
+      markSeen: () => actions.markAchievementsSeen(unlockedItems.map(i => i.id))
+    };
+  })();
 
   const trainingTypes = (Object.keys(TRAINING_LABELS) as TrainingType[]).map(k => ({
     key: k,
@@ -640,11 +674,15 @@ export function buildViewModel(state: AppState, actions: Actions) {
     isComplete: s.screen === 'complete',
     isProgress: s.screen === 'progress',
     isExercises: s.screen === 'exercises',
-    showTabs: ['program', 'progress', 'exercises'].includes(s.screen),
+    isAchievements: s.screen === 'achievements',
+    showTabs: ['program', 'progress', 'exercises', 'achievements'].includes(s.screen),
     tabProgramColor: s.screen === 'program' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
     tabProgressColor: s.screen === 'progress' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
     tabExercisesColor: s.screen === 'exercises' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
-    goProgram: actions.goProgram, goProgress: actions.goProgress, goExercises: actions.goExercises,
+    tabAchievementsColor: s.screen === 'achievements' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
+    hasNewAchievements: achievementsVM.hasNew,
+    achievements: achievementsVM,
+    goProgram: actions.goProgram, goProgress: actions.goProgress, goExercises: actions.goExercises, goAchievements: actions.goAchievements,
     trainingTypes,
     muscleBars: bars.map(m => ({ ...m, drill: () => actions.openMuscleDrill(m.name) })),
     programDays, newProgramWizard,
