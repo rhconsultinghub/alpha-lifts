@@ -1,11 +1,69 @@
+import { useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { ViewModel } from '../state/viewModel';
 import { ExercisePhoto } from './ExercisePhoto';
 import { BodyDiagram } from './BodyDiagram';
 import { MusclesWorkedModal } from './modals/MusclesWorkedModal';
 
+const LONG_PRESS_MS = 450;
+const MOVE_CANCEL_PX = 10;
+
+// Press-and-hold drag reordering, engaged only from the ⠿ handle (not the row itself) so it can't
+// fight with the row's own tap-to-edit / photo-tap / swap-button targets. While dragging, the
+// visual order is tracked entirely in local component state (`drag.order`, a permutation of
+// display positions) and only committed to the real program via a single reorderExercise call on
+// release — dispatching mid-gesture would race the async re-render against a flurry of pointermove
+// events and reorder against stale indices.
 export function DayViewScreen({ vm }: { vm: ViewModel }) {
   const d = vm.currentDay;
+  const [drag, setDrag] = useState<{ p0: number; startY: number; rowH: number; order: number[]; position: number } | null>(null);
+  const longPressTimer = useRef<number | null>(null);
+  const rowRef = useRef<HTMLDivElement | null>(null);
+
   if (!d) return null;
+  const exercises: any[] = d.exercises;
+
+  const clearLongPress = () => {
+    if (longPressTimer.current != null) { window.clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+  };
+
+  const handlePointerDown = (e: ReactPointerEvent, position: number) => {
+    const startY = e.clientY;
+    const rowH = rowRef.current?.offsetHeight || 90;
+    const pointerId = e.pointerId;
+    const target = e.currentTarget as HTMLElement;
+    clearLongPress();
+    longPressTimer.current = window.setTimeout(() => {
+      longPressTimer.current = null;
+      target.setPointerCapture?.(pointerId);
+      const order = exercises.map((_, k) => k);
+      setDrag({ p0: position, startY, rowH, order, position });
+    }, LONG_PRESS_MS);
+  };
+
+  const handlePointerMove = (e: ReactPointerEvent) => {
+    if (longPressTimer.current != null && Math.abs(e.clientY - (drag?.startY ?? e.clientY)) > MOVE_CANCEL_PX) {
+      clearLongPress();
+    }
+    if (!drag) return;
+    const steps = Math.round((e.clientY - drag.startY) / drag.rowH);
+    const newPosition = Math.max(0, Math.min(exercises.length - 1, drag.p0 + steps));
+    if (newPosition !== drag.position) {
+      const order = exercises.map((_, k) => k);
+      const [moved] = order.splice(drag.p0, 1);
+      order.splice(newPosition, 0, moved);
+      setDrag({ ...drag, order, position: newPosition });
+    }
+  };
+
+  const finishDrag = () => {
+    clearLongPress();
+    if (drag && drag.position !== drag.p0) exercises[drag.p0].reorderTo(drag.position);
+    setDrag(null);
+  };
+
+  const displayOrder = drag ? drag.order : exercises.map((_, k) => k);
+
   return (
     <>
       <div style={{ background: 'linear-gradient(160deg, oklch(0.22 0.05 35), #0f0e0d 65%)', padding: '22px 20px 20px' }}>
@@ -74,25 +132,47 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
           </div>
         )}
 
-        {d.exercises.map((ex: any, i: number) => (
-          <div key={i} style={{ padding: '18px 0', borderBottom: '1px solid rgba(255,255,255,.1)', display: 'flex', gap: 14 }}>
-            <ExercisePhoto id={ex.id} pattern={ex.pattern} onClick={ex.openDetail} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                <button onClick={ex.openDetail} style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', font: "600 18px 'Inter'", color: '#f5f0ea' }}>{ex.name}</button>
-                <button onClick={ex.openSwap} style={{ flex: 'none', font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.6)' }}>⇄ Swap</button>
-              </div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                <span style={{ font: "500 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'rgba(255,255,255,.08)' }}>{ex.setsText}</span>
-                <span style={{ font: "600 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'oklch(0.65 0.19 35)', color: '#0d0c0b' }}>{ex.targetText}</span>
-                {ex.supersetBadge && (
-                  <span style={{ font: "600 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'oklch(0.7 0.13 230 / 0.15)', color: 'oklch(0.78 0.13 230)' }}>⚡ Superset</span>
-                )}
-              </div>
-              <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginTop: 8 }}>🔒 {ex.equipLabel} · {ex.muscle}</div>
+        {displayOrder.map((origIdx, displayPos) => {
+          const ex = exercises[origIdx];
+          const isDragged = !!drag && displayPos === drag.position;
+          return (
+            <div
+              key={ex.id + '-' + origIdx}
+              ref={displayPos === 0 ? rowRef : undefined}
+              style={{
+                padding: '18px 0', borderBottom: '1px solid rgba(255,255,255,.1)', display: 'flex', gap: 14,
+                background: isDragged ? 'rgba(255,255,255,.05)' : 'transparent',
+                boxShadow: isDragged ? '0 8px 20px rgba(0,0,0,.4)' : 'none',
+                borderRadius: isDragged ? 14 : 0,
+                position: 'relative', zIndex: isDragged ? 1 : 'auto'
+              }}
+            >
+              <ExercisePhoto id={ex.id} pattern={ex.pattern} onClick={ex.openDetail} />
+              <button onClick={ex.openQuickEdit} style={{ flex: 1, minWidth: 0, background: 'none', border: 'none', padding: 0, textAlign: 'left' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                  <span style={{ font: "600 18px 'Inter'", color: '#f5f0ea' }}>{ex.name}</span>
+                  <span onClick={(e) => { e.stopPropagation(); ex.openSwap(); }} style={{ flex: 'none', font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', color: 'rgba(245,240,234,.6)' }}>⇄ Swap</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  <span style={{ font: "500 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'rgba(255,255,255,.08)' }}>{ex.setsText}</span>
+                  <span style={{ font: "600 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'oklch(0.65 0.19 35)', color: '#0d0c0b' }}>{ex.targetText}</span>
+                  {ex.supersetBadge && (
+                    <span style={{ font: "600 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'oklch(0.7 0.13 230 / 0.15)', color: 'oklch(0.78 0.13 230)' }}>⚡ Superset</span>
+                  )}
+                </div>
+                <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginTop: 8 }}>🔒 {ex.equipLabel} · {ex.muscle}</div>
+              </button>
+              <div
+                onPointerDown={(e) => handlePointerDown(e, origIdx)}
+                onPointerMove={handlePointerMove}
+                onPointerUp={finishDrag}
+                onPointerCancel={finishDrag}
+                title="Press and hold to reorder"
+                style={{ flex: 'none', alignSelf: 'center', width: 32, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(245,240,234,.3)', fontSize: 18, touchAction: 'none', cursor: 'grab' }}
+              >⠿</div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         <button onClick={vm.startWorkout} style={{ width: '100%', marginTop: 20, background: 'oklch(0.65 0.19 35)', color: '#0d0c0b', font: "700 15px 'Inter'", textAlign: 'center', padding: 16, borderRadius: 16, border: 'none' }}>Start Workout</button>
       </div>

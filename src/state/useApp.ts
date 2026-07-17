@@ -10,9 +10,9 @@ import type {
 } from '../data/types';
 import {
   recommendation, restForExercise, dayMuscleRanks, isWeekComplete, fmtWeight,
-  nextIncompleteIndex, defaultCompareLiftIds, bestSetScore
+  nextIncompleteIndex, defaultCompareLiftIds, bestSetScore, effectiveLast
 } from './logic';
-import { vibrateRestEnd, playRestEndSound, notifyRestEnd } from './alerts';
+import { vibrateRestEnd, playRestEndSound, notifyRestEnd, updateRestProgressNotification, clearRestProgressNotification } from './alerts';
 import { shouldFireReminder, fireReminder } from './reminders';
 
 const STORAGE_KEY = 'fitness-app-state-v1';
@@ -181,12 +181,19 @@ export function useApp() {
   }, []);
 
   // ---------- rest-timer alerts ----------
+  const requestNotifyPermissionIfNeeded = () => {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission();
+  };
   const setRestAlertSound = useCallback((v: boolean) => setState(s => ({ ...s, restAlertSound: v })), []);
-  const setRestAlertVibrate = useCallback((v: boolean) => setState(s => ({ ...s, restAlertVibrate: v })), []);
+  // Vibration while the app is minimized is only reachable via a system notification's own
+  // vibrate pattern (see alerts.ts), so turning this on needs the same permission grant as the
+  // notify toggle — not just a page-level Vibration API call, which no-ops when the doc is hidden.
+  const setRestAlertVibrate = useCallback((v: boolean) => {
+    if (v) requestNotifyPermissionIfNeeded();
+    setState(s => ({ ...s, restAlertVibrate: v }));
+  }, []);
   const setRestAlertNotify = useCallback((v: boolean) => {
-    if (v && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
+    if (v) requestNotifyPermissionIfNeeded();
     setState(s => ({ ...s, restAlertNotify: v }));
   }, []);
 
@@ -369,6 +376,8 @@ export function useApp() {
   // ---------- detail overlay ----------
   const openDetail = useCallback((dayKey: string, exIndex: number) => setState(s => ({ ...s, detail: { dayKey, exIndex } })), []);
   const closeDetail = useCallback(() => setState(s => ({ ...s, detail: null })), []);
+  const openQuickEdit = useCallback((dayKey: string, exIndex: number) => setState(s => ({ ...s, quickEdit: { dayKey, exIndex } })), []);
+  const closeQuickEdit = useCallback(() => setState(s => ({ ...s, quickEdit: null })), []);
 
   // ---------- muscle drill ----------
   const openMuscleDrill = useCallback((name: string) => setState(s => ({ ...s, muscleDrill: name as AppState['muscleDrill'] })), []);
@@ -739,6 +748,42 @@ export function useApp() {
       return { ...s, program };
     });
   }, []);
+  // Drag-to-reorder equivalent of moveExercise above (arbitrary from/to instead of a single-step
+  // swap) — used by DayViewScreen's press-and-hold drag list, which recomputes the target index
+  // continuously as the dragged row passes over its neighbors rather than one step at a time.
+  const reorderExercise = useCallback((dayKey: string, fromIdx: number, toIdx: number) => {
+    setState(s => {
+      const exercises = s.program[dayKey].exercises;
+      if (fromIdx === toIdx || fromIdx < 0 || fromIdx >= exercises.length || toIdx < 0 || toIdx >= exercises.length) return s;
+      const program = JSON.parse(JSON.stringify(s.program));
+      const arr = program[dayKey].exercises;
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      return { ...s, program };
+    });
+  }, []);
+  // Day View quick-edit modal's weight/reps steppers — writes a manualTarget override (see
+  // ProgramExercise.manualTarget) rather than ex.last directly, since ex.last alone would be
+  // silently outranked by cross-day exerciseHistory in effectiveLast() the moment this exercise
+  // has been logged anywhere before (the overwhelmingly common case).
+  const setExerciseTarget = useCallback((dayKey: string, idx: number, field: 'weight' | 'reps', val: number) => {
+    setState(s => {
+      const program = JSON.parse(JSON.stringify(s.program));
+      const ex: ProgramExercise = program[dayKey].exercises[idx];
+      const base = ex.manualTarget || effectiveLast(ex, s.exerciseHistory[ex.id]);
+      ex.manualTarget = { weight: base.weight, reps: base.reps, [field]: Math.max(0, val) };
+      return { ...s, program };
+    });
+  }, []);
+  const bumpExerciseTarget = useCallback((dayKey: string, idx: number, field: 'weight' | 'reps', delta: number) => {
+    setState(s => {
+      const program = JSON.parse(JSON.stringify(s.program));
+      const ex: ProgramExercise = program[dayKey].exercises[idx];
+      const base = ex.manualTarget || effectiveLast(ex, s.exerciseHistory[ex.id]);
+      ex.manualTarget = { weight: base.weight, reps: base.reps, [field]: Math.max(0, base[field] + delta) };
+      return { ...s, program };
+    });
+  }, []);
 
   // ---------- workout ----------
   const buildWorkoutExercise = useCallback((exIndex: number) => {
@@ -760,6 +805,11 @@ export function useApp() {
 
   const stopRest = useCallback(() => {
     if (restInterval.current) { window.clearInterval(restInterval.current); restInterval.current = null; }
+    // Fire-and-forget: clears any lingering "Resting… Xs remaining" tray notification left over
+    // from a rest period that was skipped/adjusted/exited rather than left to run out naturally
+    // (the natural-completion path in restTick below replaces it with the "Rest complete" alert
+    // instead of clearing it, so this only matters for early-exit paths).
+    clearRestProgressNotification();
   }, []);
 
   // Shared by the 1s interval and the visibilitychange resync below, so a throttled/suspended
@@ -774,9 +824,17 @@ export function useApp() {
         if (restInterval.current) { window.clearInterval(restInterval.current); restInterval.current = null; }
         if (s.restAlertVibrate) vibrateRestEnd();
         if (s.restAlertSound) playRestEndSound();
-        if (s.restAlertNotify) notifyRestEnd();
+        // Vibration while minimized only reaches the user through this notification's own vibrate
+        // pattern (see alerts.ts) — fire it whenever vibrate OR notify is on, not just notify, so
+        // the default restAlertVibrate:true setting works in the background without the user
+        // having to separately discover and enable the notify toggle too.
+        if (s.restAlertVibrate || s.restAlertNotify) notifyRestEnd(s.restAlertVibrate);
         return { ...s, workout: { ...s.workout, resting: false, restRemaining: 0, restEndAt: null } };
       }
+      // Best-effort live countdown in the tray while backgrounded — the in-app toast (RestToast)
+      // already covers the foreground case with a true every-second update, so this only needs to
+      // run when the document is actually hidden.
+      if (s.restAlertNotify && document.hidden) updateRestProgressNotification(Math.round(remainingMs / 1000));
       return { ...s, workout: { ...s.workout, restRemaining: Math.round(remainingMs / 1000) } };
     });
   }, []);
@@ -823,6 +881,10 @@ export function useApp() {
     stopRest();
     setState(s => {
       if (!s.workout) return s;
+      // Contextual permission prompt: the first time a rest period actually starts with vibrate
+      // or notify enabled (both default/commonly on), rather than requesting at cold app boot
+      // where the ask has no context and is easy to reflexively deny.
+      if ((s.restAlertVibrate || s.restAlertNotify)) requestNotifyPermissionIfNeeded();
       const restEndAt = Date.now() + s.workout.restTotal * 1000;
       return { ...s, workout: { ...s.workout, resting: true, restRemaining: s.workout.restTotal, restEndAt } };
     });
@@ -938,7 +1000,8 @@ export function useApp() {
         if (doneSets) {
           const topSet = doneSets[doneSets.length - 1];
           const hitTop = doneSets.every(r => r.reps >= lib.repHi);
-          newEx = { ...ex, last: { weight: topSet.weight, reps: topSet.reps, hitTop, rir: topSet.rir }, lastSets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })), sets: doneSets.length };
+          // a fresh real log always supersedes a manual weight/reps correction, wherever it was set.
+          newEx = { ...ex, last: { weight: topSet.weight, reps: topSet.reps, hitTop, rir: topSet.rir }, lastSets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })), sets: doneSets.length, manualTarget: null };
           doneSets.forEach(r => { totalVolume += (r.weight || 0) * r.reps; });
           const isBodyweight = equip.v === 'bodyweight' || equip.v === 'assisted';
           const isTime = lib.trackingMode === 'time';
@@ -972,9 +1035,11 @@ export function useApp() {
         durationMin, avgRestSec, weekNumber: s.weekNumber, status: 'completed' as const, exercises: summary!
       };
       const exerciseHistory = { ...s.exerciseHistory };
+      const loggedIds = new Set<string>();
       s.workout.dayExercises.forEach((ex, idx) => {
         const doneSets = (s.workout!.exSets[idx] || []).filter(r => r.done);
         if (!doneSets.length) return;
+        loggedIds.add(ex.id);
         const prior = exerciseHistory[ex.id] || [];
         const entry = { date: dateStr, weight: doneSets[0].weight, reps: doneSets[0].reps, day: dayLabel, sets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })) };
         exerciseHistory[ex.id] = [...prior, entry].slice(-8);
@@ -983,6 +1048,17 @@ export function useApp() {
       const program = JSON.parse(JSON.stringify(s.program));
       program[dayKey].lastCompletedAt = now.toISOString();
       program[dayKey].exercisesDoneMask = exercisesDoneMask;
+      // A manualTarget on some *other* day's slot for the same exercise is now stale (this session's
+      // real log is fresher than any manual guess, on whichever day it was set) — clear it wherever
+      // it appears, not just on the day just played, so effectiveLast() doesn't resurrect a months-
+      // old correction the next time that other day is opened.
+      if (loggedIds.size) {
+        s.dayOrder.forEach(k => {
+          const exercises = program[k]?.exercises;
+          if (!exercises) return;
+          exercises.forEach((ex: ProgramExercise) => { if (loggedIds.has(ex.id)) ex.manualTarget = null; });
+        });
+      }
       if (!hasChanges) program[dayKey].exercises = updatedDayExercises;
 
       let weekNumber = s.weekNumber, weekStartedAt = s.weekStartedAt;
@@ -1053,7 +1129,7 @@ export function useApp() {
   // robustness: the failure mode is "press back once more than expected," never "back exits the
   // app early."
   const isAnyModalOpen = useCallback((s: AppState) => !!(
-    s.showSettings || s.swap || s.muscleSwap || s.detail || s.muscleDrill || s.warmupDetailId ||
+    s.showSettings || s.swap || s.muscleSwap || s.detail || s.quickEdit || s.muscleDrill || s.warmupDetailId ||
     s.libraryDetailId || s.exerciseForm || s.exerciseHistoryModalId || s.archiveDetailId ||
     s.newProgramWizard || s.weekReviewOpen || s.showBodyModal
   ), []);
@@ -1071,6 +1147,7 @@ export function useApp() {
       if (s.showBodyModal) return { ...s, showBodyModal: false };
       if (s.showSettings) return { ...s, showSettings: false };
       if (s.libraryDetailId) return { ...s, libraryDetailId: null };
+      if (s.quickEdit) return { ...s, quickEdit: null };
       if (s.detail) return { ...s, detail: null };
       // nothing open — fall back to screen-level back.
       if (s.screen === 'dayBuilder') return { ...s, screen: 'dayView' as Screen };
@@ -1116,14 +1193,14 @@ export function useApp() {
       openNewProgramWizard, closeNewProgramWizard, setWizardField, setWizardPrefill, selectWizardSplit,
       addWizardCustomDay, removeWizardCustomDay, setWizardCustomDayField, createProgramFromWizard,
       completeOnboarding,
-      setBodyView, openBodyModal, closeBodyModal, openDetail, closeDetail,
+      setBodyView, openBodyModal, closeBodyModal, openDetail, closeDetail, openQuickEdit, closeQuickEdit,
       openMuscleDrill, closeMuscleDrill, openWarmupDetail, closeWarmupDetail,
       openLibraryDetail, closeLibraryDetail, setExerciseSearchQuery, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,
       setExerciseFormField, toggleFormMuscle, toggleFormSecondary, toggleFormEquip, saveExerciseForm,
       requestDeleteExercise, deleteExercise,
       openSwap, closeSwap, swapTab, swapToggleAll, swapStageEquip, swapStageEx, swapConfirm, removeWorkoutExercise, moveWorkoutExercise, setSwapQuery,
       openMuscleSwap, closeMuscleSwap, toggleMuscleSwapDay, muscleSwapToggleAll, muscleSwapStageEx, muscleSwapConfirm, muscleSwapSetQuery,
-      removeExercise, changeSets, moveExercise, toggleSuperset,
+      removeExercise, changeSets, moveExercise, reorderExercise, setExerciseTarget, bumpExerciseTarget, toggleSuperset,
       startWorkout, switchExercise, setSetField, setSetRir, bumpSetField, toggleSetDone, addSet, removeSet,
       restAdjust, restSkip, advance, applyPlanUpdate, discardPlanUpdate,
       exitWorkout, resumeWorkout, requestEndEarly, completeWorkout, stopRest

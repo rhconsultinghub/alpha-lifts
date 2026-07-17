@@ -12,7 +12,9 @@ import { ExercisesScreen } from './components/ExercisesScreen';
 import { AchievementsScreen } from './components/AchievementsScreen';
 import { TabBar } from './components/TabBar';
 import { ResumePill } from './components/ResumePill';
+import { RestToast } from './components/RestToast';
 import { ExerciseDetailModal } from './components/modals/ExerciseDetailModal';
+import { ExerciseQuickEditModal } from './components/modals/ExerciseQuickEditModal';
 import { SwapModal } from './components/modals/SwapModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { MuscleDrillModal } from './components/modals/MuscleDrillModal';
@@ -60,6 +62,7 @@ export default function App() {
         <TabBar vm={vm} />
 
         <ExerciseDetailModal vm={vm} />
+        <ExerciseQuickEditModal vm={vm} />
         <SwapModal vm={vm} />
         <SettingsModal vm={vm} />
         <MuscleDrillModal vm={vm} />
@@ -71,6 +74,7 @@ export default function App() {
         <ArchiveDetailModal vm={vm} />
         <NewProgramWizardModal vm={vm} />
         <WeekReviewModal vm={vm} />
+        <RestToast vm={vm} />
       </div>
     </div>
   );

@@ -27,6 +27,7 @@ export function createInitialState(): AppState {
     muscleDrill: null,
     warmupDetailId: null,
     detail: null,
+    quickEdit: null,
     swap: null,
     muscleSwap: null,
     workout: null,

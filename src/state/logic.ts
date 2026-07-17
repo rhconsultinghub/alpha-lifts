@@ -165,6 +165,10 @@ export type WarmupStyle = 'Minimal' | 'Standard' | 'Cautious';
 // even when you did the same exercise on a *different* day more recently (e.g. an exercise that
 // appears on both a Push and an Upper day tracks two independent ex.last fields, one per slot).
 export function effectiveLast(ex: ProgramExercise, history?: ExerciseHistoryEntry[]): ExerciseLast {
+  // A manual correction from the Day View quick-edit modal outranks even cross-day history — it's
+  // a deliberate, explicit statement of "start here next time," not just whatever happened to get
+  // logged last. Cleared automatically once the exercise is logged again (completeWorkout).
+  if (ex.manualTarget) return { weight: ex.manualTarget.weight, reps: ex.manualTarget.reps, hitTop: false };
   if (history && history.length) {
     const lib = EXLIB[ex.id];
     const latest = history[history.length - 1];

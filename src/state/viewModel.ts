@@ -8,7 +8,8 @@ import {
   muscleBarsList, dayWarning, recommendation, estimateDayTime, formatDuration,
   warmupInfo, dayMuscleRanks, formatElapsed, fmtWeight, weightStep, formatSetTime,
   volumeChartData, weeklyHeatmapData, exerciseProgressData, compareLiftsData, consistencyData,
-  volumeDonutData, durationTrendData, warmupForDay, bodyWeightChartData, platesBreakdown, deloadSuggestion
+  volumeDonutData, durationTrendData, warmupForDay, bodyWeightChartData, platesBreakdown, deloadSuggestion,
+  effectiveLast
 } from './logic';
 
 const ACCENT = 'oklch(0.65 0.19 35)';
@@ -23,7 +24,9 @@ export interface ExerciseRowVM {
   setsText: string;
   targetText: string;
   openDetail: () => void;
+  openQuickEdit: () => void;
   openSwap: () => void;
+  reorderTo: (toIdx: number) => void;
   supersetBadge: boolean;
 }
 
@@ -53,11 +56,13 @@ export function buildViewModel(state: AppState, actions: Actions) {
   const achievementsVM = (() => {
     const items = ACHIEVEMENTS.map(a => {
       const current = a.metric(s);
-      const unlocked = current >= a.target;
-      const progressPct = Math.max(0, Math.min(100, Math.round((current / a.target) * 100)));
-      const progressLabel = a.formatProgress ? a.formatProgress(current, a.target, s) : `${Math.min(current, a.target)} / ${a.target}`;
+      const target = typeof a.target === 'function' ? a.target(s) : a.target;
+      const description = typeof a.description === 'function' ? a.description(s) : a.description;
+      const unlocked = current >= target;
+      const progressPct = Math.max(0, Math.min(100, Math.round((current / target) * 100)));
+      const progressLabel = a.formatProgress ? a.formatProgress(current, target, s) : `${Math.min(current, target)} / ${target}`;
       return {
-        id: a.id, name: a.name, category: a.category, icon: a.icon, points: a.points, description: a.description,
+        id: a.id, name: a.name, category: a.category, icon: a.icon, points: a.points, description,
         unlocked, progressPct, progressLabel, isNew: unlocked && !s.seenAchievementIds.includes(a.id)
       };
     });
@@ -277,7 +282,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
           setsText: ex.sets + ' × ' + (isTime ? formatSetTime(lib.repLo) + '-' + formatSetTime(lib.repHi) : lib.repLo + '-' + lib.repHi),
           targetText: r.weight > 0 ? fmtWeight(r.weight, s.units) : isTime ? formatSetTime(r.reps) : r.reps + ' reps',
           openDetail: () => actions.openDetail(dayKey, i),
+          openQuickEdit: () => actions.openQuickEdit(dayKey, i),
           openSwap: () => actions.openSwap(dayKey, i, 'equip', false),
+          reorderTo: (toIdx: number) => actions.reorderExercise(dayKey, i, toIdx),
           supersetBadge: !!ex.supersetGroup
         } as ExerciseRowVM;
       })
@@ -461,6 +468,44 @@ export function buildViewModel(state: AppState, actions: Actions) {
         secondaryText: lib.secondary.length ? lib.secondary.join(', ') : 'None',
         close: actions.closeDetail,
         openSwap: () => { actions.closeDetail(); actions.openSwap(dayKey, s.detail!.exIndex, 'equip', false); }
+      };
+    }
+  }
+
+  // ---------- Day View quick-edit modal (weight/reps/sets/equip) ----------
+  // Program-plan-only (not usable mid-workout, where the same fields are already editable per-set
+  // via the working-set steppers on WorkoutScreen) — so this always reads/writes s.program
+  // directly, unlike `detail` above which also has an in-session variant.
+  let quickEdit: any = { open: false };
+  if (s.quickEdit) {
+    const { dayKey, exIndex } = s.quickEdit;
+    const ex = s.program[dayKey]?.exercises[exIndex];
+    if (ex) {
+      const lib = EXLIB[ex.id];
+      const equip = lib.equip[ex.equipIdx];
+      const isTime = lib.trackingMode === 'time';
+      const isBodyweight = equip.v === 'bodyweight' || equip.v === 'assisted';
+      const last = effectiveLast(ex, s.exerciseHistory[ex.id]);
+      const step = weightStep(s.units);
+      const dispWeight = s.units === 'lb' ? Math.round((last.weight * 2.20462) / 5) * 5 : Math.round(last.weight * 2) / 2;
+      const plates = equip.v === 'barbell' ? platesBreakdown(dispWeight, s.units) : null;
+      quickEdit = {
+        open: true, id: ex.id, name: lib.name, muscle: lib.muscle, equipLabel: equip.label,
+        sets: ex.sets, isTime, isBodyweight,
+        decSets: () => actions.changeSets(dayKey, exIndex, -1),
+        incSets: () => actions.changeSets(dayKey, exIndex, 1),
+        weight: dispWeight, reps: last.reps, timeText: formatSetTime(last.reps),
+        unitsLabel: s.units.toUpperCase(),
+        decWeight: () => actions.bumpExerciseTarget(dayKey, exIndex, 'weight', -step),
+        incWeight: () => actions.bumpExerciseTarget(dayKey, exIndex, 'weight', step),
+        setWeight: (v: number) => actions.setExerciseTarget(dayKey, exIndex, 'weight', s.units === 'lb' ? v / 2.20462 : v),
+        decReps: () => actions.bumpExerciseTarget(dayKey, exIndex, 'reps', isTime ? -5 : -1),
+        incReps: () => actions.bumpExerciseTarget(dayKey, exIndex, 'reps', isTime ? 5 : 1),
+        setReps: (v: number) => actions.setExerciseTarget(dayKey, exIndex, 'reps', v),
+        platesText: plates ? plates.join(' + ') + ' per side' : '',
+        openEquip: () => { actions.closeQuickEdit(); actions.openSwap(dayKey, exIndex, 'equip', false); },
+        openInfo: () => { actions.closeQuickEdit(); actions.openDetail(dayKey, exIndex); },
+        close: actions.closeQuickEdit
       };
     }
   }
@@ -694,7 +739,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     openDayBuilder: actions.openDayBuilder, closeDayBuilder: actions.closeDayBuilder,
     startWorkout: actions.startWorkout, exitWorkout: actions.exitWorkout,
     openAddExercise: () => actions.openSwap(s.activeDayKey || '', -1, 'replace', true),
-    workout, detail, swap, muscleSwap, settings, openSettings: actions.openSettings,
+    workout, detail, quickEdit, swap, muscleSwap, settings, openSettings: actions.openSettings,
     confirmEndEarly: s.confirmEndEarly,
     openBodyModal: actions.openBodyModal, closeBodyModal: actions.closeBodyModal, showBodyModal: s.showBodyModal,
     setBodyView: actions.setBodyView, bodyView: s.bodyView,

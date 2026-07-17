@@ -53,6 +53,12 @@ export interface ProgramExercise {
   // two exercises sharing the same group id are performed as an adjacent-pair superset (see
   // toggleSuperset in useApp.ts) — undefined/null means not linked.
   supersetGroup?: string | null;
+  // manual weight/reps correction from the Day View quick-edit modal, taking precedence over both
+  // this slot's own `last` and (unusually) even the cross-day exerciseHistory that effectiveLast()
+  // otherwise prefers — an explicit user edit is a stronger signal than "whatever was logged last."
+  // Cleared automatically the next time this exercise is actually logged (see completeWorkout in
+  // useApp.ts), so it's a one-time correction, not a permanent pin. undefined/null = no override.
+  manualTarget?: { weight: number; reps: number } | null;
 }
 
 export interface ProgramDay {
@@ -231,6 +237,9 @@ export interface AppState {
   muscleDrill: Muscle | null;
   warmupDetailId: string | null;
   detail: { dayKey: string; exIndex: number } | null;
+  // Day View's tap-to-edit quick modal (weight/reps/sets/equip) — separate from `detail` (the
+  // read-only photo/how-to/video info screen), which stays reachable via the exercise photo tap.
+  quickEdit: { dayKey: string; exIndex: number } | null;
   swap: SwapState | null;
   muscleSwap: MuscleSwapState | null;
   workout: WorkoutState | null;

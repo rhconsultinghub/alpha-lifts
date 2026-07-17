@@ -14,17 +14,32 @@ export interface Achievement {
   category: AchievementCategory;
   icon: string;
   points: number;
-  description: string;
+  // static string, or a function for achievements whose displayed threshold depends on the
+  // user's unit setting (volume) — see volumeMilestone() below.
+  description: string | ((state: AppState) => string);
   // current progress and the threshold to unlock at — kept as plain numbers (not a boolean) so the
-  // UI can show a progress bar on locked achievements too, not just a lock icon.
+  // UI can show a progress bar on locked achievements too, not just a lock icon. target can be a
+  // function of state for the same unit-dependent reason as description.
   metric: (state: AppState) => number;
-  target: number;
+  target: number | ((state: AppState) => number);
   // overrides the plain "current/target" progress label for achievements where the raw numbers
   // need unit conversion (volume) rather than being displayed as-is (counts).
   formatProgress?: (current: number, target: number, state: AppState) => string;
 }
 
 const bool = (fn: (state: AppState) => boolean) => (state: AppState) => (fn(state) ? 1 : 0);
+
+// Volume milestones are round numbers *in the user's own unit* (2,000 lb / 1,000 kg, etc.) rather
+// than one kg threshold converted into an odd lb number (1,000 kg -> "2,205 lb") — matches how a
+// lifter actually thinks about round milestones in whichever unit they train in. The underlying
+// metric (lifetimeVolumeKg) is always in kg, so the kg-equivalent of the *display* unit's round
+// number is what's actually compared against.
+function volumeMilestone(kgTarget: number, lbTarget: number) {
+  return (state: AppState) => (state.units === 'lb' ? lbTarget / 2.20462 : kgTarget);
+}
+function volumeLabel(kgTarget: number, lbTarget: number) {
+  return (state: AppState) => (state.units === 'lb' ? lbTarget.toLocaleString() + ' lb' : kgTarget.toLocaleString() + ' kg');
+}
 
 export const ACHIEVEMENTS: Achievement[] = [
   // ---------- consistency & streaks ----------
@@ -90,17 +105,20 @@ export const ACHIEVEMENTS: Achievement[] = [
   },
   {
     id: 'volume-1000', name: 'Ton Lifted', category: 'volume', icon: '🏋', points: 40,
-    description: 'Lift a cumulative 1,000 kg across every session.', metric: lifetimeVolumeKg, target: 1000,
+    description: state => `Lift a cumulative ${volumeLabel(1000, 2000)(state)} across every session.`,
+    metric: lifetimeVolumeKg, target: volumeMilestone(1000, 2000),
     formatProgress: (current, target, state) => `${fmtWeight(current, state.units)} / ${fmtWeight(target, state.units)}`
   },
   {
     id: 'volume-10000', name: 'Ten Tonnes', category: 'volume', icon: '🏋', points: 150,
-    description: 'Lift a cumulative 10,000 kg across every session.', metric: lifetimeVolumeKg, target: 10000,
+    description: state => `Lift a cumulative ${volumeLabel(10000, 20000)(state)} across every session.`,
+    metric: lifetimeVolumeKg, target: volumeMilestone(10000, 20000),
     formatProgress: (current, target, state) => `${fmtWeight(current, state.units)} / ${fmtWeight(target, state.units)}`
   },
   {
     id: 'volume-50000', name: 'Fifty Tonnes', category: 'volume', icon: '🏋', points: 350,
-    description: 'Lift a cumulative 50,000 kg across every session.', metric: lifetimeVolumeKg, target: 50000,
+    description: state => `Lift a cumulative ${volumeLabel(50000, 100000)(state)} across every session.`,
+    metric: lifetimeVolumeKg, target: volumeMilestone(50000, 100000),
     formatProgress: (current, target, state) => `${fmtWeight(current, state.units)} / ${fmtWeight(target, state.units)}`
   },
 
