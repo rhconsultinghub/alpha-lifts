@@ -738,3 +738,77 @@ land where four prior passes didn't:
 
 `public/body-front.png`/`body-back.png` are load-bearing again (phase 20 had orphaned them; they
 were never deleted).
+
+(22) exercise-photo standardization. The exercise photos had accreted from three stylistically
+inconsistent sources (see the old header comment in `exercisePhotos.ts`): free-exercise-db stock
+shots (landscape, varied models/gyms/lighting), name-matched ones from that same catalog, and a
+handful of earlier one-off user crops. The user supplied 10 new labeled collage images (saved in
+the project *root* `Alpha Lifts/` folder, one collage per muscle group — Biceps/Back/Calves/Chest/
+Core/Glutes/Hamstrings/Quads/Rear Delts/Shoulders — every cell a near-square full-body shot of one
+consistent model in one dark studio, with the exercise name printed on a white label band above
+each photo) and asked to crop each cell and match it to its exercise. 132 of the 151 library
+exercises are covered by these collages; all 132 photos were replaced (`public/exercise-photos/
+{id}.jpg`, same filenames, so no code/allowlist change — `EXERCISE_PHOTO_IDS` and the Workbox jpg
+glob were already correct). The other 19 keep their older photos because no collage covered them:
+every Triceps exercise plus a set of niche/coined lifts — full list in the `exercisePhotos.ts`
+header comment. The collage labels are verbatim the library's own `name` fields (the collages were
+generated *from* this library), so matching was an exact normalized-name lookup (lowercase, strip
+apostrophes/punctuation, collapse spaces), not fuzzy — zero unmatched, no score-based guessing of
+the kind phase-11's notes warn about.
+
+Cropping technique (a throwaway `.verify/` Node + `sharp` pipeline, same disposable-scratch pattern
+as phases 12/16/21, deleted after integrating): the collages are irregular grids (different column
+counts per row: 6/5/5, 7/7/7/2, 4/3 offset, etc., and partial/empty trailing cells), so a fixed
+grid won't do. Detection is two-stage and keys off the white label bands, not the photos: (1) rows
+— split into photo bands vs. label/separator bands by per-row white-pixel fraction (pixels ≥205),
+threshold 0.10; a row-*mean*-brightness threshold was tried first but a partial bottom row's mostly-
+empty label band (e.g. hamstrings' lone Stiff-legged Deadlift, back's 2-cell row 4) is too dark to
+clear a mean cut and merges upward, whereas the white-*fraction* cut cleanly catches even a sparse
+label. (2) columns — within each band, cells are the runs of columns whose *label region directly
+above* is mostly white (fraction >0.3); this both finds the per-photo x-splits (the thin ~180-grey
+vertical gridlines between photos read as gaps because they're below the 205 white cut) *and* drops
+empty/offset cells for free (an empty cell has a dark, unlabeled region above it), which a photo-
+region split can't do and which also sidesteps false splits from bright vertical elements inside a
+photo (racks, barbells). Crops are inset 3px to shed the residual grey border lines, written as
+q90 JPEG. Verified before overwriting anything: every crop was tiled into per-collage contact sheets
+annotated with the assigned `{id}` + label and read back by eye (all 132 correct, order preserved,
+no label-text bleed), and the app's actual render was simulated (180×180 `fit:cover`, matching
+`ExercisePhoto.tsx`'s fixed-square `objectFit:'cover'` container) to confirm the near-square crops
+square cleanly without lopping off the exercise action. If more collages are supplied later (e.g. a
+Triceps one to close the last 19), reuse this exact detector — the label-band keying is what makes
+it robust to the irregular layouts. The source collages, like every prior user-supplied source
+image in this project, are not kept in the repo; they'd need re-supplying to re-crop.
+
+Post-swap review + fixes: a full-resolution review of the 132 (all barbell compounds + all coined/
+obscure lifts, cross-checked against real reference images) found four worth fixing — two obvious
+generation errors and two soft mismatches: `clean_and_press` showed two barbells at once (front-
+racked *and* pressed overhead — an impossible AI merge of the two phases); `bent_press` showed a
+two-arm lying barbell bench press instead of the one-arm overhead strongman bent press (the AI
+didn't know the coined movement); `extended_range_one_arm_floor_press` held a dumbbell in each hand
+for a "one-arm" move; and `bench_press_with_neutral_grip` used a straight bar (a true neutral grip
+needs a specialty bar). The user then supplied four corrected replacement images — this time one
+standalone labeled image per exercise (not a collage), same white label band on top — which were
+cropped by the same label-band technique reduced to the single-image case (find the top white band's
+lower edge via row white-fraction, crop below it, trim any fully-white frame) and written over those
+four ids. All four verified correct at full res + square-render before overwriting.
+
+Scan of the remaining 19 (the ids with no muscle-collage — every Triceps exercise plus the coined
+lifts; see `exercisePhotos.ts` header): these were NOT assumed fine just because they predate the
+collage swap. Two findings: (a) 5 were bright free-exercise-db real photos (`triceps_pushdown`,
+`overhead_triceps_ext`, `skull_crusher`, `close_grip_bench`, `jm_press`) — movement-accurate but the
+only stylistically-inconsistent images left in the whole library; and (b) **`kelso_shrug` was wrong**
+— it showed a man standing upright holding dumbbells (a standing shrug/hold), not the bent-over,
+scapular-retraction Kelso shrug. The user then supplied six individual dark-studio replacement images
+covering exactly those six ids, all verified movement-correct and installed — so the library is now
+fully one consistent dark style with zero bright stock photos remaining, and `kelso_shrug` now
+correctly shows the chest-supported bent-over movement. Three of the six (`skull_crusher`, `jm_press`,
+`close_grip_bench`) arrived as very wide ~2.8:1 banners with no label band; a centered square crop
+(the app renders every photo as a fixed `objectFit:'cover'` square) would have cut off the bar/head
+and shown only torso+knees, so those three were pre-cropped to a square centered at ~0.58 of the
+width (the bench-press subject lies with head+bar in the right third) — candidate square crops at
+several x-centers were rendered and eyeballed to pick the framing that keeps bar+arms+head+chest in
+frame. The other 13 un-replaced ids (`pec_deck`, `chest_supported_row`, `bulgarian_split_squat`,
+`hip_abduction`, `pendlay_row`, `seal_row`, `meadows_row`, `landmine_press`, `cossack_squat`,
+`nordic_curl`, `suitcase_carry`, `copenhagen_plank`, `larsen_press`) are the on-style phase-10/11
+dark crops, verified movement-correct and left as-is. One soft note kept for the record: `seal_row`
+reads correctly (prone chest-supported row) but has a stray unrelated barbell in the foreground.

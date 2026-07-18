@@ -1,15 +1,18 @@
-// Exercise ids with a bundled reference photo in public/exercise-photos/{id}.jpg. Every exercise
-// now has one, from three sources:
-//  1. The 67 exercises imported from free-exercise-db (github.com/yuhonas/free-exercise-db,
-//     public domain/Unlicense) — one photo each, downloaded alongside the exercise data itself.
-//  2. The original ~90 hand-curated exercises — most matched afterward by name/muscle against
-//     that same free-exercise-db catalog.
-//  3. The remaining 14 with no reasonable free-exercise-db match (niche/coined variant names like
-//     "Kelso Shrug" or "Larsen Press") — user-supplied reference photos, cropped from a labeled
-//     collage image (`public/exercise-photos/` originals aren't kept in the repo; if these need
-//     re-cropping, the source collage lived at `Other Missing Exercises.png` alongside a separate
-//     `Chest supported row.png` for that one exercise, both outside the repo).
-// Any custom user-created exercise still has no photo and falls back to the hand-drawn SVG
+// Exercise ids with a bundled reference photo in public/exercise-photos/{id}.jpg. All 151 have one,
+// and as of the phase-22 standardization pass (see CLAUDE.md) they are now ALL one cohesive dark-
+// studio style (same model look / lighting / dark gym background) — the last bright, stylistically-
+// inconsistent free-exercise-db stock photos were replaced in the final follow-up round, so there is
+// no longer a "grab-bag" subset. Provenance, for the record: 132 were cropped from a set of 10 user-
+// supplied labeled collages (one per muscle group); a further handful of individually-supplied single
+// images replaced specific bad/inconsistent crops over three follow-up rounds — four AI-glitch/
+// mismatch fixes (clean_and_press, bent_press, extended_range_one_arm_floor_press,
+// bench_press_with_neutral_grip) and then six more (triceps_pushdown, overhead_triceps_ext,
+// skull_crusher, jm_press, close_grip_bench, kelso_shrug — the last of which had been depicting a
+// standing hold instead of the bent-over Kelso shrug). The remaining ~13 (pec_deck,
+// chest_supported_row, bulgarian_split_squat, hip_abduction, pendlay_row, seal_row, meadows_row,
+// landmine_press, cossack_squat, nordic_curl, suitcase_carry, copenhagen_plank, larsen_press) are the
+// earlier phase-10/11 user-supplied dark crops — already on-style, verified movement-correct, left
+// as-is. Any custom user-created exercise still has no photo and falls back to the hand-drawn SVG
 // pictogram in ExerciseIcon.
 export const EXERCISE_PHOTO_IDS = new Set([
   'ab_rollout', 'ab_rollout_on_knees', 'alternate_bicep_curl', 'alternate_hammer_curl',
