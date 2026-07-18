@@ -699,3 +699,42 @@ reordering/quick-edit, and rest-alert reliability:
   modals, `z-index: 30`) showing the live countdown + Skip button, so it stays visible even if the
   user is browsing exercise history mid-rest, not just when WorkoutScreen's own (larger, but
   modal-obscured) rest card happens to be on top.
+
+(21) user rejected phase 20's self-drawn SVG figure ("looks terrible") and asked to return to the
+photo-overlay approach with a careful trace of each muscle. Restored the phase-18 overlay version
+of `BodyDiagram.tsx` from git (`git show cb30d52:...`) as the starting point, then did a fifth —
+and finally successful — full calibration pass of every region on both views. What made this one
+land where four prior passes didn't:
+
+- **Read the coordinates off the image before drawing anything.** Rendered both reference images
+  with a fine 20px grid (100px-major, labeled), then zoomed crops (2-3x, nearest-neighbor) of each
+  body area, and explicitly wrote down the drawn muscle outlines' boundary coordinates from the
+  crops *first* — only then authored candidate paths. The single biggest prior miss found this
+  way: the front `Quads` region had always started at x≈172 when the thigh's outer contour is at
+  x≈135-144, i.e. every previous version silently excluded the entire outer half of the thigh
+  (vastus lateralis), which is a big part of why the shading never looked right.
+- **Mirror, don't hand-duplicate.** Only left-side paths are stored; `mirrorPath()` in
+  `BodyDiagram.tsx` generates the right side by flipping x around each image's centerline (front
+  482px wide → center 241, back 470 → 235), so the two sides can never drift apart and every
+  fix applies to both automatically.
+- **One `<path>` element per muscle, subpaths concatenated.** The Back group is three
+  intentionally-overlapping regions (traps diamond, two lat wings raised medially to also cover
+  the rhomboid/teres scapular area, erector column) — as separate semi-transparent `<path>`s the
+  overlaps double-darken into visible bands, but as subpaths of a single path they fill uniformly.
+  `buildMusclePaths()` groups all of a muscle's defs (plus mirrors) into one element.
+- **Iterate on the composite, not in the head.** Three render-inspect-adjust iterations via a
+  throwaway `.verify/` dir (`regions.cjs` + `render.cjs` — note `.cjs`, the package is
+  `"type": "module"` so `.js` scripts can't `require()`), each region drawn in a distinct debug
+  color at 0.35 opacity over the real PNG, checked full-figure and in zoomed crops. Iteration
+  fixes: shoulder caps and biceps/triceps trimmed a few px where they spilled past the arm
+  contour, core bottom V raised out of the groin, lat bottom tips lifted off the glute tops,
+  ham/glute boundary separated at the gluteal fold, rear delts shifted up-medial onto the drawn
+  deltoid.
+- **Verified the real thing, not just the debug render**: seeded a mixed day (bench/OHP/row/
+  squat/RDL/pushdown), opened the Muscles Worked modal, and rasterized the live `img`+`svg`
+  composite out of the browser (XMLSerializer → canvas → PNG, read back with the Read tool) for
+  both views — chest/shoulders/quads (front) and back-group/triceps/hamstrings (back) all sat
+  cleanly inside their drawn outlines at the app's real accent shading, zero console errors.
+
+`public/body-front.png`/`body-back.png` are load-bearing again (phase 20 had orphaned them; they
+were never deleted).
