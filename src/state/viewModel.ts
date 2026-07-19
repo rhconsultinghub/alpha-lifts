@@ -3,6 +3,7 @@ import { SPLIT_PRESETS, DAY_TYPE_LABELS } from '../data/wizard';
 import { WARMUP_LIBRARY } from '../data/warmups';
 import { ACHIEVEMENT_FAMILIES, CATEGORY_LABELS, TOTAL_POSSIBLE_POINTS, TOTAL_TIERS, type AchievementCategory } from '../data/achievements';
 import type { AppState, HistoryEntry, Muscle, TrainingType } from '../data/types';
+import { testVibration } from './alerts';
 import type { Actions } from './useApp';
 import {
   muscleBarsList, dayWarning, recommendation, estimateDayTime, formatDuration,
@@ -169,10 +170,11 @@ export function buildViewModel(state: AppState, actions: Actions) {
     restAlertSound: s.restAlertSound,
     restAlertVibrate: s.restAlertVibrate,
     restAlertNotify: s.restAlertNotify,
-    // The Vibration API simply doesn't exist on iOS (any browser, including an installed PWA), so
-    // on those devices the Vibrate toggle was a switch that could never do anything. Detect it and
-    // say so in the UI rather than letting the setting quietly lie.
+    // Some platforms don't expose the Vibration API at all (notably iOS, in every browser including
+    // an installed PWA), where the Vibrate toggle would be a switch wired to nothing. Detect it and
+    // say so rather than letting the setting quietly lie.
     vibrationSupported: typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function',
+    testVibration,
     toggleRestAlertSound: () => actions.setRestAlertSound(!s.restAlertSound),
     toggleRestAlertVibrate: () => actions.setRestAlertVibrate(!s.restAlertVibrate),
     toggleRestAlertNotify: () => actions.setRestAlertNotify(!s.restAlertNotify),

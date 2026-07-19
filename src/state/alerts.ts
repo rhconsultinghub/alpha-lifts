@@ -14,8 +14,27 @@ const ICON = () => `${import.meta.env.BASE_URL}icon-192.png`;
 const TAG_PROGRESS = 'alpha-lifts-rest-progress';
 const TAG_DONE = 'alpha-lifts-rest-done';
 
-export function vibrateRestEnd(): void {
-  try { navigator.vibrate?.([200, 100, 200]); } catch { /* unsupported */ }
+// Long, clearly-patterned buzz — the old [200,100,200] was easy to miss against a rack or through a
+// pocket, and the whole point of this alert is to be felt without looking.
+const REST_END_PATTERN = [400, 150, 400, 150, 600];
+
+// Returns whether the browser *accepted* the call. Chrome returns false when it refuses to vibrate
+// (most commonly because the frame has no user activation yet); it returns true once the request is
+// handed to the OS, which is not the same as the phone actually buzzing — see testVibration().
+export function vibrateRestEnd(): boolean {
+  try { return typeof navigator.vibrate === 'function' ? navigator.vibrate(REST_END_PATTERN) : false; }
+  catch { return false; }
+}
+
+// Fired straight from a tap in Settings, so user activation is guaranteed. That's what makes it a
+// useful diagnostic: it splits the two failure modes apart, which need completely different fixes.
+//   - returns false  -> the browser refused the call outright (Vibration API blocked/absent).
+//   - returns true but nothing is felt -> the call reached the OS and Android suppressed it, i.e.
+//     device-level haptics: Do Not Disturb, "Vibration & haptics" turned down/off, a per-app or
+//     per-site block, or an OEM battery-saver profile. Nothing the page can override.
+export function testVibration(): boolean {
+  try { return typeof navigator.vibrate === 'function' ? navigator.vibrate(REST_END_PATTERN) : false; }
+  catch { return false; }
 }
 
 // Rest-complete alert. Routed through the active Service Worker's showNotification() rather than

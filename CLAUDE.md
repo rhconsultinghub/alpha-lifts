@@ -940,15 +940,30 @@ has — **does not exist on iOS at all**, in any browser, including an installed
 `vibrate` option is also long dead on Chrome. So on iOS the Vibrate toggle was a switch wired to
 nothing, sitting next to a Sound toggle that overrides the user's ringer setting.
 
-No amount of code can make iOS vibrate from a web app, so the fix is to stop the UI lying about it
-rather than fake a capability: `vibrationSupported` (a `typeof navigator.vibrate === 'function'`
-check) is exposed on the settings VM, and `SettingsModal` renders the Vibrate control disabled and
-labelled "Vibrate N/A" with an explanatory callout when it's absent, pointing the user at Notify +
-backgrounding the app (the OS notification is the only thing that can buzz an iPhone here, per the
-phone's own notification settings). The Rest Alerts help text also now states outright that Sound
-plays through media volume and therefore ignores the silent/vibrate switch — the actual cause of the
-reported chime. Deliberately left alone: the `restAlertVibrate || restAlertNotify` gate on
-`notifyRestEnd()`, because with vibrate defaulting on that gate is what makes the notification fire at
-all, which on iOS is the only route to a buzz. Verified both branches by stubbing `navigator.vibrate`
-away at runtime: supported → "📳 Vibrate On" enabled, no callout; unsupported → disabled "Vibrate N/A"
-plus the callout.
+**The chime half of that diagnosis is confirmed and holds. The platform half was wrong** — worth
+recording as a caution. From "chimes despite vibrate mode + no buzz" the platform was inferred to be
+iOS and the first fix was built around that; the user then corrected it: **they're on Android**, where
+`navigator.vibrate()` *does* exist. Lesson: those symptoms are equally consistent with an Android
+device whose vibration is being refused or suppressed, so confirm the platform before building on an
+inference. The `vibrationSupported` capability check that came out of it is still correct and worth
+keeping (it's generic, and genuinely covers iOS), but it renders as normal on Android and so does
+nothing for the reported problem — its copy was de-iOS-ified accordingly.
+
+The real Android question is *why* an accepted `navigator.vibrate()` call doesn't buzz, and that
+splits into two failure modes needing completely different fixes, indistinguishable from the app's
+side and not reproducible off-device:
+  - the browser **refuses** the call (`navigator.vibrate()` returns `false` — typically vibration
+    disabled for the site/browser, or no user activation on the frame), versus
+  - the call **succeeds** (returns `true`, request handed to the OS) and **Android suppresses it** —
+    Do Not Disturb, Settings → Sound & vibration → Vibration & haptics turned down/off, a per-app or
+    per-site block, or an OEM battery-saver profile. Nothing a web page can override.
+So rather than guess, Settings grew a **"Test buzz"** control that calls `testVibration()` straight
+from the tap (guaranteeing user activation) and reports which of the two happened. `vibrateRestEnd()`
+also returns the boolean now, and the pattern was lengthened from `[200,100,200]` to
+`[400,150,400,150,600]` — the old one was easy to miss through a pocket or against a rack, which is
+its own possible explanation for "no buzz". The Rest Alerts help text states outright that Sound plays
+through media volume and therefore ignores the silent/vibrate switch, which is the actual cause of the
+reported chime (turning Sound off silences it). Deliberately left alone: the
+`restAlertVibrate || restAlertNotify` gate on `notifyRestEnd()`, since with vibrate defaulting on that
+gate is what makes the notification fire at all. Verified both readouts by stubbing `navigator.vibrate`
+to return true and then false at runtime.
