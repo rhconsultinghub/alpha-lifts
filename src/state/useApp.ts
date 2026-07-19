@@ -43,16 +43,20 @@ function loadInitial(): AppState {
   return state;
 }
 
+// If a workout is in progress and the user hasn't interacted with the app for this long, prompt to
+// confirm they're still training (they may have set the phone down and walked off). 30 minutes.
+const IDLE_WORKOUT_MS = 30 * 60 * 1000;
+
 // A linked superset pair shares rest after a full round (both exercises' current-index set done)
 // rather than each exercise having its own rest — uses the longer of the two so neither lift gets
 // shortchanged on recovery.
-function restTotalFor(dayExercises: ProgramExercise[], idx: number, restPacing: RestPacing): number {
+function restTotalFor(dayExercises: ProgramExercise[], idx: number, restPacing: RestPacing, trainingType: TrainingType, rir?: number): number {
   const ex = dayExercises[idx];
-  const base = restForExercise(ex.id, restPacing);
+  const base = restForExercise(ex.id, restPacing, trainingType, rir);
   if (!ex.supersetGroup) return base;
   const partner = dayExercises.find((e, i) => i !== idx && e.supersetGroup === ex.supersetGroup);
   if (!partner) return base;
-  return Math.max(base, restForExercise(partner.id, restPacing));
+  return Math.max(base, restForExercise(partner.id, restPacing, trainingType, rir));
 }
 
 export function useApp() {
@@ -60,6 +64,12 @@ export function useApp() {
   const restInterval = useRef<number | null>(null);
   const elapsedInterval = useRef<number | null>(null);
   const [, forceTick] = useState(0);
+  // Timestamp of the last in-app user interaction, tracked in a ref (no re-render on every tap) and
+  // used only to decide whether an in-progress workout has gone idle. Not persisted.
+  const lastActivityRef = useRef(Date.now());
+  // restEndAt of the rest period whose completion alerts have already fired — makes restTick's
+  // completion branch idempotent across the interval and the visibilitychange resync.
+  const restDoneForRef = useRef<number | null>(null);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* storage full/unavailable */ }
@@ -74,6 +84,11 @@ export function useApp() {
   useEffect(() => {
     const id = window.setInterval(() => {
       const cur = stateRef.current;
+      // Idle-workout check: a workout is open but the app hasn't been touched for IDLE_WORKOUT_MS.
+      // Runs on the same 60s cadence, so it fires within a minute of crossing the threshold.
+      if (cur.workout && !cur.idleWorkoutPrompt && Date.now() - lastActivityRef.current >= IDLE_WORKOUT_MS) {
+        setState(s => (s.workout && !s.idleWorkoutPrompt ? { ...s, idleWorkoutPrompt: true } : s));
+      }
       const now = new Date();
       if (!shouldFireReminder(cur, now)) return;
       const dow = now.toLocaleDateString(undefined, { weekday: 'long' });
@@ -82,6 +97,19 @@ export function useApp() {
       setState(s => ({ ...s, lastReminderFiredDate: now.toDateString() }));
     }, 60000);
     return () => window.clearInterval(id);
+  }, []);
+
+  // Track any in-app interaction as activity, in a ref so ordinary taps never trigger a re-render.
+  // The idle prompt is a blocking dialog resolved only via its Continue/End buttons, so there's no
+  // auto-dismiss here (which would also risk the dialog unmounting between pointerdown and click).
+  useEffect(() => {
+    const onActivity = () => { lastActivityRef.current = Date.now(); };
+    window.addEventListener('pointerdown', onActivity);
+    window.addEventListener('keydown', onActivity);
+    return () => {
+      window.removeEventListener('pointerdown', onActivity);
+      window.removeEventListener('keydown', onActivity);
+    };
   }, []);
 
   const startElapsedTimer = useCallback(() => {
@@ -572,11 +600,11 @@ export function useApp() {
           const newEx = mkEx(swap.stagedExId, 3, 0, { weight: 0, reps: lib.repHi, hitTop: true });
           const dayExercises = [...s.workout.dayExercises, newEx];
           const newIdx = dayExercises.length - 1;
-          const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id]);
+          const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory);
           const sets: WorkoutSetRow[] = [];
           for (let i = 0; i < newEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
           const exSets = { ...s.workout.exSets, [newIdx]: sets };
-          const restTotal = restTotalFor(dayExercises, newIdx, s.restPacing);
+          const restTotal = restTotalFor(dayExercises, newIdx, s.restPacing, s.trainingType);
           return {
             ...s,
             workout: { ...s.workout, dayExercises, exIndex: newIdx, exSets, changesMade: s.workout.changesMade + 1, resting: false, restRemaining: 0, restEndAt: null, restTotal },
@@ -596,11 +624,11 @@ export function useApp() {
         if (swap.tab === 'replace' && oldEx.supersetGroup) {
           dayExercises = dayExercises.map(e => (e.supersetGroup === oldEx.supersetGroup ? { ...e, supersetGroup: null } : e));
         }
-        const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id]);
+        const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory);
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < newEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         const exSets = { ...s.workout.exSets, [idx]: sets };
-        const restTotal = restTotalFor(dayExercises, idx, s.restPacing);
+        const restTotal = restTotalFor(dayExercises, idx, s.restPacing, s.trainingType);
         return { ...s, workout: { ...s.workout, dayExercises, changesMade: s.workout.changesMade + 1, exSets, restTotal }, swap: null };
       }
       const program = JSON.parse(JSON.stringify(s.program));
@@ -648,12 +676,12 @@ export function useApp() {
       // would otherwise show an empty working-sets list — build its default sets now.
       if (!exSets[exIndex]) {
         const landedEx = dayExercises[exIndex];
-        const rec = recommendation(landedEx, s.units, s.coachVoice, s.exerciseHistory[landedEx.id]);
+        const rec = recommendation(landedEx, s.units, s.coachVoice, s.exerciseHistory[landedEx.id], s.exerciseHistory);
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < landedEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         exSets[exIndex] = sets;
       }
-      const restTotal = restTotalFor(dayExercises, exIndex, s.restPacing);
+      const restTotal = restTotalFor(dayExercises, exIndex, s.restPacing, s.trainingType);
       return { ...s, workout: { ...s.workout, dayExercises, exSets, exIndex, resting: false, restRemaining: 0, restEndAt: null, restTotal, changesMade: s.workout.changesMade + 1 } };
     });
   }, []);
@@ -793,12 +821,12 @@ export function useApp() {
       let exSets = prevExSets;
       if (!exSets[exIndex]) {
         const ex = s.workout.dayExercises[exIndex];
-        const rec = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id]);
+        const rec = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id], s.exerciseHistory);
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < ex.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         exSets = { ...prevExSets, [exIndex]: sets };
       }
-      const restTotal = restTotalFor(s.workout.dayExercises, exIndex, s.restPacing);
+      const restTotal = restTotalFor(s.workout.dayExercises, exIndex, s.restPacing, s.trainingType);
       return { ...s, workout: { ...s.workout, exIndex, exSets, resting: false, restRemaining: 0, restEndAt: null, restTotal }, confirmEndEarly: false };
     });
   }, []);
@@ -816,27 +844,35 @@ export function useApp() {
   // interval (backgrounded tab, minimized PWA) still resolves correctly the moment either one next
   // gets to run — remaining time is always derived from the absolute restEndAt, never decremented,
   // so there's nothing to drift or double-count between the two call sites.
+  // Alerts fire *outside* the setState updater deliberately. An updater must be a pure function —
+  // React (and StrictMode especially) may invoke it more than once per commit, which previously
+  // meant the vibrate/sound/notification could double-fire or, on a bailed-out update, not fire at
+  // all. State is read from stateRef here instead, and restDoneForRef makes completion idempotent
+  // per rest period (keyed on that period's restEndAt) so the 1s interval and the visibilitychange
+  // resync can both call this without ever alerting twice for the same rest.
   const restTick = useCallback(() => {
-    setState(s => {
-      if (!s.workout || !s.workout.resting || s.workout.restEndAt == null) return s;
-      const remainingMs = s.workout.restEndAt - Date.now();
-      if (remainingMs <= 0) {
-        if (restInterval.current) { window.clearInterval(restInterval.current); restInterval.current = null; }
-        if (s.restAlertVibrate) vibrateRestEnd();
-        if (s.restAlertSound) playRestEndSound();
-        // Vibration while minimized only reaches the user through this notification's own vibrate
-        // pattern (see alerts.ts) — fire it whenever vibrate OR notify is on, not just notify, so
-        // the default restAlertVibrate:true setting works in the background without the user
-        // having to separately discover and enable the notify toggle too.
-        if (s.restAlertVibrate || s.restAlertNotify) notifyRestEnd(s.restAlertVibrate);
-        return { ...s, workout: { ...s.workout, resting: false, restRemaining: 0, restEndAt: null } };
-      }
-      // Best-effort live countdown in the tray while backgrounded — the in-app toast (RestToast)
-      // already covers the foreground case with a true every-second update, so this only needs to
-      // run when the document is actually hidden.
-      if (s.restAlertNotify && document.hidden) updateRestProgressNotification(Math.round(remainingMs / 1000));
-      return { ...s, workout: { ...s.workout, restRemaining: Math.round(remainingMs / 1000) } };
-    });
+    const cur = stateRef.current;
+    if (!cur.workout || !cur.workout.resting || cur.workout.restEndAt == null) return;
+    const endAt = cur.workout.restEndAt;
+    const remainingMs = endAt - Date.now();
+    if (remainingMs <= 0) {
+      if (restDoneForRef.current === endAt) return;
+      restDoneForRef.current = endAt;
+      if (restInterval.current) { window.clearInterval(restInterval.current); restInterval.current = null; }
+      if (cur.restAlertVibrate) vibrateRestEnd();
+      if (cur.restAlertSound) playRestEndSound();
+      // Fire the notification whenever vibrate OR notify is on, not just notify: the default
+      // restAlertVibrate:true setting should still reach a backgrounded phone (where
+      // navigator.vibrate is a no-op) via the OS alerting on the notification — see alerts.ts.
+      if (cur.restAlertVibrate || cur.restAlertNotify) notifyRestEnd(cur.restAlertVibrate);
+      setState(s => (s.workout ? { ...s, workout: { ...s.workout, resting: false, restRemaining: 0, restEndAt: null } } : s));
+      return;
+    }
+    // Best-effort live countdown in the tray while backgrounded — the in-app toast (RestToast)
+    // already covers the foreground case with a true every-second update, so this only needs to
+    // run when the document is actually hidden.
+    if (cur.restAlertNotify && document.hidden) updateRestProgressNotification(Math.round(remainingMs / 1000));
+    setState(s => (s.workout && s.workout.resting ? { ...s, workout: { ...s.workout, restRemaining: Math.round(remainingMs / 1000) } } : s));
   }, []);
 
   // Vibrate/WebAudio are both restricted to a visible document by the browser (vibrate no-ops
@@ -863,21 +899,25 @@ export function useApp() {
       program[dayKey].lastCompletedAt = null;
       const dayExercises: ProgramExercise[] = JSON.parse(JSON.stringify(program[dayKey].exercises));
       const ex0 = dayExercises[0];
-      const rec0 = recommendation(ex0, s.units, s.coachVoice, s.exerciseHistory[ex0.id]);
+      const rec0 = recommendation(ex0, s.units, s.coachVoice, s.exerciseHistory[ex0.id], s.exerciseHistory);
       const sets0: WorkoutSetRow[] = [];
       for (let i = 0; i < ex0.sets; i++) sets0.push({ weight: rec0.weight, reps: rec0.reps, done: false });
       return {
         ...s, program, screen: 'workout' as Screen,
         workout: {
           dayKey, exIndex: 0, exSets: { 0: sets0 }, dayExercises, changesMade: 0,
-          resting: false, restRemaining: 0, restEndAt: null, restTotal: restTotalFor(dayExercises, 0, s.restPacing), startedAt: Date.now()
+          resting: false, restRemaining: 0, restEndAt: null, restTotal: restTotalFor(dayExercises, 0, s.restPacing, s.trainingType), startedAt: Date.now()
         }
       };
     });
     startElapsedTimer();
   }, [startElapsedTimer]);
 
-  const startRest = useCallback(() => {
+  // restSecOverride lets the caller (toggleSetDone) recompute rest against the RIR of the set that
+  // was just completed — the stored workout.restTotal is the neutral (RIR-unknown) value set when
+  // the exercise was built, so without this the logged effort of the finishing set wouldn't affect
+  // its own rest. Falls back to the stored total for any other caller.
+  const startRest = useCallback((restSecOverride?: number) => {
     stopRest();
     setState(s => {
       if (!s.workout) return s;
@@ -885,8 +925,9 @@ export function useApp() {
       // or notify enabled (both default/commonly on), rather than requesting at cold app boot
       // where the ask has no context and is easy to reflexively deny.
       if ((s.restAlertVibrate || s.restAlertNotify)) requestNotifyPermissionIfNeeded();
-      const restEndAt = Date.now() + s.workout.restTotal * 1000;
-      return { ...s, workout: { ...s.workout, resting: true, restRemaining: s.workout.restTotal, restEndAt } };
+      const total = restSecOverride ?? s.workout.restTotal;
+      const restEndAt = Date.now() + total * 1000;
+      return { ...s, workout: { ...s.workout, resting: true, restTotal: total, restRemaining: total, restEndAt } };
     });
     restInterval.current = window.setInterval(restTick, 1000);
   }, [stopRest, restTick]);
@@ -954,9 +995,13 @@ export function useApp() {
           return;
         }
       }
-      startRest();
+      // Rest reflects the effort of the set just finished: a set logged at RIR 0 (failure) rests
+      // longer than one left several reps short. Undefined rir (not logged) falls back to neutral.
+      const completedRir = state.workout.exSets[idx][i].rir;
+      const restSec = restTotalFor(state.workout.dayExercises, idx, state.restPacing, state.trainingType, completedRir);
+      startRest(restSec);
     }
-  }, [state.workout, startRest, switchExercise]);
+  }, [state.workout, state.restPacing, state.trainingType, startRest, switchExercise]);
   const addSet = useCallback(() => {
     setState(s => {
       if (!s.workout) return s;
@@ -1107,6 +1152,58 @@ export function useApp() {
 
   const exitWorkout = useCallback(() => setState(s => ({ ...s, screen: 'program' as Screen })), []);
   const resumeWorkout = useCallback(() => setState(s => ({ ...s, screen: 'workout' as Screen })), []);
+
+  // Entry point for a tap on the "Rest complete" notification (see src/sw.ts). Lands on the active
+  // program day's workout showing the exercise the user still owes work on: normally that's the one
+  // they were just resting inside, but if the rest they finished was after the *last* set of that
+  // exercise, the useful thing to show is the next incomplete exercise instead. Reads from stateRef
+  // so it works identically whether it was triggered by a postMessage into a running app or by the
+  // boot-time hash check on a cold start.
+  const openRestCompleteExercise = useCallback(() => {
+    const cur = stateRef.current;
+    if (!cur.workout) return;
+    lastActivityRef.current = Date.now();
+    const sets = cur.workout.exSets[cur.workout.exIndex];
+    const allDone = !!sets && sets.length > 0 && sets.every(r => r.done);
+    const next = allDone ? nextIncompleteIndex(cur.workout.dayExercises, cur.workout.exSets, cur.workout.exIndex) : null;
+    setState(s => ({ ...s, screen: 'workout' as Screen, idleWorkoutPrompt: false }));
+    if (next != null) switchExercise(next);
+  }, [switchExercise]);
+
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'open-rest-exercise') openRestCompleteExercise();
+    };
+    // Cold start: the worker had no live client to message, so it passed the intent in the URL.
+    // Strip the hash straight away so a later reload doesn't re-trigger the jump.
+    const consumeHash = () => {
+      if (window.location.hash !== '#rest-exercise') return;
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      openRestCompleteExercise();
+    };
+    navigator.serviceWorker?.addEventListener('message', onMessage);
+    // hashchange as well as the mount-time check: openWindow() normally yields a fresh document
+    // (mount covers it), but if it ever resolves to an already-open context the hash would change
+    // same-document and never remount this effect.
+    window.addEventListener('hashchange', consumeHash);
+    consumeHash();
+    return () => {
+      navigator.serviceWorker?.removeEventListener('message', onMessage);
+      window.removeEventListener('hashchange', consumeHash);
+    };
+  }, [openRestCompleteExercise]);
+  // Idle-prompt resolutions: Continue brings the current exercise back to front; End Workout runs
+  // the normal end-of-session flow (logs whatever's done, same as ending early). Both clear the flag
+  // and reset the activity clock so the prompt can't immediately re-fire.
+  const continueWorkoutFromIdle = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    setState(s => ({ ...s, idleWorkoutPrompt: false, screen: 'workout' as Screen }));
+  }, []);
+  const endWorkoutFromIdle = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    setState(s => ({ ...s, idleWorkoutPrompt: false }));
+    completeWorkout();
+  }, [completeWorkout]);
   const requestEndEarly = useCallback(() => {
     if (state.confirmEndEarly) {
       setState(s => ({ ...s, confirmEndEarly: false }));
@@ -1203,7 +1300,8 @@ export function useApp() {
       removeExercise, changeSets, moveExercise, reorderExercise, setExerciseTarget, bumpExerciseTarget, toggleSuperset,
       startWorkout, switchExercise, setSetField, setSetRir, bumpSetField, toggleSetDone, addSet, removeSet,
       restAdjust, restSkip, advance, applyPlanUpdate, discardPlanUpdate,
-      exitWorkout, resumeWorkout, requestEndEarly, completeWorkout, stopRest
+      exitWorkout, resumeWorkout, requestEndEarly, completeWorkout, stopRest,
+      continueWorkoutFromIdle, endWorkoutFromIdle
     }
   };
 }

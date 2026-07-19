@@ -180,7 +180,41 @@ export function effectiveLast(ex: ProgramExercise, history?: ExerciseHistoryEntr
   return ex.last;
 }
 
-export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVoice = 'Encouraging', history?: ExerciseHistoryEntry[]): Recommendation {
+export interface SimilarRef { name: string; weight: number; reps: number; isTime: boolean; sameVariant: boolean; }
+
+// Finds the closest already-logged exercise to stand in as a reference for one with no history of
+// its own. Ranked by match quality — same movement pattern first (a true variant, e.g. Incline DB
+// Press for Bench Press), then same primary muscle — and within a tier by how much history exists
+// (a well-established lift is a better reference than a one-off). Deliberately does NOT sort by
+// date: ExerciseHistoryEntry.date is a display-formatted locale string with no year, so it isn't
+// reliably comparable across exercises. The *entry* returned is still that exercise's own most
+// recent log (last element of its append-ordered array).
+export function similarExerciseReference(exId: string, allHistory?: Record<string, ExerciseHistoryEntry[]>): SimilarRef | null {
+  const lib = EXLIB[exId];
+  if (!lib || !allHistory) return null;
+  let best: { id: string; tier: number; count: number } | null = null;
+  for (const otherId of Object.keys(allHistory)) {
+    if (otherId === exId) continue;
+    const entries = allHistory[otherId];
+    if (!entries || !entries.length) continue;
+    const other = EXLIB[otherId];
+    if (!other) continue;
+    const tier = other.pattern === lib.pattern ? 0 : (other.muscle === lib.muscle ? 1 : -1);
+    if (tier < 0) continue;
+    if (!best || tier < best.tier || (tier === best.tier && entries.length > best.count)) {
+      best = { id: otherId, tier, count: entries.length };
+    }
+  }
+  if (!best) return null;
+  const entries = allHistory[best.id];
+  const e = entries[entries.length - 1];
+  const sets = e.sets && e.sets.length ? e.sets : [{ weight: e.weight, reps: e.reps }];
+  const top = sets[sets.length - 1];
+  const otherLib = EXLIB[best.id];
+  return { name: otherLib.name, weight: top.weight, reps: top.reps, isTime: otherLib.trackingMode === 'time', sameVariant: best.tier === 0 };
+}
+
+export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVoice = 'Encouraging', history?: ExerciseHistoryEntry[], allHistory?: Record<string, ExerciseHistoryEntry[]>): Recommendation {
   const lib = EXLIB[ex.id];
   const equip = lib.equip[ex.equipIdx];
   const last = effectiveLast(ex, history);
@@ -190,6 +224,32 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
   const fmtVal = (v: number) => (isTime ? formatSetTime(v) : String(v) + unitWord);
   const v = voice.toLowerCase();
   const phrase = (direct: string, encouraging: string, hype: string) => (v === 'direct' ? direct : v === 'hype' ? hype : encouraging);
+
+  // Never show a progressive-overload prompt for an exercise that's never been logged: `ex.last` is
+  // placeholder data for a fresh slot (weight 0), so "+2.5 kg on last time" would be advice built on
+  // nothing, and it reads as if the user has done this lift before. Instead surface a first-time
+  // message, seeded with the closest logged variant as a reference point when one exists. A manual
+  // target from the quick-edit modal counts as a deliberate starting point, so it's left alone.
+  if (!ex.manualTarget && (!history || history.length === 0)) {
+    const bodyweight = equip.v === 'bodyweight' || equip.v === 'assisted';
+    const ref = similarExerciseReference(ex.id, allHistory);
+    if (ref && !bodyweight) {
+      const refVal = ref.isTime ? formatSetTime(ref.reps) : ref.reps + ' reps';
+      return {
+        weight: ref.weight, reps: lib.repHi,
+        title: phrase('First time — reference below', 'First time — here’s a reference', 'New lift — let’s find your number! 💪'),
+        note: 'No history for this one yet. Closest thing you’ve logged is ' + ref.name + ' at ' + fmtWeight(ref.weight, units) + ' × ' + refVal +
+          (ref.sameVariant ? ' (same movement)' : ' (same muscle group)') + ' — use it as a starting reference and adjust to feel.'
+      };
+    }
+    return {
+      weight: bodyweight ? 0 : last.weight, reps: lib.repHi,
+      title: phrase('First time — set a baseline', 'First time — find your baseline', 'New lift — set your baseline! 💪'),
+      note: bodyweight
+        ? 'No history yet. Aim for ' + fmtVal(lib.repHi) + ' and we’ll track your progress from here.'
+        : 'No history yet. Pick a weight you can control for ' + fmtVal(lib.repHi) + ' — we’ll build from there next session.'
+    };
+  }
   if (equip.v === 'bodyweight' || equip.v === 'assisted') {
     const bump = isTime ? 5 : 1;
     const bumpWord = isTime ? bump + 's' : '1 rep';
@@ -231,8 +291,33 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
 
 const REST_PACING_MULT: Record<RestPacing, number> = { Relaxed: 1.3, Standard: 1, Aggressive: 0.7 };
 
-export function restForExercise(exId: string, pacing: RestPacing = 'Standard'): number {
-  return Math.round(EXLIB[exId].restBase * REST_PACING_MULT[pacing]);
+// Research-backed rest scaling, layered on top of each exercise's restBase (which already encodes
+// compound-vs-isolation and load). Two factors beyond the user's manual pacing override:
+//  - training type: heavy near-max strength work and every-set-to-failure (HIT) need the longest
+//    inter-set recovery for performance/volume-load to hold across sets, while endurance/metabolic
+//    work rests shortest (Schoenfeld 2016; NSCA guidance that longer rest on multi-joint work
+//    preserves subsequent-set performance).
+//  - proximity to failure (RIR of the set just finished): a set taken to true failure incurs more
+//    fatigue and needs longer to recover than one left several reps in reserve.
+export const REST_TRAINING_FACTOR: Record<TrainingType, number> = {
+  strength: 1.4, hit: 1.3, progressive_overload: 1, general: 0.85, endurance: 0.6
+};
+
+// undefined RIR (not logged for that set, or a static day-time estimate that can't know future
+// effort) resolves to the neutral RIR-2 factor rather than assuming failure or a full buffer.
+export function rirRestFactor(rir?: number): number {
+  if (rir == null) return 1;
+  if (rir <= 0) return 1.25;   // true failure
+  if (rir === 1) return 1.15;
+  if (rir === 2) return 1;     // baseline hypertrophy proximity
+  if (rir === 3) return 0.9;
+  return 0.8;                  // 4+ reps in reserve
+}
+
+// Clamped to a sane 30s–5min window so no combination of multipliers produces an absurd rest.
+export function restForExercise(exId: string, pacing: RestPacing = 'Standard', trainingType: TrainingType = 'progressive_overload', rir?: number): number {
+  const raw = EXLIB[exId].restBase * REST_TRAINING_FACTOR[trainingType] * rirRestFactor(rir) * REST_PACING_MULT[pacing];
+  return Math.max(30, Math.min(300, Math.round(raw)));
 }
 
 function estimateDayTimeFormula(state: AppState, dayKey: string, pacing: RestPacing, warmupStyle: WarmupStyle): number {
@@ -240,7 +325,7 @@ function estimateDayTimeFormula(state: AppState, dayKey: string, pacing: RestPac
   let sec = day.exercises.length * 30;
   day.exercises.forEach(ex => {
     const lib = EXLIB[ex.id];
-    sec += ex.sets * (40 + restForExercise(ex.id, pacing));
+    sec += ex.sets * (40 + restForExercise(ex.id, pacing, state.trainingType));
     if (lib.compound && ex.last.weight >= 40 && warmupStyle !== 'Minimal') sec += 150;
   });
   return sec;

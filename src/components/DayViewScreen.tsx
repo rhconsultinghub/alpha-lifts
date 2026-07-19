@@ -5,20 +5,23 @@ import { ExercisePhoto } from './ExercisePhoto';
 import { BodyDiagram } from './BodyDiagram';
 import { MusclesWorkedModal } from './modals/MusclesWorkedModal';
 
-const LONG_PRESS_MS = 450;
-const MOVE_CANCEL_PX = 10;
+const LONG_PRESS_MS = 280;
+const MOVE_CANCEL_PX = 12;
 
 // Press-and-hold drag reordering, engaged only from the ⠿ handle (not the row itself) so it can't
-// fight with the row's own tap-to-edit / photo-tap / swap-button targets. While dragging, the
-// visual order is tracked entirely in local component state (`drag.order`, a permutation of
-// display positions) and only committed to the real program via a single reorderExercise call on
-// release — dispatching mid-gesture would race the async re-render against a flurry of pointermove
-// events and reorder against stale indices.
+// fight with the row's own tap-to-edit / photo-tap / swap-button targets. After a short hold the
+// row "pops out" (lifts, scales up, accent outline, a haptic tick) and then follows the finger,
+// while the other rows slide to open a gap at the drop position — so it's always clear both that a
+// drag is engaged and where the row will land. The exercises array is never permuted mid-drag: the
+// dragged row keeps its original index and just renders translated, and the others render shifted by
+// one row-height toward/away from the gap; only on release does a single reorderExercise call
+// commit, sidestepping stale-index races against the flurry of pointermove re-renders.
 export function DayViewScreen({ vm }: { vm: ViewModel }) {
   const d = vm.currentDay;
-  const [drag, setDrag] = useState<{ p0: number; startY: number; rowH: number; order: number[]; position: number } | null>(null);
+  const [drag, setDrag] = useState<{ p0: number; startY: number; rowH: number; dy: number; target: number } | null>(null);
+  const [pressing, setPressing] = useState<number | null>(null);
   const longPressTimer = useRef<number | null>(null);
-  const rowRef = useRef<HTMLDivElement | null>(null);
+  const pressRef = useRef<{ startY: number; rowH: number } | null>(null);
 
   if (!d) return null;
   const exercises: any[] = d.exercises;
@@ -29,40 +32,40 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
 
   const handlePointerDown = (e: ReactPointerEvent, position: number) => {
     const startY = e.clientY;
-    const rowH = rowRef.current?.offsetHeight || 90;
+    const rowEl = (e.currentTarget as HTMLElement).closest('[data-dvrow]') as HTMLElement | null;
+    const rowH = rowEl?.offsetHeight || 96;
     const pointerId = e.pointerId;
     const target = e.currentTarget as HTMLElement;
     clearLongPress();
+    pressRef.current = { startY, rowH };
+    setPressing(position);
     longPressTimer.current = window.setTimeout(() => {
       longPressTimer.current = null;
       target.setPointerCapture?.(pointerId);
-      const order = exercises.map((_, k) => k);
-      setDrag({ p0: position, startY, rowH, order, position });
+      if (navigator.vibrate) navigator.vibrate(15); // haptic "pop" on pickup (mobile only, no-op elsewhere)
+      setDrag({ p0: position, startY, rowH, dy: 0, target: position });
     }, LONG_PRESS_MS);
   };
 
   const handlePointerMove = (e: ReactPointerEvent) => {
-    if (longPressTimer.current != null && Math.abs(e.clientY - (drag?.startY ?? e.clientY)) > MOVE_CANCEL_PX) {
+    // pre-engage: a finger that travels before the hold completes is a scroll, not a pickup — cancel
+    if (longPressTimer.current != null && pressRef.current && Math.abs(e.clientY - pressRef.current.startY) > MOVE_CANCEL_PX) {
       clearLongPress();
+      setPressing(null);
     }
     if (!drag) return;
-    const steps = Math.round((e.clientY - drag.startY) / drag.rowH);
-    const newPosition = Math.max(0, Math.min(exercises.length - 1, drag.p0 + steps));
-    if (newPosition !== drag.position) {
-      const order = exercises.map((_, k) => k);
-      const [moved] = order.splice(drag.p0, 1);
-      order.splice(newPosition, 0, moved);
-      setDrag({ ...drag, order, position: newPosition });
-    }
+    const dy = e.clientY - drag.startY;
+    const target = Math.max(0, Math.min(exercises.length - 1, drag.p0 + Math.round(dy / drag.rowH)));
+    if (dy !== drag.dy || target !== drag.target) setDrag({ ...drag, dy, target });
   };
 
   const finishDrag = () => {
     clearLongPress();
-    if (drag && drag.position !== drag.p0) exercises[drag.p0].reorderTo(drag.position);
+    setPressing(null);
+    pressRef.current = null;
+    if (drag && drag.target !== drag.p0) exercises[drag.p0].reorderTo(drag.target);
     setDrag(null);
   };
-
-  const displayOrder = drag ? drag.order : exercises.map((_, k) => k);
 
   return (
     <>
@@ -132,19 +135,30 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
           </div>
         )}
 
-        {displayOrder.map((origIdx, displayPos) => {
-          const ex = exercises[origIdx];
-          const isDragged = !!drag && displayPos === drag.position;
+        {exercises.map((ex, i) => {
+          const isDragged = !!drag && drag.p0 === i;
+          const isPressing = pressing === i && !drag;
+          // Non-dragged rows slide by one row-height to open the gap the dragged row will drop into.
+          let shift = 0;
+          if (drag && !isDragged) {
+            if (drag.target > drag.p0 && i > drag.p0 && i <= drag.target) shift = -drag.rowH;
+            else if (drag.target < drag.p0 && i >= drag.target && i < drag.p0) shift = drag.rowH;
+          }
           return (
             <div
-              key={ex.id + '-' + origIdx}
-              ref={displayPos === 0 ? rowRef : undefined}
+              key={ex.id + '-' + i}
+              data-dvrow="1"
               style={{
-                padding: '18px 0', borderBottom: '1px solid rgba(255,255,255,.1)', display: 'flex', gap: 14,
-                background: isDragged ? 'rgba(255,255,255,.05)' : 'transparent',
-                boxShadow: isDragged ? '0 8px 20px rgba(0,0,0,.4)' : 'none',
+                padding: '18px 0', borderBottom: '1px solid rgba(255,255,255,.1)', display: 'flex', gap: 14, position: 'relative',
+                transform: isDragged ? `translateY(${drag.dy}px) scale(1.03)` : `translateY(${shift}px)`,
+                transition: isDragged ? 'none' : 'transform 160ms cubic-bezier(.2,.7,.3,1)',
+                zIndex: isDragged ? 5 : 'auto',
+                background: isDragged ? 'rgba(30,25,20,.96)' : 'transparent',
+                boxShadow: isDragged ? '0 14px 32px rgba(0,0,0,.55)' : 'none',
+                outline: isDragged ? '1px solid oklch(0.65 0.19 35 / 0.55)' : 'none',
+                outlineOffset: -1,
                 borderRadius: isDragged ? 14 : 0,
-                position: 'relative', zIndex: isDragged ? 1 : 'auto'
+                opacity: isPressing ? 0.7 : 1
               }}
             >
               <ExercisePhoto id={ex.id} pattern={ex.pattern} onClick={ex.openDetail} />
@@ -163,12 +177,12 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
                 <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginTop: 8 }}>🔒 {ex.equipLabel} · {ex.muscle}</div>
               </button>
               <div
-                onPointerDown={(e) => handlePointerDown(e, origIdx)}
+                onPointerDown={(e) => handlePointerDown(e, i)}
                 onPointerMove={handlePointerMove}
                 onPointerUp={finishDrag}
                 onPointerCancel={finishDrag}
                 title="Press and hold to reorder"
-                style={{ flex: 'none', alignSelf: 'center', width: 32, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(245,240,234,.3)', fontSize: 18, touchAction: 'none', cursor: 'grab' }}
+                style={{ flex: 'none', alignSelf: 'center', width: 32, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', color: isDragged ? 'oklch(0.78 0.15 35)' : 'rgba(245,240,234,.3)', fontSize: 18, touchAction: 'none', cursor: drag ? 'grabbing' : 'grab' }}
               >⠿</div>
             </div>
           );

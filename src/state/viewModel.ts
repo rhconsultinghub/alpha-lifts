@@ -1,7 +1,7 @@
 import { EXLIB, DAY_THEMES, MUSCLE_TARGETS, TRAINING_LABELS, TRAINING_TYPE_DESCS, EQUIP_CATALOG } from '../data/exercises';
 import { SPLIT_PRESETS, DAY_TYPE_LABELS } from '../data/wizard';
 import { WARMUP_LIBRARY } from '../data/warmups';
-import { ACHIEVEMENTS, CATEGORY_LABELS, TOTAL_POSSIBLE_POINTS, type AchievementCategory } from '../data/achievements';
+import { ACHIEVEMENT_FAMILIES, CATEGORY_LABELS, TOTAL_POSSIBLE_POINTS, TOTAL_TIERS, type AchievementCategory } from '../data/achievements';
 import type { AppState, HistoryEntry, Muscle, TrainingType } from '../data/types';
 import type { Actions } from './useApp';
 import {
@@ -54,30 +54,65 @@ export function buildViewModel(state: AppState, actions: Actions) {
   // only bit of achievement-related state that's actually persisted, and it only controls the
   // "NEW" badge, never unlock status itself.
   const achievementsVM = (() => {
-    const items = ACHIEVEMENTS.map(a => {
-      const current = a.metric(s);
-      const target = typeof a.target === 'function' ? a.target(s) : a.target;
-      const description = typeof a.description === 'function' ? a.description(s) : a.description;
-      const unlocked = current >= target;
-      const progressPct = Math.max(0, Math.min(100, Math.round((current / target) * 100)));
-      const progressLabel = a.formatProgress ? a.formatProgress(current, target, s) : `${Math.min(current, target)} / ${target}`;
+    const fmt = (v: number, f: typeof ACHIEVEMENT_FAMILIES[number]) => (f.formatValue ? f.formatValue(v, s) : String(Math.round(v)));
+    const items = ACHIEVEMENT_FAMILIES.map(f => {
+      const current = f.metric(s);
+      const thresholds = f.tiers.map(t => (typeof t.threshold === 'function' ? t.threshold(s) : t.threshold));
+      // highest tier whose threshold is met; -1 if none reached yet.
+      let reached = -1;
+      for (let k = 0; k < thresholds.length; k++) if (current >= thresholds[k]) reached = k;
+      const maxed = reached === f.tiers.length - 1;
+      const unlocked = reached >= 0;
+      const earnedPoints = f.tiers.slice(0, reached + 1).reduce((sum, t) => sum + t.points, 0);
+      const familyPoints = f.tiers.reduce((sum, t) => sum + t.points, 0);
+      const curTier = reached >= 0 ? f.tiers[reached] : null;
+      const nextTier = maxed ? null : f.tiers[reached + 1];
+      const nextThreshold = maxed ? thresholds[thresholds.length - 1] : thresholds[reached + 1];
+      const prevThreshold = reached >= 0 ? thresholds[reached] : 0;
+      // progress bar spans the current tier's floor -> next tier's threshold, so it visibly refills
+      // each time a tier is cleared rather than creeping ever-slower toward one far target.
+      const span = nextThreshold - prevThreshold;
+      const progressPct = maxed ? 100 : Math.max(0, Math.min(100, Math.round(((current - prevThreshold) / (span || 1)) * 100)));
+      // singularize the noun when the target is exactly 1 ("1 PR", not "1 PRs"); "in a row" is
+      // invariant so it's left alone.
+      const dispNoun = f.noun && nextThreshold === 1 && f.noun !== 'in a row' ? f.noun.replace(/s$/, '') : f.noun;
+      const nounSuffix = dispNoun ? ' ' + dispNoun : '';
+      const progressLabel = maxed
+        ? `All ${f.tiers.length} tiers complete`
+        : `${fmt(Math.min(current, nextThreshold), f)} / ${fmt(nextThreshold, f)}${nounSuffix}`;
+      // NEW badge tracks the *current* tier: seen ids are `${familyId}:${tierIndex}` so unlocking a
+      // fresh tier re-lights it even though earlier tiers of the same family were already seen.
+      const seenId = `${f.id}:${reached}`;
       return {
-        id: a.id, name: a.name, category: a.category, icon: a.icon, points: a.points, description,
-        unlocked, progressPct, progressLabel, isNew: unlocked && !s.seenAchievementIds.includes(a.id)
+        id: f.id, title: f.title, category: f.category, icon: f.icon,
+        unlocked, maxed,
+        tierName: curTier ? curTier.name : f.tiers[0].name,
+        tierText: unlocked ? `Tier ${reached + 1} / ${f.tiers.length}` : `0 / ${f.tiers.length}`,
+        nextName: nextTier ? nextTier.name : '',
+        description: maxed
+          ? `Maxed out — ${fmt(nextThreshold, f)}${nounSuffix}.`
+          : (unlocked ? `Next: ${nextTier!.name} at ${fmt(nextThreshold, f)}${nounSuffix}.` : `Reach ${fmt(nextThreshold, f)}${nounSuffix} to unlock.`),
+        progressPct, progressLabel,
+        earnedPoints, familyPoints, nextPoints: nextTier ? nextTier.points : 0,
+        reachedTiers: reached + 1, totalTiers: f.tiers.length,
+        isNew: unlocked && !s.seenAchievementIds.includes(seenId)
       };
     });
-    const unlockedItems = items.filter(i => i.unlocked);
     const categories = (Object.keys(CATEGORY_LABELS) as AchievementCategory[]).map(cat => ({
       key: cat, label: CATEGORY_LABELS[cat], items: items.filter(i => i.category === cat)
     }));
+    // mark the current tier of every unlocked family as seen.
+    const seenIds = items.filter(i => i.unlocked).map(i => `${i.id}:${i.reachedTiers - 1}`);
     return {
       categories,
-      totalPoints: unlockedItems.reduce((sum, i) => sum + i.points, 0),
+      totalPoints: items.reduce((sum, i) => sum + i.earnedPoints, 0),
       totalPossiblePoints: TOTAL_POSSIBLE_POINTS,
-      unlockedCount: unlockedItems.length,
+      tiersEarned: items.reduce((sum, i) => sum + i.reachedTiers, 0),
+      totalTiers: TOTAL_TIERS,
+      unlockedCount: items.filter(i => i.unlocked).length,
       totalCount: items.length,
       hasNew: items.some(i => i.isNew),
-      markSeen: () => actions.markAchievementsSeen(unlockedItems.map(i => i.id))
+      markSeen: () => actions.markAchievementsSeen(seenIds)
     };
   })();
 
@@ -275,7 +310,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       exercises: day.exercises.map((ex, i) => {
         const lib = EXLIB[ex.id];
         const equip = lib.equip[ex.equipIdx];
-        const r = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id]);
+        const r = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id], s.exerciseHistory);
         const isTime = lib.trackingMode === 'time';
         return {
           id: ex.id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label,
@@ -343,7 +378,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     const lib = EXLIB[ex.id];
     const equip = lib.equip[ex.equipIdx];
     const exHistory = s.exerciseHistory[ex.id];
-    const rec = recommendation(ex, s.units, s.coachVoice, exHistory);
+    const rec = recommendation(ex, s.units, s.coachVoice, exHistory, s.exerciseHistory);
     const warmupRaw = warmupInfo(ex, s.warmupStyle);
     const warmup = warmupRaw ? {
       show: true, note: warmupRaw.note,
@@ -409,7 +444,12 @@ export function buildViewModel(state: AppState, actions: Actions) {
         // logged session for this exercise, regardless of which program day it was done on, beats
         // this slot's own (possibly stale) lastSets.
         const latestHistoryEntry = exHistory && exHistory.length ? exHistory[exHistory.length - 1] : null;
-        const lastSetsArr = (latestHistoryEntry && latestHistoryEntry.sets && latestHistoryEntry.sets.length)
+        // Never-logged exercise: the final `ex.last` fallback below is placeholder data (weight 0)
+        // for a fresh program slot, so showing it as "Last time: 0 lb × 6" invents a session that
+        // never happened. Suppress the per-set last-time line entirely in that case, matching the
+        // first-time messaging recommendation() now shows instead of a progressive-overload prompt.
+        const neverLogged = !ex.manualTarget && !latestHistoryEntry && !(ex.lastSets && ex.lastSets.length);
+        const lastSetsArr = neverLogged ? [] : (latestHistoryEntry && latestHistoryEntry.sets && latestHistoryEntry.sets.length)
           ? latestHistoryEntry.sets
           : (ex.lastSets && ex.lastSets.length) ? ex.lastSets : (ex.last ? Array(ex.sets).fill({ weight: ex.last.weight, reps: ex.last.reps }) : []);
         return currentSets.map((row, i) => {
@@ -710,6 +750,14 @@ export function buildViewModel(state: AppState, actions: Actions) {
   const resumeText = s.workout ? ('Resume ' + s.program[s.workout.dayKey].label + ' — Exercise ' + (s.workout.exIndex + 1) + ' of ' + s.program[s.workout.dayKey].exercises.length) : '';
   const resumeElapsedText = s.workout ? formatElapsed(Date.now() - (s.workout.startedAt || Date.now())) : '';
 
+  const idlePrompt = {
+    show: !!s.workout && s.idleWorkoutPrompt,
+    exerciseName: s.workout ? (EXLIB[s.workout.dayExercises[s.workout.exIndex]?.id]?.name || '') : '',
+    elapsedText: resumeElapsedText,
+    continueWorkout: actions.continueWorkoutFromIdle,
+    endWorkout: actions.endWorkoutFromIdle
+  };
+
   return {
     needsOnboarding: !s.onboarded,
     isProgram: s.screen === 'program',
@@ -727,6 +775,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     tabAchievementsColor: s.screen === 'achievements' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
     hasNewAchievements: achievementsVM.hasNew,
     achievements: achievementsVM,
+    idlePrompt,
     goProgram: actions.goProgram, goProgress: actions.goProgress, goExercises: actions.goExercises, goAchievements: actions.goAchievements,
     trainingTypes,
     muscleBars: bars.map(m => ({ ...m, drill: () => actions.openMuscleDrill(m.name) })),

@@ -8,141 +8,126 @@ import {
 
 export type AchievementCategory = 'consistency' | 'records' | 'volume' | 'variety';
 
-export interface Achievement {
-  id: string;
+// A single rung of a badge family. The badge as a whole is never "done" until every tier is
+// reached, so there's always a next target to chase (the whole point of tiering these — see
+// viewModel's achievementsVM for how the current tier / next tier / progress are derived).
+export interface AchievementTier {
+  // number, or a function of state for tiers whose threshold depends on the unit setting (volume).
+  threshold: number | ((state: AppState) => number);
+  points: number;
   name: string;
+}
+
+export interface AchievementFamily {
+  id: string;
+  title: string;
   category: AchievementCategory;
   icon: string;
-  points: number;
-  // static string, or a function for achievements whose displayed threshold depends on the
-  // user's unit setting (volume) — see volumeMilestone() below.
-  description: string | ((state: AppState) => string);
-  // current progress and the threshold to unlock at — kept as plain numbers (not a boolean) so the
-  // UI can show a progress bar on locked achievements too, not just a lock icon. target can be a
-  // function of state for the same unit-dependent reason as description.
   metric: (state: AppState) => number;
-  target: number | ((state: AppState) => number);
-  // overrides the plain "current/target" progress label for achievements where the raw numbers
-  // need unit conversion (volume) rather than being displayed as-is (counts).
-  formatProgress?: (current: number, target: number, state: AppState) => string;
+  tiers: AchievementTier[];        // strictly ascending by threshold
+  noun: string;                    // for progress text, e.g. "50 / 100 workouts"
+  // overrides raw-number formatting of the metric/threshold in progress text (volume -> "1,250 kg").
+  formatValue?: (v: number, state: AppState) => string;
 }
 
 const bool = (fn: (state: AppState) => boolean) => (state: AppState) => (fn(state) ? 1 : 0);
+const ALL_MUSCLES = Object.keys(MUSCLE_TARGETS).length;
 
-// Volume milestones are round numbers *in the user's own unit* (2,000 lb / 1,000 kg, etc.) rather
-// than one kg threshold converted into an odd lb number (1,000 kg -> "2,205 lb") — matches how a
-// lifter actually thinks about round milestones in whichever unit they train in. The underlying
-// metric (lifetimeVolumeKg) is always in kg, so the kg-equivalent of the *display* unit's round
-// number is what's actually compared against.
-function volumeMilestone(kgTarget: number, lbTarget: number) {
-  return (state: AppState) => (state.units === 'lb' ? lbTarget / 2.20462 : kgTarget);
-}
-function volumeLabel(kgTarget: number, lbTarget: number) {
-  return (state: AppState) => (state.units === 'lb' ? lbTarget.toLocaleString() + ' lb' : kgTarget.toLocaleString() + ' kg');
-}
+// Volume thresholds are round numbers *in the user's own unit* (2,000 lb / 1,000 kg …) rather than
+// one kg number converted into an odd lb figure. lifetimeVolumeKg is always kg, so we compare
+// against the kg-equivalent of the display unit's round number.
+const vol = (kg: number, lb: number) => (state: AppState) => (state.units === 'lb' ? lb / 2.20462 : kg);
+const volFmt = (v: number, state: AppState) => fmtWeight(v, state.units);
 
-export const ACHIEVEMENTS: Achievement[] = [
+export const ACHIEVEMENT_FAMILIES: AchievementFamily[] = [
   // ---------- consistency & streaks ----------
   {
-    id: 'first-step', name: 'First Step', category: 'consistency', icon: '🎯', points: 10,
-    description: 'Complete your first workout.', metric: completedWorkoutCount, target: 1
+    id: 'streak', title: 'Streak', category: 'consistency', icon: '🔥', metric: bestEverStreak, noun: 'in a row',
+    tiers: [
+      { threshold: 3, points: 25, name: 'On a Roll' },
+      { threshold: 7, points: 60, name: 'Week Warrior' },
+      { threshold: 14, points: 130, name: 'Fortnight' },
+      { threshold: 30, points: 300, name: 'Unbroken' },
+      { threshold: 60, points: 600, name: 'Relentless' }
+    ]
   },
   {
-    id: 'streak-3', name: '3-Day Streak', category: 'consistency', icon: '🔥', points: 25,
-    description: 'Complete 3 sessions in a row without a skip.', metric: bestEverStreak, target: 3
-  },
-  {
-    id: 'streak-7', name: '7-Day Streak', category: 'consistency', icon: '🔥', points: 60,
-    description: 'Complete 7 sessions in a row without a skip.', metric: bestEverStreak, target: 7
-  },
-  {
-    id: 'streak-14', name: 'Two-Week Streak', category: 'consistency', icon: '🔥', points: 150,
-    description: 'Complete 14 sessions in a row without a skip.', metric: bestEverStreak, target: 14
-  },
-  {
-    id: 'clean-week-1', name: 'Clean Week', category: 'consistency', icon: '✅', points: 30,
-    description: 'Finish a week with nothing marked skipped.', metric: cleanWeekCount, target: 1
-  },
-  {
-    id: 'clean-week-4', name: 'Four Clean Weeks', category: 'consistency', icon: '✅', points: 100,
-    description: 'Finish 4 separate weeks with nothing marked skipped.', metric: cleanWeekCount, target: 4
+    id: 'clean-weeks', title: 'Clean Weeks', category: 'consistency', icon: '✅', metric: cleanWeekCount, noun: 'clean weeks',
+    tiers: [
+      { threshold: 1, points: 30, name: 'Clean Week' },
+      { threshold: 4, points: 90, name: 'Clean Month' },
+      { threshold: 12, points: 220, name: 'Clean Quarter' },
+      { threshold: 26, points: 450, name: 'Half-Year Clean' },
+      { threshold: 52, points: 800, name: 'Spotless Year' }
+    ]
   },
 
   // ---------- personal records ----------
   {
-    id: 'pr-1', name: 'First PR', category: 'records', icon: '🏆', points: 15,
-    description: 'Log your first personal record.', metric: totalPRCount, target: 1
-  },
-  {
-    id: 'pr-10', name: 'Record Breaker', category: 'records', icon: '🏆', points: 50,
-    description: 'Log 10 personal records total.', metric: totalPRCount, target: 10
-  },
-  {
-    id: 'pr-25', name: 'Record Collector', category: 'records', icon: '🏆', points: 120,
-    description: 'Log 25 personal records total.', metric: totalPRCount, target: 25
-  },
-  {
-    id: 'pr-50', name: 'PR Machine', category: 'records', icon: '🏆', points: 200,
-    description: 'Log 50 personal records total.', metric: totalPRCount, target: 50
+    id: 'prs', title: 'Personal Records', category: 'records', icon: '🏆', metric: totalPRCount, noun: 'PRs',
+    tiers: [
+      { threshold: 1, points: 15, name: 'First PR' },
+      { threshold: 10, points: 50, name: 'Record Breaker' },
+      { threshold: 25, points: 120, name: 'Record Collector' },
+      { threshold: 50, points: 220, name: 'PR Machine' },
+      { threshold: 100, points: 450, name: 'PR Legend' }
+    ]
   },
 
   // ---------- volume & totals ----------
   {
-    id: 'sessions-10', name: 'Ten Sessions', category: 'volume', icon: '📅', points: 30,
-    description: 'Complete 10 workouts total.', metric: completedWorkoutCount, target: 10
+    id: 'workouts', title: 'Workouts', category: 'volume', icon: '📅', metric: completedWorkoutCount, noun: 'workouts',
+    tiers: [
+      { threshold: 1, points: 10, name: 'First Step' },
+      { threshold: 10, points: 25, name: 'Ten Sessions' },
+      { threshold: 25, points: 60, name: 'Quarter Century' },
+      { threshold: 50, points: 120, name: 'Half Century' },
+      { threshold: 100, points: 250, name: 'Century' },
+      { threshold: 250, points: 500, name: 'Double Ton' },
+      { threshold: 500, points: 900, name: 'Iron Will' }
+    ]
   },
   {
-    id: 'sessions-25', name: 'Quarter Century', category: 'volume', icon: '📅', points: 75,
-    description: 'Complete 25 workouts total.', metric: completedWorkoutCount, target: 25
-  },
-  {
-    id: 'sessions-50', name: 'Half Century', category: 'volume', icon: '📅', points: 150,
-    description: 'Complete 50 workouts total.', metric: completedWorkoutCount, target: 50
-  },
-  {
-    id: 'sessions-100', name: 'Century', category: 'volume', icon: '📅', points: 300,
-    description: 'Complete 100 workouts total.', metric: completedWorkoutCount, target: 100
-  },
-  {
-    id: 'volume-1000', name: 'Ton Lifted', category: 'volume', icon: '🏋', points: 40,
-    description: state => `Lift a cumulative ${volumeLabel(1000, 2000)(state)} across every session.`,
-    metric: lifetimeVolumeKg, target: volumeMilestone(1000, 2000),
-    formatProgress: (current, target, state) => `${fmtWeight(current, state.units)} / ${fmtWeight(target, state.units)}`
-  },
-  {
-    id: 'volume-10000', name: 'Ten Tonnes', category: 'volume', icon: '🏋', points: 150,
-    description: state => `Lift a cumulative ${volumeLabel(10000, 20000)(state)} across every session.`,
-    metric: lifetimeVolumeKg, target: volumeMilestone(10000, 20000),
-    formatProgress: (current, target, state) => `${fmtWeight(current, state.units)} / ${fmtWeight(target, state.units)}`
-  },
-  {
-    id: 'volume-50000', name: 'Fifty Tonnes', category: 'volume', icon: '🏋', points: 350,
-    description: state => `Lift a cumulative ${volumeLabel(50000, 100000)(state)} across every session.`,
-    metric: lifetimeVolumeKg, target: volumeMilestone(50000, 100000),
-    formatProgress: (current, target, state) => `${fmtWeight(current, state.units)} / ${fmtWeight(target, state.units)}`
+    id: 'volume', title: 'Lifetime Volume', category: 'volume', icon: '🏋', metric: lifetimeVolumeKg, noun: '', formatValue: volFmt,
+    tiers: [
+      { threshold: vol(1000, 2000), points: 40, name: 'Ton Lifted' },
+      { threshold: vol(10000, 20000), points: 150, name: 'Ten Tonnes' },
+      { threshold: vol(50000, 100000), points: 350, name: 'Fifty Tonnes' },
+      { threshold: vol(100000, 200000), points: 600, name: 'Hundred Tonnes' },
+      { threshold: vol(250000, 500000), points: 1000, name: 'Quarter Million' }
+    ]
   },
 
   // ---------- variety & exploration ----------
   {
-    id: 'variety-5', name: 'Explorer', category: 'variety', icon: '🧭', points: 20,
-    description: 'Log at least one set on 5 different exercises.', metric: distinctExercisesLoggedCount, target: 5
+    id: 'variety', title: 'Exercise Variety', category: 'variety', icon: '🧭', metric: distinctExercisesLoggedCount, noun: 'exercises',
+    tiers: [
+      { threshold: 5, points: 20, name: 'Explorer' },
+      { threshold: 15, points: 60, name: 'Well-Rounded' },
+      { threshold: 30, points: 130, name: 'Versatile' },
+      { threshold: 50, points: 250, name: 'Encyclopedic' }
+    ]
   },
   {
-    id: 'variety-15', name: 'Well-Rounded', category: 'variety', icon: '🧭', points: 60,
-    description: 'Log at least one set on 15 different exercises.', metric: distinctExercisesLoggedCount, target: 15
+    id: 'full-body', title: 'Full Body', category: 'variety', icon: '💪', metric: distinctMusclesTrainedCount, noun: 'muscle groups',
+    tiers: [
+      { threshold: Math.ceil(ALL_MUSCLES / 2), points: 25, name: 'Half Covered' },
+      { threshold: ALL_MUSCLES, points: 50, name: 'Full Body' }
+    ]
   },
   {
-    id: 'full-body', name: 'Full Body', category: 'variety', icon: '💪', points: 50,
-    description: 'Train every muscle group at least once.', metric: distinctMusclesTrainedCount,
-    target: Object.keys(MUSCLE_TARGETS).length
+    id: 'custom', title: 'Custom Creator', category: 'variety', icon: '✏️', metric: customExerciseCount, noun: 'custom exercises',
+    tiers: [
+      { threshold: 1, points: 25, name: 'Custom Creator' },
+      { threshold: 3, points: 60, name: 'Tinkerer' },
+      { threshold: 5, points: 110, name: 'Architect' }
+    ]
   },
   {
-    id: 'custom-creator', name: 'Custom Creator', category: 'variety', icon: '✏️', points: 25,
-    description: 'Add a custom exercise to your library.', metric: customExerciseCount, target: 1
-  },
-  {
-    id: 'time-under-tension', name: 'Time Under Tension', category: 'variety', icon: '⏱', points: 15,
-    description: 'Log a set on a time-tracked exercise (like a plank).', metric: bool(hasLoggedTimeExercise), target: 1
+    id: 'time-tension', title: 'Time Under Tension', category: 'variety', icon: '⏱', metric: bool(hasLoggedTimeExercise), noun: '',
+    tiers: [
+      { threshold: 1, points: 15, name: 'Time Under Tension' }
+    ]
   }
 ];
 
@@ -150,4 +135,5 @@ export const CATEGORY_LABELS: Record<AchievementCategory, string> = {
   consistency: 'Consistency & Streaks', records: 'Personal Records', volume: 'Volume & Totals', variety: 'Variety & Exploration'
 };
 
-export const TOTAL_POSSIBLE_POINTS = ACHIEVEMENTS.reduce((sum, a) => sum + a.points, 0);
+export const TOTAL_POSSIBLE_POINTS = ACHIEVEMENT_FAMILIES.reduce((sum, f) => sum + f.tiers.reduce((s, t) => s + t.points, 0), 0);
+export const TOTAL_TIERS = ACHIEVEMENT_FAMILIES.reduce((sum, f) => sum + f.tiers.length, 0);

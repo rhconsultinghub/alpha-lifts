@@ -13,7 +13,7 @@ export function ExercisePhoto({ id, pattern, size = 72, radius = 14, onClick }: 
   return (
     <Tag onClick={onClick} style={{ ...style, ...(onClick ? { cursor: 'pointer' } : {}) }}>
       {photoUrl
-        ? <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ? <img src={photoUrl} alt="" loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         : <ExerciseIcon pattern={pattern} />}
     </Tag>
   );

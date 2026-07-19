@@ -4,7 +4,15 @@
 // page already has gesture-unlocked audio).
 
 const ICON = () => `${import.meta.env.BASE_URL}icon-192.png`;
-const TAG = 'alpha-lifts-rest';
+// Two separate tags on purpose. The countdown ticker replaces itself in place every tick with
+// `silent: true`; if the final "Rest complete" alert reused that same tag it would be delivered as
+// an *update* to an existing, already-silenced notification, and Android generally won't re-alert
+// (no sound, no vibration) for an in-place replacement — `renotify` is inconsistently honoured. By
+// closing the ticker and posting the completion under its own fresh tag, the OS treats it as a new
+// notification and applies the normal notification alert behaviour, which is what actually drives
+// the vibration on Android. (See notifyRestEnd for the rest of the vibration story.)
+const TAG_PROGRESS = 'alpha-lifts-rest-progress';
+const TAG_DONE = 'alpha-lifts-rest-done';
 
 export function vibrateRestEnd(): void {
   try { navigator.vibrate?.([200, 100, 200]); } catch { /* unsupported */ }
@@ -23,15 +31,25 @@ export function vibrateRestEnd(): void {
 export async function notifyRestEnd(vibrate: boolean): Promise<void> {
   try {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-    // `renotify` is part of the spec (and needed here so the completion alert re-alerts even
-    // though it reuses the countdown ticker's tag) but missing from this project's TS DOM lib
-    // typings, hence the cast.
+    // `vibrate` and `renotify` are spec options missing from this project's TS DOM lib typings,
+    // hence the cast. Note `vibrate` is effectively dead on modern Chrome (the Notification
+    // vibration option was removed) — it's kept for browsers that still honour it, but the vibration
+    // that actually reaches a backgrounded phone comes from the OS alerting on a *new* notification,
+    // which is why this posts under its own tag after clearing the silent ticker. Foreground
+    // vibration is handled separately by vibrateRestEnd()'s navigator.vibrate() call, since the
+    // Vibration API is restricted to visible documents.
+    // data.type is what the service worker's notificationclick handler keys off to reopen the app
+    // on the right exercise (see src/sw.ts).
     const options = {
-      body: 'Time to get back to it.', icon: ICON(), tag: TAG, renotify: true,
+      body: 'Time to get back to it.', icon: ICON(), tag: TAG_DONE, renotify: true,
+      data: { type: 'rest-complete' },
       ...(vibrate ? { vibrate: [200, 100, 200] } : {})
     } as NotificationOptions;
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.ready;
+      // clear the silent countdown first so the completion lands as a brand-new notification
+      const stale = await reg.getNotifications({ tag: TAG_PROGRESS });
+      stale.forEach(n => n.close());
       await reg.showNotification('Rest complete', options);
       return;
     }
@@ -54,7 +72,7 @@ export async function updateRestProgressNotification(remainingSec: number): Prom
     const reg = await navigator.serviceWorker.ready;
     const mm = Math.floor(remainingSec / 60);
     const ss = String(remainingSec % 60).padStart(2, '0');
-    await reg.showNotification('Resting…', { body: `${mm}:${ss} remaining`, icon: ICON(), tag: TAG, silent: true });
+    await reg.showNotification('Resting…', { body: `${mm}:${ss} remaining`, icon: ICON(), tag: TAG_PROGRESS, silent: true });
   } catch { /* unsupported or blocked */ }
 }
 
@@ -64,8 +82,10 @@ export async function clearRestProgressNotification(): Promise<void> {
   try {
     if (!('serviceWorker' in navigator)) return;
     const reg = await navigator.serviceWorker.ready;
-    const notifs = await reg.getNotifications({ tag: TAG });
-    notifs.forEach(n => n.close());
+    for (const tag of [TAG_PROGRESS, TAG_DONE]) {
+      const notifs = await reg.getNotifications({ tag });
+      notifs.forEach(n => n.close());
+    }
   } catch { /* unsupported or blocked */ }
 }
 

@@ -812,3 +812,94 @@ frame. The other 13 un-replaced ids (`pec_deck`, `chest_supported_row`, `bulgari
 `nordic_curl`, `suitcase_carry`, `copenhagen_plank`, `larsen_press`) are the on-style phase-10/11
 dark crops, verified movement-correct and left as-is. One soft note kept for the record: `seal_row`
 reads correctly (prone chest-supported row) but has a stray unrelated barbell in the foreground.
+
+(23) five-item feature round:
+- **Exercise thumbnails not painting on the Exercises tab** (`reverse_curl` and others blank until
+  tapped in). Not a load failure — all 151 `<img>` render eagerly with no `loading`/`decoding` hints,
+  and 10 of the photos were stored at up to ~1400px (each ~5–6 MB *decoded*), so the simultaneous
+  decode of 151 images starved the renderer on-device and left some thumbnails unpainted (clicking in
+  decodes that one on demand, hence it "loads"). Fix: `loading="lazy" decoding="async"` on the
+  `ExercisePhoto` img, plus a one-off downsize of every photo whose max dimension exceeded 640px down
+  to ≤640 (they're shown at ≤180px) — total asset weight 3.6→2.5 MB, precache 4675→3614 KiB, decoded
+  memory ~3× lower. Not reproducible on desktop; the fix targets the decode-storm root cause directly.
+- **Research-backed rest timers** (`restForExercise` in `logic.ts`). Previously `restBase[ex] ×
+  pacingMult` only — ignored training type and RIR. Now `restBase × REST_TRAINING_FACTOR[type] ×
+  rirRestFactor(rir) × pacingMult`, clamped 30–300s. `restBase` still encodes compound-vs-isolation;
+  the training factor (strength 1.4 / hit 1.3 / progressive_overload 1 / general .85 / endurance .6)
+  and RIR factor (0→1.25 … 2→1 … 4+→.8; undefined→1 neutral) layer on top (Schoenfeld 2016 / NSCA:
+  longer rest on heavy multi-joint / near-failure work). The in-workout rest is recomputed against the
+  *just-completed set's* logged RIR — `startRest(restSecOverride?)` takes an override that
+  `toggleSetDone` supplies from `restTotalFor(..., completedRir)`; the stored `workout.restTotal` is
+  still the neutral value used for the pre-set display and the static day-time estimate (which now
+  also passes `trainingType`, so estimates shift a little — intended). Verified live: Strength + bench
+  (restBase 120) + RIR 0 → 3:30 (120×1.4×1.25), i.e. both factors applied.
+- **Achievements are now tiered families** (`ACHIEVEMENT_FAMILIES` replaces the flat `ACHIEVEMENTS`).
+  Each badge is one `AchievementFamily` with an ascending `tiers[]` (threshold/points/name); the VM
+  derives the highest reached tier, next tier, points-so-far, and a progress bar that spans the
+  *current* tier floor → next threshold (so it refills each tier rather than creeping toward one far
+  goal). Same store-nothing/retroactive design as before (unlocked state recomputed from history);
+  `seenAchievementIds` now holds `familyId:tierIndex` so a freshly-cleared tier re-lights "NEW" even
+  though earlier tiers were seen (the action merges, so old flat ids harmlessly persist — old users
+  get one burst of NEW on the current tier of each family, which is correct). 9 families / 37 tiers /
+  8310 possible points. Nouns singularize at a target of 1 ("1 PR", not "1 PRs").
+- **Day View reorder reworked** (`DayViewScreen`). Was a 450ms hold that snapped the row between
+  slots. Now 280ms hold → the row "pops out" (scale 1.03, lift shadow, accent outline, `navigator.
+  vibrate(15)` haptic) and follows the finger, while the other rows slide by one row-height to open
+  the gap it'll drop into — a clear live drop indicator. The exercises array is never permuted
+  mid-drag (dragged row keeps its index and renders translated; others render shifted); only release
+  commits via the existing `reorderExercise`. Verified live with a synthetic pointer drag: row 0
+  dragged down 2 slots committed to the correct order.
+- **30-min idle-workout prompt.** A ref tracks last pointer/key activity; the existing 60s interval
+  flags `idleWorkoutPrompt` when a workout is open and idle ≥ `IDLE_WORKOUT_MS` (30 min).
+  `IdleWorkoutToast` is a blocking centered dialog (deliberately not a dismissible toast — it's a
+  decision) with Continue (→ back to the current exercise, resets the clock) and End Workout (→ normal
+  `completeWorkout`). Activity tracking is ref-only (no re-render per tap) and the dialog resolves
+  only via its buttons, avoiding a pointerdown-unmounts-before-click race. Verified live at a
+  shrunken threshold: prompt fired with the correct elapsed/exercise text, Continue returned to the
+  workout. (`AppState.idleWorkoutPrompt` added, defaulted in `initialState`, carried by the
+  shallow-merge like every other optional field.)
+
+(24) rest-notification + first-time-exercise round:
+- **Tapping the "Rest complete" notification now reopens the app on the right exercise.** This is why
+  the PWA moved from `generateSW` to **`injectManifest`** (`vite.config.ts` + new `src/sw.ts`, with
+  `workbox-precaching`/`workbox-core` promoted from transitive to explicit devDeps): `notificationclick`
+  can only be handled inside the service worker and generateSW offers no hook for custom listeners.
+  The worker deliberately does no routing logic of its own — only the page knows the live workout
+  state — so it focuses an existing client and `postMessage`s `{type:'open-rest-exercise'}`, or, when
+  no client exists (app fully closed), hands the intent over as a `#rest-exercise` URL hash for the
+  app to consume on boot. `useApp`'s `openRestCompleteExercise` then lands on the active program day's
+  workout screen showing the exercise still owed work: the one just rested inside, or — if that rest
+  followed the exercise's *final* set — the next incomplete exercise via `nextIncompleteIndex`. The
+  hash is stripped with `replaceState` immediately so a later reload can't re-trigger the jump, and a
+  `hashchange` listener backs up the mount-time check. Verified both branches live: parked on the
+  Program screen with exercise 3 fully logged, loading with the hash advanced to "Exercise 4 of 5";
+  repeating it with exercise 4 only partly logged correctly stayed on exercise 4.
+- **Rest notifications weren't vibrating.** Two real causes fixed. (a) The countdown ticker and the
+  completion alert shared one notification `tag`, so the completion was delivered as an *in-place
+  update* of an already-`silent: true` notification — Android generally won't re-alert (no sound, no
+  vibration) for a replacement, and `renotify` is honoured inconsistently. They now use separate tags
+  (`TAG_PROGRESS`/`TAG_DONE`) and the ticker is explicitly closed before the completion is posted, so
+  the OS sees a genuinely new notification and applies normal alert behaviour. (b) The vibrate/sound/
+  notify calls were being made *inside* a `setState` updater, which must be pure — React (StrictMode
+  especially) can invoke it more than once per commit, so alerts could double-fire or, on a bailed-out
+  update, not fire at all. `restTick` now reads `stateRef`, runs the alerts outside the updater, and
+  guards completion with `restDoneForRef` (keyed on that period's `restEndAt`) so the 1s interval and
+  the visibilitychange resync can both call it without ever alerting twice. Worth knowing for future
+  expectations: the Notification `vibrate` option is effectively dead on modern Chrome (kept only for
+  browsers that still honour it), `navigator.vibrate()` is spec-restricted to *visible* documents so
+  it only covers the foreground case, and iOS exposes no Vibration API at all — backgrounded vibration
+  therefore rides entirely on the OS alerting on a new notification.
+- **No progressive-overload prompt for an exercise that's never been logged.** `ex.last` is
+  placeholder data on a fresh program slot (weight 0), so `recommendation()` was rendering advice
+  built on nothing — "Last time: 0 lb × 6 reps, all sets hit target. Try 5 lb." — which reads as if
+  the user had done the lift before. `recommendation()` now short-circuits when there's no
+  `exerciseHistory` for the id and no `manualTarget` (a manual target is a deliberate starting point,
+  so it's left alone), and new `similarExerciseReference()` finds the closest already-logged stand-in
+  to show instead: ranked same movement `pattern` first (a true variant), then same primary `muscle`,
+  breaking ties on how much history exists. It deliberately does **not** sort by date —
+  `ExerciseHistoryEntry.date` is a display-formatted locale string with no year, so it isn't
+  comparable across exercises; the entry shown is still that exercise's own latest log. The per-set
+  "Last time" line in `viewModel` was suppressed under the same never-logged condition, since it fell
+  back to the same placeholder. Verified live: a fresh Incline DB Press showed "Closest thing you've
+  logged is Bench Press at 175 lb × 8 reps (same muscle group)" with no fake last-time line, while
+  Bench Press itself (with history) still showed the normal "+5 lb" overload prompt.

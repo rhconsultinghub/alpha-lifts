@@ -13,6 +13,7 @@ import { AchievementsScreen } from './components/AchievementsScreen';
 import { TabBar } from './components/TabBar';
 import { ResumePill } from './components/ResumePill';
 import { RestToast } from './components/RestToast';
+import { IdleWorkoutToast } from './components/IdleWorkoutToast';
 import { ExerciseDetailModal } from './components/modals/ExerciseDetailModal';
 import { ExerciseQuickEditModal } from './components/modals/ExerciseQuickEditModal';
 import { SwapModal } from './components/modals/SwapModal';
@@ -75,6 +76,7 @@ export default function App() {
         <NewProgramWizardModal vm={vm} />
         <WeekReviewModal vm={vm} />
         <RestToast vm={vm} />
+        <IdleWorkoutToast vm={vm} />
       </div>
     </div>
   );

@@ -226,6 +226,10 @@ export interface AppState {
   showSettings: boolean;
   confirmDeleteProgId: string | null;
   confirmEndEarly: boolean;
+  // Set true when a workout has been in progress with no in-app interaction for the idle timeout
+  // (see IDLE_WORKOUT_MS in useApp) — drives the "still working out?" prompt. Reset to false as
+  // soon as the user interacts or resolves the prompt.
+  idleWorkoutPrompt: boolean;
   pendingPlanUpdate: PendingPlanUpdate | null;
   activeProgramId: string;
   programName: string;

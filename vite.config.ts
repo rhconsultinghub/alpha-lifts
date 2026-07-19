@@ -9,6 +9,12 @@ export default defineConfig(({ command }) => ({
   plugins: [
     react(),
     VitePWA({
+      // injectManifest (rather than the simpler generateSW) specifically so the app can ship its own
+      // `notificationclick` handler — see src/sw.ts. That event can only be handled inside the
+      // service worker, and generateSW offers no hook to add custom event listeners.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
@@ -27,7 +33,7 @@ export default defineConfig(({ command }) => ({
           { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,jpg}']
       }
     })

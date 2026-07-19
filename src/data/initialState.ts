@@ -16,6 +16,7 @@ export function createInitialState(): AppState {
     showSettings: false,
     confirmDeleteProgId: null,
     confirmEndEarly: false,
+    idleWorkoutPrompt: false,
     pendingPlanUpdate: null,
     activeProgramId: '',
     programName: '',
