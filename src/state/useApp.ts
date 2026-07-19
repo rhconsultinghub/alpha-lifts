@@ -686,6 +686,16 @@ export function useApp() {
     });
   }, []);
 
+  // Removing an exercise mid-workout throws away any sets already logged against it and can't be
+  // undone, so the ✕ Remove button stages the request and a confirm dialog commits it.
+  const requestRemoveWorkoutExercise = useCallback((idx: number) => setState(s => ({ ...s, confirmRemoveExIndex: idx })), []);
+  const cancelRemoveWorkoutExercise = useCallback(() => setState(s => ({ ...s, confirmRemoveExIndex: null })), []);
+  const confirmRemoveWorkoutExercise = useCallback(() => {
+    const idx = stateRef.current.confirmRemoveExIndex;
+    setState(s => ({ ...s, confirmRemoveExIndex: null }));
+    if (idx != null) removeWorkoutExercise(idx);
+  }, [removeWorkoutExercise]);
+
   // Reorders the currently active exercise relative to its neighbor, mid-session — like the
   // add/remove/swap actions above, this only touches the session's working copy
   // (workout.dayExercises), counts toward changesMade, and only reaches the saved plan if the
@@ -1226,12 +1236,15 @@ export function useApp() {
   // robustness: the failure mode is "press back once more than expected," never "back exits the
   // app early."
   const isAnyModalOpen = useCallback((s: AppState) => !!(
+    s.confirmRemoveExIndex != null ||
     s.showSettings || s.swap || s.muscleSwap || s.detail || s.quickEdit || s.muscleDrill || s.warmupDetailId ||
     s.libraryDetailId || s.exerciseForm || s.exerciseHistoryModalId || s.archiveDetailId ||
     s.newProgramWizard || s.weekReviewOpen || s.showBodyModal
   ), []);
   const closeTopmost = useCallback(() => {
     setState(s => {
+      // topmost first — the remove-exercise confirm sits above every other surface
+      if (s.confirmRemoveExIndex != null) return { ...s, confirmRemoveExIndex: null };
       if (s.archiveDetailId) return { ...s, archiveDetailId: null };
       if (s.exerciseHistoryModalId) return { ...s, exerciseHistoryModalId: null };
       if (s.newProgramWizard) return { ...s, newProgramWizard: null };
@@ -1296,6 +1309,7 @@ export function useApp() {
       setExerciseFormField, toggleFormMuscle, toggleFormSecondary, toggleFormEquip, saveExerciseForm,
       requestDeleteExercise, deleteExercise,
       openSwap, closeSwap, swapTab, swapToggleAll, swapStageEquip, swapStageEx, swapConfirm, removeWorkoutExercise, moveWorkoutExercise, setSwapQuery,
+      requestRemoveWorkoutExercise, cancelRemoveWorkoutExercise, confirmRemoveWorkoutExercise,
       openMuscleSwap, closeMuscleSwap, toggleMuscleSwapDay, muscleSwapToggleAll, muscleSwapStageEx, muscleSwapConfirm, muscleSwapSetQuery,
       removeExercise, changeSets, moveExercise, reorderExercise, setExerciseTarget, bumpExerciseTarget, toggleSuperset,
       startWorkout, switchExercise, setSetField, setSetRir, bumpSetField, toggleSetDone, addSet, removeSet,

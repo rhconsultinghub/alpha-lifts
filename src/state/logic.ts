@@ -362,17 +362,25 @@ export interface WarmupInfo {
 }
 
 // whether a warm-up is called for: heavy-ish compound lift, gated by the Warm-Up Style setting.
-export function warmupInfo(ex: ProgramExercise, style: WarmupStyle = 'Standard'): WarmupInfo | null {
+// `workingWeight` is the load the user is actually about to lift this session — the heaviest of the
+// current working sets (see viewModel), which already reflects today's recommendation plus any
+// manual edit. Warm-up sets are percentages of *that*, so the ramp always leads into the real top
+// set. It used to key off `ex.last.weight`, this program slot's stored last-session weight, which
+// meant the ramp lagged a session behind every time the weight went up, ignored a quick-edit
+// manualTarget entirely, and (because `ex.last` is placeholder 0 on a fresh slot) suppressed the
+// warm-up altogether for an exercise being run for the first time even at a heavy working weight.
+export function warmupInfo(ex: ProgramExercise, style: WarmupStyle = 'Standard', workingWeight?: number): WarmupInfo | null {
   if (style === 'Minimal') return null;
   const lib = EXLIB[ex.id];
   const equip = lib.equip[ex.equipIdx];
   if (!lib.compound || equip.v === 'bodyweight' || equip.v === 'assisted') return null;
+  const top = workingWeight != null ? workingWeight : ex.last.weight;
   const threshold = style === 'Cautious' ? 25 : 40;
-  if (ex.last.weight < threshold) return null;
+  if (top < threshold) return null;
   const sets = style === 'Cautious'
-    ? [{ weight: roundTo(ex.last.weight * 0.3, 2.5), reps: 10 }, { weight: roundTo(ex.last.weight * 0.5, 2.5), reps: 8 }, { weight: roundTo(ex.last.weight * 0.7, 2.5), reps: 5 }]
-    : [{ weight: roundTo(ex.last.weight * 0.4, 2.5), reps: 8 }, { weight: roundTo(ex.last.weight * 0.65, 2.5), reps: 5 }];
-  return { note: 'Heavy compound lift — warm up before your working sets.', sets };
+    ? [{ weight: roundTo(top * 0.3, 2.5), reps: 10 }, { weight: roundTo(top * 0.5, 2.5), reps: 8 }, { weight: roundTo(top * 0.7, 2.5), reps: 5 }]
+    : [{ weight: roundTo(top * 0.4, 2.5), reps: 8 }, { weight: roundTo(top * 0.65, 2.5), reps: 5 }];
+  return { note: 'Heavy compound lift — ramp up to your working weight before your first hard set.', sets };
 }
 
 // returns { muscle: 0..1 } — relative share of this day's set volume, for opacity-based highlighting.

@@ -14,6 +14,7 @@ import { TabBar } from './components/TabBar';
 import { ResumePill } from './components/ResumePill';
 import { RestToast } from './components/RestToast';
 import { IdleWorkoutToast } from './components/IdleWorkoutToast';
+import { ConfirmRemoveExerciseModal } from './components/modals/ConfirmRemoveExerciseModal';
 import { ExerciseDetailModal } from './components/modals/ExerciseDetailModal';
 import { ExerciseQuickEditModal } from './components/modals/ExerciseQuickEditModal';
 import { SwapModal } from './components/modals/SwapModal';
@@ -76,6 +77,7 @@ export default function App() {
         <NewProgramWizardModal vm={vm} />
         <WeekReviewModal vm={vm} />
         <RestToast vm={vm} />
+        <ConfirmRemoveExerciseModal vm={vm} />
         <IdleWorkoutToast vm={vm} />
       </div>
     </div>

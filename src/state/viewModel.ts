@@ -111,7 +111,6 @@ export function buildViewModel(state: AppState, actions: Actions) {
       totalTiers: TOTAL_TIERS,
       unlockedCount: items.filter(i => i.unlocked).length,
       totalCount: items.length,
-      hasNew: items.some(i => i.isNew),
       markSeen: () => actions.markAchievementsSeen(seenIds)
     };
   })();
@@ -379,12 +378,15 @@ export function buildViewModel(state: AppState, actions: Actions) {
     const equip = lib.equip[ex.equipIdx];
     const exHistory = s.exerciseHistory[ex.id];
     const rec = recommendation(ex, s.units, s.coachVoice, exHistory, s.exerciseHistory);
-    const warmupRaw = warmupInfo(ex, s.warmupStyle);
+    const currentSets = s.workout.exSets[exIndex] || [];
+    // Warm-ups ramp to the heaviest set the user is actually about to do this session (their edited
+    // working weight if they've changed it, otherwise today's recommendation) — not last session's.
+    const workingWeight = currentSets.length ? Math.max(...currentSets.map(r => r.weight)) : rec.weight;
+    const warmupRaw = warmupInfo(ex, s.warmupStyle, workingWeight);
     const warmup = warmupRaw ? {
       show: true, note: warmupRaw.note,
       setsText: warmupRaw.sets.map(ws => fmtWeight(ws.weight, s.units) + ' × ' + ws.reps).join('  ·  ')
     } : { show: false };
-    const currentSets = s.workout.exSets[exIndex] || [];
     const allDone = currentSets.length > 0 && currentSets.every(r => r.done);
     const mm = Math.floor(s.workout.restRemaining / 60);
     const ss = String(s.workout.restRemaining % 60).padStart(2, '0');
@@ -421,7 +423,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       openSwap: () => actions.openSwap(dayKey, exIndex, 'equip', false),
       openAddExercise: () => actions.openSwap(dayKey, -1, 'replace', true),
       canRemoveExercise: dayExercises.length > 1,
-      removeExercise: () => actions.removeWorkoutExercise(exIndex),
+      removeExercise: () => actions.requestRemoveWorkoutExercise(exIndex),
       canMoveUp: exIndex > 0,
       moveUp: () => actions.moveWorkoutExercise('up'),
       canMoveDown: exIndex < dayExercises.length - 1,
@@ -750,6 +752,20 @@ export function buildViewModel(state: AppState, actions: Actions) {
   const resumeText = s.workout ? ('Resume ' + s.program[s.workout.dayKey].label + ' — Exercise ' + (s.workout.exIndex + 1) + ' of ' + s.program[s.workout.dayKey].exercises.length) : '';
   const resumeElapsedText = s.workout ? formatElapsed(Date.now() - (s.workout.startedAt || Date.now())) : '';
 
+  const confirmRemoveExercise = (() => {
+    const idx = s.confirmRemoveExIndex;
+    if (idx == null || !s.workout) return { show: false, name: '', loggedSets: 0 };
+    const target = s.workout.dayExercises[idx];
+    const sets = s.workout.exSets[idx] || [];
+    return {
+      show: true,
+      name: target ? (EXLIB[target.id]?.name || 'this exercise') : 'this exercise',
+      loggedSets: sets.filter(r => r.done).length,
+      confirm: actions.confirmRemoveWorkoutExercise,
+      cancel: actions.cancelRemoveWorkoutExercise
+    };
+  })();
+
   const idlePrompt = {
     show: !!s.workout && s.idleWorkoutPrompt,
     exerciseName: s.workout ? (EXLIB[s.workout.dayExercises[s.workout.exIndex]?.id]?.name || '') : '',
@@ -773,9 +789,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
     tabProgressColor: s.screen === 'progress' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
     tabExercisesColor: s.screen === 'exercises' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
     tabAchievementsColor: s.screen === 'achievements' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
-    hasNewAchievements: achievementsVM.hasNew,
     achievements: achievementsVM,
     idlePrompt,
+    confirmRemoveExercise,
     goProgram: actions.goProgram, goProgress: actions.goProgress, goExercises: actions.goExercises, goAchievements: actions.goAchievements,
     trainingTypes,
     muscleBars: bars.map(m => ({ ...m, drill: () => actions.openMuscleDrill(m.name) })),

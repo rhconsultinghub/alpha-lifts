@@ -903,3 +903,27 @@ reads correctly (prone chest-supported row) but has a stray unrelated barbell in
   back to the same placeholder. Verified live: a fresh Incline DB Press showed "Closest thing you've
   logged is Bench Press at 175 lb × 8 reps (same muscle group)" with no fake last-time line, while
   Bench Press itself (with history) still showed the normal "+5 lb" overload prompt.
+
+(25) three-item polish round:
+- **Mid-workout "✕ Remove" is now confirm-gated.** It sat directly beside the set-logging controls
+  and removed instantly, discarding any sets already logged against that exercise with no undo. New
+  `AppState.confirmRemoveExIndex` stages the request and `ConfirmRemoveExerciseModal` commits it,
+  naming the exercise and calling out how many logged sets would be lost. Registered in
+  `isAnyModalOpen`/`closeTopmost` (checked first, since it sits above every other surface) so the
+  hardware back gesture dismisses it like any other modal. Verified live: "Keep it" left 5 exercises
+  intact, "Remove exercise" took it to 4.
+- **Warm-up sets now ramp to the working weight**, answering "how are warmups calculated?": they're
+  percentages of a top weight — Standard 40%/65% for two sets, Cautious 30%/50%/70% for three — gated
+  to compound, non-bodyweight lifts above a 40kg (25kg on Cautious) threshold, with the whole thing
+  skipped on Warm-Up Style "Minimal". The bug was *which* weight: it keyed off `ex.last.weight`, this
+  program slot's stored last-session weight, so the ramp lagged a session behind every weight
+  increase, ignored a quick-edit `manualTarget` entirely, and — since `ex.last` is placeholder 0 on a
+  fresh slot — suppressed warm-ups completely for a first-time exercise no matter how heavy the
+  working sets. `warmupInfo()` takes an explicit `workingWeight` now and `viewModel` passes the
+  heaviest of the *current* working sets (falling back to today's recommendation before any set
+  exists). Verified live: at an 82.5kg working weight the ramp read 70lb/115lb, and raising set 1 to
+  ~110kg moved it to 100lb/160lb in real time — previously it wouldn't have moved at all.
+- **Dropped the "new achievement" dot from the Achievements tab.** Achievements are a reward to
+  stumble on, not an inbox to clear, and a persistent badge on the nav reads as a chore. The per-badge
+  NEW chip *inside* the screen stays (it only appears once you're already looking). `hasNew`/
+  `hasNewAchievements` were removed from the VM along with it rather than left as dead fields.

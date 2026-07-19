@@ -230,6 +230,10 @@ export interface AppState {
   // (see IDLE_WORKOUT_MS in useApp) — drives the "still working out?" prompt. Reset to false as
   // soon as the user interacts or resolves the prompt.
   idleWorkoutPrompt: boolean;
+  // Index (into workout.dayExercises) of an exercise the user has asked to remove mid-workout, held
+  // pending an explicit confirm — removing one discards its logged sets, so it shouldn't be a
+  // single mis-tap away.
+  confirmRemoveExIndex: number | null;
   pendingPlanUpdate: PendingPlanUpdate | null;
   activeProgramId: string;
   programName: string;
