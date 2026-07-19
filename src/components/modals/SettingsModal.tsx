@@ -101,10 +101,23 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
           </div>
 
           <div style={{ font: "500 12px 'Inter'", color: 'rgba(245,240,234,.75)', marginBottom: 4 }}>Rest Alerts</div>
-          <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginBottom: 8 }}>Sound and Vibrate only work while Alpha Lifts is the app you're actively looking at — that's a browser restriction, not a setting. Notify is the one that can still reach you if you've switched to another app during your rest period.</div>
+          <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginBottom: 8 }}>Sound and Vibrate only work while Alpha Lifts is the app you're actively looking at — that's a browser restriction, not a setting. Notify is the one that can still reach you if you've switched to another app during your rest period. Sound plays through media volume, so it ignores your phone's silent/vibrate switch.</div>
+          {!st.vibrationSupported && (
+            <div style={{ font: "400 11px/1.45 'Inter'", color: 'oklch(0.78 0.13 230)', background: 'oklch(0.7 0.13 230 / 0.1)', border: '1px solid oklch(0.7 0.13 230 / 0.3)', borderRadius: 10, padding: '8px 10px', marginBottom: 8 }}>
+              This device doesn't expose vibration to web apps (iOS never has), so Vibrate can't do anything here. Turn on Notify and leave the app in the background during rest — your phone's own notification settings will buzz it.
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <button onClick={st.toggleRestAlertSound} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: st.restAlertSound ? 'oklch(0.65 0.19 35)' : 'rgba(255,255,255,.06)', color: st.restAlertSound ? '#0d0c0b' : 'rgba(245,240,234,.7)' }}>{st.restAlertSound ? '🔊 Sound On' : '🔇 Sound Off'}</button>
-            <button onClick={st.toggleRestAlertVibrate} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: st.restAlertVibrate ? 'oklch(0.65 0.19 35)' : 'rgba(255,255,255,.06)', color: st.restAlertVibrate ? '#0d0c0b' : 'rgba(245,240,234,.7)' }}>{st.restAlertVibrate ? '📳 Vibrate On' : 'Vibrate Off'}</button>
+            <button
+              onClick={st.vibrationSupported ? st.toggleRestAlertVibrate : undefined}
+              disabled={!st.vibrationSupported}
+              style={{
+                flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none',
+                background: !st.vibrationSupported ? 'rgba(255,255,255,.03)' : st.restAlertVibrate ? 'oklch(0.65 0.19 35)' : 'rgba(255,255,255,.06)',
+                color: !st.vibrationSupported ? 'rgba(245,240,234,.3)' : st.restAlertVibrate ? '#0d0c0b' : 'rgba(245,240,234,.7)'
+              }}
+            >{!st.vibrationSupported ? 'Vibrate N/A' : st.restAlertVibrate ? '📳 Vibrate On' : 'Vibrate Off'}</button>
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
             <button onClick={st.toggleRestAlertNotify} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: st.restAlertNotify ? 'oklch(0.65 0.19 35)' : 'rgba(255,255,255,.06)', color: st.restAlertNotify ? '#0d0c0b' : 'rgba(245,240,234,.7)' }}>{st.restAlertNotify ? '🔔 Notify On' : '🔕 Notify Off'}</button>

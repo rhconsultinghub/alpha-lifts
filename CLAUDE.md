@@ -927,3 +927,28 @@ reads correctly (prone chest-supported row) but has a stray unrelated barbell in
   stumble on, not an inbox to clear, and a persistent badge on the nav reads as a chore. The per-badge
   NEW chip *inside* the screen stays (it only appears once you're already looking). `hasNew`/
   `hasNewAchievements` were removed from the VM along with it rather than left as dead fields.
+
+(26) rest-alert vibration, diagnosed properly. User report: the rest alert "makes an auditory chime
+despite my phone being on vibrate," while the notification itself (and its click-through, phase 24)
+works fine. That combination is the whole diagnosis — **a chime that plays while the ringer is set to
+vibrate cannot be coming from the OS notification**, because the OS would have buzzed it instead. It's
+`playRestEndSound()`, the app's own WebAudio beep: WebAudio output goes to the **media** stream, which
+on both iOS and Android deliberately ignores the ringer/silent/vibrate switch (that's why a video
+still plays with the phone on silent). `restAlertSound` defaults to `true`, so it's on unless turned
+off. Meanwhile nothing vibrated because `navigator.vibrate()` — the only real vibration path a web app
+has — **does not exist on iOS at all**, in any browser, including an installed PWA; the Notification
+`vibrate` option is also long dead on Chrome. So on iOS the Vibrate toggle was a switch wired to
+nothing, sitting next to a Sound toggle that overrides the user's ringer setting.
+
+No amount of code can make iOS vibrate from a web app, so the fix is to stop the UI lying about it
+rather than fake a capability: `vibrationSupported` (a `typeof navigator.vibrate === 'function'`
+check) is exposed on the settings VM, and `SettingsModal` renders the Vibrate control disabled and
+labelled "Vibrate N/A" with an explanatory callout when it's absent, pointing the user at Notify +
+backgrounding the app (the OS notification is the only thing that can buzz an iPhone here, per the
+phone's own notification settings). The Rest Alerts help text also now states outright that Sound
+plays through media volume and therefore ignores the silent/vibrate switch — the actual cause of the
+reported chime. Deliberately left alone: the `restAlertVibrate || restAlertNotify` gate on
+`notifyRestEnd()`, because with vibrate defaulting on that gate is what makes the notification fire at
+all, which on iOS is the only route to a buzz. Verified both branches by stubbing `navigator.vibrate`
+away at runtime: supported → "📳 Vibrate On" enabled, no callout; unsupported → disabled "Vibrate N/A"
+plus the callout.

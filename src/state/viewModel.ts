@@ -169,6 +169,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
     restAlertSound: s.restAlertSound,
     restAlertVibrate: s.restAlertVibrate,
     restAlertNotify: s.restAlertNotify,
+    // The Vibration API simply doesn't exist on iOS (any browser, including an installed PWA), so
+    // on those devices the Vibrate toggle was a switch that could never do anything. Detect it and
+    // say so in the UI rather than letting the setting quietly lie.
+    vibrationSupported: typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function',
     toggleRestAlertSound: () => actions.setRestAlertSound(!s.restAlertSound),
     toggleRestAlertVibrate: () => actions.setRestAlertVibrate(!s.restAlertVibrate),
     toggleRestAlertNotify: () => actions.setRestAlertNotify(!s.restAlertNotify),
