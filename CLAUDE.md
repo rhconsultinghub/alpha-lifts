@@ -205,8 +205,19 @@ program. Keep this in mind if `AppState` schema changes again around onboarding.
 Static PWA on GitHub Pages, project site (not a custom domain), auto-deployed via
 `.github/workflows/deploy.yml` on every push to `main`.
 
+**Live at `https://rhconsultinghub.github.io/alpha-lifts/`** — note the owner is
+`rhconsultinghub`, not the user's personal handle. Anything that needs the deployed *origin*
+(the Worker's `ALLOWED_ORIGINS`, for one) wants `https://rhconsultinghub.github.io` with no path.
+
 - `vite.config.ts`: `base: '/alpha-lifts/'` in production builds (must match the GitHub repo
   name — this repo is named `alpha-lifts`). Dev server stays at `/`.
+- **`VITE_COACH_API_URL` must be a repository variable under the *Actions* scope** (Settings →
+  Secrets and variables → **Actions** → Variables) for the AI coach to work in the deployed app.
+  Vite inlines it at build time, so changing it requires a rebuild — an existing artifact will
+  never pick it up. `deploy.yml` also accepts it as an Actions *secret*. It is not secret in any
+  meaningful sense (it ends up in the JS bundle); the Worker's origin allowlist is the real
+  control. Unset is supported and ships a "not configured" coach tab. See phase 33 for the
+  scope trap that makes a wrong placement here almost invisible.
 - `vite-plugin-pwa` generates the manifest + service worker (`registerType: 'autoUpdate'`).
 - Icons in `public/`: `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`,
   `apple-touch-icon.png`, `favicon.svg` — all a flexed-arm-holding-a-dumbbell glyph, single
@@ -1301,3 +1312,55 @@ and Leg Day lights quads-to-the-hip/calves/core, all inside the drawn contours. 
 was a throwaway `.verify/audit.ts` run with `npm install --no-save tsx` (deleted after, per
 convention — rebuild from the description above if needed). `npx tsc -b` and `npm run build`
 clean.
+
+(33) **the AI coach actually shipped** — phase 29 built it but nothing had ever run: no Anthropic
+call had been made and the Worker had never been deployed. It is now live end to end. Three
+things were broken between the committed code and a working deployment, and only the last was a
+user action:
+
+- **`ALLOWED_ORIGINS` named the wrong site.** It read `https://ryanhouse19.github.io` — a guess
+  the worker README had flagged as such — but the remote is `rhconsultinghub/alpha-lifts`, so
+  Pages serves from `https://rhconsultinghub.github.io`. The Worker 403s an unlisted origin
+  *before* calling the API, so every message would have failed while costing nothing, presenting
+  as a broken deploy rather than a one-line typo.
+- **`deploy.yml` never passed `VITE_COACH_API_URL`**, so the production build inlined an empty
+  string and shipped the "not configured" tab regardless of what was deployed.
+- **The repository variable was set under the *Agents* scope, not *Actions*.** This is the one
+  worth remembering: GitHub's Settings → Secrets and variables has separate scopes, and variables
+  under Agents (for the Copilot coding agent) are invisible to workflow runs. `vars.X` silently
+  resolves to an empty string, the build succeeds, and the app ships behaving exactly as though
+  the coach was never configured. Nothing errors anywhere.
+
+**The diagnostic that cracked it:** the built asset filename never changed
+(`index-05CodC0H.js` across every poll). Since the intervening commits only touched
+`wrangler.toml`, the README and `deploy.yml` — none of which are bundled — an unchanged content
+hash proved the *bundle input* was unchanged, i.e. the variable was still arriving empty, rather
+than the workflow merely not having run. Polling `https://rhconsultinghub.github.io/alpha-lifts/`
+for the asset hash and grepping the JS for `workers.dev` is a cheap, reliable way to answer "did
+my build-time env var actually land?" without any GitHub API access. It flipped to
+`index-DkTkMCFE.js` with the URL inlined the moment the variable moved to the Actions scope.
+
+`deploy.yml` now accepts the value from `vars` **or** `secrets` (`vars.X || secrets.X`), since
+storing it as a secret is the natural instinct and produces the same silent empty-string failure.
+
+**Verified against the real API for the first time.** Direct POSTs at the deployed Worker: a
+disallowed origin got 403 with no API spend; an in-scope question returned a coherent answer that
+used the program context; an off-topic request ("write me a Python script") was declined in the
+coach's own voice. Then the definitive test — the same thing from the *deployed app in a real
+browser*, which is not the same test: a script can forge an `Origin` header, but only a browser
+enforces the response's `Access-Control-Allow-Origin`. It answered "How's my Push Day looking?"
+by naming the five real exercises off `localStorage` and correctly declining to characterise
+progress it had no logged data for. Zero console errors.
+
+**First real cost data: ~$0.005–0.007 per exchange** (6,685 and 5,030 microUSD; ~700 input
+tokens, 60–120 output), *below* the worker README's $0.01–0.03 estimate — but that is the floor,
+measured on single messages. Input is re-sent and re-billed every turn, so cost concentrates in
+long conversations at the 20-message cap with a full program context. Measure a real
+back-and-forth before pricing anything publicly; `MODEL` is `claude-opus-4-8` and switching to
+`claude-sonnet-5` is one line, already priced in `usage.ts`.
+
+**Still open, and the gate on any public release:** the coach is unmetered. `checkBudget()`
+always allows and `recordSpend()` is a no-op (deliberate stubs, see phase 29). The origin
+allowlist stops another *website*, but not a script posting a forged `Origin` — and the Worker
+URL is public in the bundle by design. Fine for single-user testing; closing it is the same work
+as the subscription phase. An Anthropic console monthly spend limit is the interim backstop.
