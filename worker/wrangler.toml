@@ -6,8 +6,14 @@ compatibility_flags = ["nodejs_compat"]
 # Origins allowed to call this Worker. The GitHub Pages deployment plus local dev.
 # Anything not listed here is rejected before the API is ever called — this is what
 # stops a random site from spending your API budget through your Worker.
+#
+# This is the ORIGIN only (scheme + host, no path): Pages serves the app at
+# https://rhconsultinghub.github.io/alpha-lifts/, but the browser sends the bare
+# origin in the Origin header. Derived from the git remote (rhconsultinghub/alpha-lifts)
+# — a project site is always https://<owner>.github.io. If a custom domain is ever
+# added, this needs to change with it, or every request 403s.
 [vars]
-ALLOWED_ORIGINS = "https://ryanhouse19.github.io,http://localhost:5173"
+ALLOWED_ORIGINS = "https://rhconsultinghub.github.io,http://localhost:5173"
 
 # ANTHROPIC_API_KEY is NOT set here — wrangler.toml is committed to git.
 # Set it as an encrypted secret instead:

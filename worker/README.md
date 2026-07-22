@@ -36,10 +36,17 @@ Then point the app at it. In `alpha-lifts/.env.local` for dev:
 VITE_COACH_API_URL=http://localhost:8787
 ```
 
-and as a repository secret / workflow env var for the GitHub Pages build. **Check
-`ALLOWED_ORIGINS` in `wrangler.toml` matches your real Pages origin** — it's currently a guess
-at `https://ryanhouse19.github.io`. An origin not on that list is rejected with a 403 before
-any API call is made, so a wrong value shows up as every request failing.
+For the deployed app, set a **repository variable** named `VITE_COACH_API_URL` (Settings →
+Secrets and variables → Actions → Variables) to the Worker's URL. `deploy.yml` passes it into
+the build; leaving it unset is supported and just ships the "not configured" tab. It's a
+variable rather than a secret because Vite inlines `VITE_*` into the bundle — it is public
+either way, and the Worker's origin allowlist is the actual control.
+
+`ALLOWED_ORIGINS` in `wrangler.toml` is set to `https://rhconsultinghub.github.io`, derived
+from the git remote (`rhconsultinghub/alpha-lifts` → a project site is always
+`https://<owner>.github.io`). It's the **origin only** — no `/alpha-lifts/` path. An origin not
+on that list is rejected with a 403 *before* any API call, so a wrong value here shows up as
+every request failing while costing nothing.
 
 ## Cost controls already in place
 
