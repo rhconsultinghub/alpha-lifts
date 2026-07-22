@@ -19,6 +19,17 @@ export function shouldFireReminder(state: AppState, now: Date): boolean {
   return true;
 }
 
+// Carries the same barbell badge as the rest alerts (see alerts.ts) so every notification this app
+// posts wears the same status-bar glyph rather than this one alone falling back to a generic bell.
+// Both paths are also BASE_URL-relative now — the bare 'icon-192.png' here resolved against the
+// page URL, which is wrong under the '/alpha-lifts/' production base whenever the app isn't sitting
+// at the scope root.
 export function fireReminder(dayLabel: string): void {
-  try { new Notification('Time to train', { body: dayLabel + ' is on today’s plan.', icon: 'icon-192.png' }); } catch { /* unsupported or blocked */ }
+  try {
+    new Notification('Time to train', {
+      body: dayLabel + ' is on today’s plan.',
+      icon: `${import.meta.env.BASE_URL}icon-192.png`,
+      badge: `${import.meta.env.BASE_URL}badge-96.png`
+    });
+  } catch { /* unsupported or blocked */ }
 }

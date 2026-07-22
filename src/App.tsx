@@ -10,6 +10,7 @@ import { CompleteScreen } from './components/CompleteScreen';
 import { ProgressScreen } from './components/ProgressScreen';
 import { ExercisesScreen } from './components/ExercisesScreen';
 import { AchievementsScreen } from './components/AchievementsScreen';
+import { CoachScreen } from './components/CoachScreen';
 import { TabBar } from './components/TabBar';
 import { ResumePill } from './components/ResumePill';
 import { RestToast } from './components/RestToast';
@@ -59,6 +60,7 @@ export default function App() {
         {vm.isProgress && <ProgressScreen vm={vm} />}
         {vm.isExercises && <ExercisesScreen vm={vm} />}
         {vm.isAchievements && <AchievementsScreen vm={vm} />}
+        {vm.isCoach && <CoachScreen vm={vm} />}
 
         <ResumePill vm={vm} />
         <TabBar vm={vm} />

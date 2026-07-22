@@ -169,9 +169,17 @@ export function effectiveLast(ex: ProgramExercise, history?: ExerciseHistoryEntr
   // a deliberate, explicit statement of "start here next time," not just whatever happened to get
   // logged last. Cleared automatically once the exercise is logged again (completeWorkout).
   if (ex.manualTarget) return { weight: ex.manualTarget.weight, reps: ex.manualTarget.reps, hitTop: false };
-  if (history && history.length) {
+  // Deload sessions are deliberately light, so they're not what "last time" means for the purposes
+  // of picking the next target — progressing from a deload entry would build up from ~60% of the
+  // real working weight. Fall back to the last *real* session; only if every entry on record is a
+  // deload (i.e. the exercise has never been logged outside one) does a deload entry get used.
+  // The `deload` flag is checked inline rather than via state/deload.ts's isDeloadEntry() because
+  // that module imports deloadSuggestion() from this one — importing back would be circular.
+  const real = history ? history.filter(e => e.deload !== true) : undefined;
+  const usable = real && real.length ? real : history;
+  if (usable && usable.length) {
     const lib = EXLIB[ex.id];
-    const latest = history[history.length - 1];
+    const latest = usable[usable.length - 1];
     const sets = latest.sets && latest.sets.length ? latest.sets : [{ weight: latest.weight, reps: latest.reps }];
     const topSet = sets[sets.length - 1];
     const hitTop = sets.every(r => r.reps >= lib.repHi);
@@ -214,7 +222,7 @@ export function similarExerciseReference(exId: string, allHistory?: Record<strin
   return { name: otherLib.name, weight: top.weight, reps: top.reps, isTime: otherLib.trackingMode === 'time', sameVariant: best.tier === 0 };
 }
 
-export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVoice = 'Encouraging', history?: ExerciseHistoryEntry[], allHistory?: Record<string, ExerciseHistoryEntry[]>): Recommendation {
+export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVoice = 'Encouraging', history?: ExerciseHistoryEntry[], allHistory?: Record<string, ExerciseHistoryEntry[]>, deloadPct?: number | null): Recommendation {
   const lib = EXLIB[ex.id];
   const equip = lib.equip[ex.equipIdx];
   const last = effectiveLast(ex, history);
@@ -248,6 +256,31 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
       note: bodyweight
         ? 'No history yet. Aim for ' + fmtVal(lib.repHi) + ' and we’ll track your progress from here.'
         : 'No history yet. Pick a weight you can control for ' + fmtVal(lib.repHi) + ' — we’ll build from there next session.'
+    };
+  }
+  // Deload week: cut the load and stop chasing progression entirely. Placed after the no-history
+  // branch above (a lift you've never done has no working weight to take a percentage of, so it
+  // gets normal first-time baseline advice even during a deload) but before every progression rule
+  // below, since none of them should run while deloading — the point of the week is to *not* add.
+  if (deloadPct && (history?.length || ex.manualTarget)) {
+    const pctText = Math.round(deloadPct * 100) + '%';
+    const title = phrase('Deload week — go light', 'Deload week — keep it easy', 'Deload week — bank the recovery! 🌱');
+    if (equip.v === 'bodyweight' || equip.v === 'assisted') {
+      // No external load to strip, so the volume comes off the reps/time instead.
+      const val = Math.max(1, Math.round(last.reps * deloadPct));
+      return {
+        weight: 0, reps: val, title,
+        note: 'Deload week: aim for ' + fmtVal(val) + ' instead of your usual ' + fmtVal(last.reps) +
+          '. Leave plenty in the tank — you’re recovering, not testing.'
+      };
+    }
+    const inc = incrementForEquip(equip.v) ?? 2.5;
+    const raw = last.weight * deloadPct;
+    const w = last.weight > 0 ? Math.max(inc, Math.round(raw / inc) * inc) : 0;
+    return {
+      weight: w, reps: lib.repHi, title,
+      note: 'Deload week: ' + pctText + ' of your usual ' + w1 + ' — that’s ' + fmtWeight(w, units) +
+        ' for ' + fmtVal(lib.repHi) + '. Every rep should feel easy; this week is what lets the next one go up.'
     };
   }
   if (equip.v === 'bodyweight' || equip.v === 'assisted') {
@@ -444,7 +477,10 @@ export function deloadSuggestion(state: AppState): DeloadSuggestion {
   let considered = 0;
   const plateaued: string[] = [];
   compoundIds.forEach(id => {
-    const entries = state.exerciseHistory[id] || [];
+    // Deload entries are excluded before the trend is read: they're light by design, so a deload
+    // week sitting in the window would read as a "flat or declining" lift and this detector would
+    // recommend a deload immediately after one just finished.
+    const entries = (state.exerciseHistory[id] || []).filter(e => e.deload !== true);
     if (entries.length < 3) return;
     considered++;
     const lib = EXLIB[id];
@@ -845,5 +881,23 @@ export function hasLoggedTimeExercise(state: AppState): boolean {
 export function customExerciseCount(state: AppState): number {
   return Object.keys(state.customExercises || {}).length;
 }
+
+// Total logged training time. Grows on every single completed session, which is exactly what makes
+// it good achievement fuel — see the tier design note in data/achievements.ts.
+export function totalTrainingMinutes(state: AppState): number {
+  return state.history.reduce((sum, h) => sum + (h.status === 'completed' ? (h.durationMin || 0) : 0), 0);
+}
+
+// Best single-session volume. A max, so it's monotonic like the rest of these (a lighter session
+// later can never pull it back down), and it's beatable surprisingly often while a lifter is still
+// adding weight or sets — a "beat your best day" target rather than a lifetime total.
+export function bestSessionVolumeKg(state: AppState): number {
+  return state.history.reduce((best, h) => (h.status === 'completed' && (h.volumeKg || 0) > best ? h.volumeKg : best), 0);
+}
+
+// Lifetime count of logged sets is deliberately NOT offered as a metric: HistoryEntry.exercises is
+// display rows with no set counts, and exerciseHistory is capped to the last 8 sessions per
+// exercise, so any count derived from it would *decrease* as old sessions age out — which would
+// un-earn badges. Volume and training time cover the same "grows every workout" role safely.
 
 export type { Units, TrainingType };

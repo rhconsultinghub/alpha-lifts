@@ -103,6 +103,43 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
             ))}
           </div>
 
+          <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>DELOAD WEEKS</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,.04)', borderRadius: 14, padding: '12px 14px', marginBottom: 6 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ font: "600 13px 'Inter'", color: '#f5f0ea' }}>Auto Deloads</div>
+              <div style={{ font: "400 11px/1.45 'Inter'", color: 'rgba(245,240,234,.45)', marginTop: 2 }}>{st.deload.desc}</div>
+            </div>
+            <button onClick={st.deload.toggle} style={{ flex: 'none', font: "600 12px 'Inter'", padding: '8px 14px', borderRadius: 10, border: 'none', background: st.deload.enabled ? 'oklch(0.65 0.19 35)' : 'rgba(255,255,255,.06)', color: st.deload.enabled ? '#0d0c0b' : 'rgba(245,240,234,.7)' }}>{st.deload.enabled ? 'On' : 'Off'}</button>
+          </div>
+          {st.deload.enabled && (
+            <>
+              {st.deload.statusText && (
+                <div style={{ font: "400 11px/1.45 'Inter'", color: 'oklch(0.78 0.13 230)', background: 'oklch(0.7 0.13 230 / 0.1)', border: '1px solid oklch(0.7 0.13 230 / 0.3)', borderRadius: 10, padding: '8px 10px', marginBottom: 10 }}>
+                  {st.deload.statusText}
+                </div>
+              )}
+              <div style={{ font: "500 12px 'Inter'", color: 'rgba(245,240,234,.75)', marginBottom: 4 }}>Max Weeks Without One</div>
+              <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginBottom: 8 }}>{st.deload.cadenceDesc}</div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+                {st.deload.cadenceOptions.map(o => (
+                  <button key={o.label} onClick={o.select} style={{ flex: 1, font: "600 11px 'Inter'", padding: 9, borderRadius: 10, border: 'none', background: o.bg, color: o.color }}>{o.label}</button>
+                ))}
+              </div>
+              <div style={{ font: "500 12px 'Inter'", color: 'rgba(245,240,234,.75)', marginBottom: 4 }}>Deload Intensity</div>
+              <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginBottom: 8 }}>{st.deload.intensityDesc}</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                {st.deload.intensityOptions.map(o => (
+                  <button key={o.label} onClick={o.select} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: o.bg, color: o.color }}>{o.label}</button>
+                ))}
+              </div>
+              <button
+                onClick={st.deload.isActive ? st.deload.end : st.deload.start}
+                style={{ width: '100%', font: "600 12px 'Inter'", padding: 11, borderRadius: 10, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.75)', marginBottom: 24 }}
+              >{st.deload.isActive ? 'End deload week now' : 'Start a deload week now'}</button>
+            </>
+          )}
+          {!st.deload.enabled && <div style={{ marginBottom: 24 }} />}
+
           <div style={{ font: "500 12px 'Inter'", color: 'rgba(245,240,234,.75)', marginBottom: 4 }}>Rest Alerts</div>
           <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginBottom: 8 }}>Sound and Vibrate only work while Alpha Lifts is the app you're actively looking at — that's a browser restriction, not a setting. Notify is the one that can still reach you if you've switched to another app during your rest period. Sound plays through media volume, so it ignores your phone's silent/vibrate switch.</div>
           {!st.vibrationSupported && (

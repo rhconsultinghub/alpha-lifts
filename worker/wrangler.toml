@@ -1,0 +1,20 @@
+name = "alpha-lifts-coach"
+main = "src/index.ts"
+compatibility_date = "2025-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Origins allowed to call this Worker. The GitHub Pages deployment plus local dev.
+# Anything not listed here is rejected before the API is ever called — this is what
+# stops a random site from spending your API budget through your Worker.
+[vars]
+ALLOWED_ORIGINS = "https://ryanhouse19.github.io,http://localhost:5173"
+
+# ANTHROPIC_API_KEY is NOT set here — wrangler.toml is committed to git.
+# Set it as an encrypted secret instead:
+#   npx wrangler secret put ANTHROPIC_API_KEY
+# For local dev, put it in worker/.dev.vars (gitignored).
+
+# Uncomment once you add real usage metering (see README "Phase 2").
+# [[kv_namespaces]]
+# binding = "USAGE"
+# id = "<created by: npx wrangler kv namespace create USAGE>"

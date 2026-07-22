@@ -1,4 +1,4 @@
-import { EXLIB, MUSCLE_TARGETS, TRAINING_MULT, planRepDefault } from './exercises';
+﻿import { EXLIB, MUSCLE_TARGETS, TRAINING_MULT, planRepDefault } from './exercises';
 import { mkEx, clamp } from './program';
 import type { Muscle, ProgramDays, ProgramExercise, TrainingType, WizardCustomDay } from './types';
 
@@ -12,10 +12,10 @@ export const DAY_TYPE_LABELS: Record<string, string> = {
 };
 
 export const DAY_TYPE_THEME: Record<string, Muscle[]> = {
-  push: ['Chest', 'Shoulders', 'Triceps'], pull: ['Back', 'Biceps', 'Rear Delts', 'Core'],
-  legs: ['Quads', 'Hamstrings', 'Glutes', 'Calves', 'Core'], upper: ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Rear Delts', 'Core'],
+  push: ['Chest', 'Shoulders', 'Triceps'], pull: ['Back', 'Biceps', 'Rear Delts', 'Forearms', 'Core'],
+  legs: ['Quads', 'Hamstrings', 'Glutes', 'Calves', 'Core'], upper: ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Rear Delts', 'Forearms', 'Core'],
   lower: ['Quads', 'Hamstrings', 'Glutes', 'Calves', 'Core'], full_body: Object.keys(MUSCLE_TARGETS) as Muscle[],
-  chest: ['Chest', 'Triceps'], back: ['Back', 'Biceps'], shoulders: ['Shoulders', 'Rear Delts'], arms: ['Biceps', 'Triceps'], rest: []
+  chest: ['Chest', 'Triceps'], back: ['Back', 'Biceps'], shoulders: ['Shoulders', 'Rear Delts'], arms: ['Biceps', 'Triceps', 'Forearms'], rest: []
 };
 
 // every day type's exercise list is chosen so its full theme (see DAY_TYPE_THEME above) gets at
@@ -23,20 +23,21 @@ export const DAY_TYPE_THEME: Record<string, Muscle[]> = {
 // Upper/Lower, which never uses "legs" or "pull") can leave a muscle permanently at 0%.
 export const DAY_TYPE_EXERCISES: Record<string, string[]> = {
   push: ['bench_press', 'overhead_press', 'incline_db_press', 'triceps_pushdown', 'lateral_raise'],
-  pull: ['deadlift', 'lat_pulldown', 'seated_row', 'barbell_curl', 'face_pull', 'plank'],
+  pull: ['deadlift', 'lat_pulldown', 'seated_row', 'barbell_curl', 'face_pull', 'palms_up_wrist_curl_over_a_bench', 'plank'],
   legs: ['back_squat', 'leg_curl', 'leg_press', 'hip_thrust', 'calf_raise', 'plank'],
-  upper: ['pullup', 'db_shoulder_press', 'cable_fly', 'hammer_curl', 'triceps_pushdown', 'face_pull'],
+  upper: ['pullup', 'db_shoulder_press', 'cable_fly', 'hammer_curl', 'triceps_pushdown', 'face_pull', 'reverse_curl'],
   lower: ['rdl', 'leg_press', 'hip_thrust', 'calf_raise', 'plank'],
   // full_body's theme is every muscle (see DAY_TYPE_THEME.full_body below), so — unlike the other
   // day types, which only need to cover a 2-5 muscle theme — this list needs one exercise per
   // muscle in MUSCLE_TARGETS or four of them silently sit at 0% volume forever (Biceps, Rear
-  // Delts, Triceps, Glutes had no primary-muscle exercise here previously). Isolation moves with
-  // short rest are used for the added slots to keep the session from ballooning in length.
-  full_body: ['back_squat', 'bench_press', 'seated_row', 'overhead_press', 'leg_curl', 'hip_thrust', 'hammer_curl', 'triceps_pushdown', 'face_pull', 'calf_raise', 'plank'],
+  // Delts, Triceps, Glutes had no primary-muscle exercise here previously; Forearms joined the
+  // same rule when it became a muscle in phase 32). Isolation moves with short rest are used for
+  // the added slots to keep the session from ballooning in length.
+  full_body: ['back_squat', 'bench_press', 'seated_row', 'overhead_press', 'leg_curl', 'hip_thrust', 'hammer_curl', 'triceps_pushdown', 'face_pull', 'calf_raise', 'reverse_curl', 'plank'],
   chest: ['bench_press', 'incline_db_press', 'cable_fly', 'dip', 'triceps_pushdown'],
   back: ['deadlift', 'lat_pulldown', 'seated_row', 'barbell_curl'],
   shoulders: ['overhead_press', 'lateral_raise', 'rear_delt_fly', 'front_raise'],
-  arms: ['barbell_curl', 'hammer_curl', 'triceps_pushdown', 'skull_crusher'],
+  arms: ['barbell_curl', 'hammer_curl', 'triceps_pushdown', 'skull_crusher', 'reverse_curl'],
   rest: []
 };
 
@@ -90,7 +91,11 @@ const EXTRA_POOL_MUSCLES: Partial<Record<string, string[]>> = {
   Triceps: ['overhead_triceps_ext'],
   // "pull" alone has 3 Back slots (deadlift/lat_pulldown/seated_row) and occurs twice in the PPL6
   // split, so 6 distinct Back picks are needed in that one week — the base pool only has 4.
-  Back: ['barbell_row', 'chinup']
+  Back: ['barbell_row', 'chinup'],
+  // full_body runs 3x/week and PPL6's two pull days both carry a Forearms slot — the base pool
+  // only has the two ids used in DAY_TYPE_EXERCISES, so the other two re-tagged wrist curls
+  // round out the alternates.
+  Forearms: ['seated_palms_down_wrist_curl', 'palms_down_wrist_curl_over_a_bench']
 };
 Object.entries(EXTRA_POOL_MUSCLES).forEach(([m, ids]) => {
   (POOL_BY_MUSCLE[m] = POOL_BY_MUSCLE[m] || []).push(...(ids || []).filter(id => !POOL_BY_MUSCLE[m].includes(id)));
@@ -167,8 +172,14 @@ const BALANCE_LOW_PCT = 85;
 const BALANCE_HIGH_PCT = 115;
 // soft ceiling on a single day's estimated time (seconds) that the balancer won't push past when
 // adding sets to fix an under-trained muscle — mirrors estimateDayTime()'s per-set cost
-// (40s work + rest) at Standard pacing.
-const MAX_DAY_TIME_SEC = 65 * 60;
+// (40s work + rest) at Standard pacing. Raised 65→75 in phase 32: the Forearms slot added to the
+// upper/pull day lists consumed enough initial day time that Back's top-up pass on Upper/Lower ×
+// Progressive Overload was gated out entirely (Back stuck at 75% of target); at 75 the full
+// split×training-type audit lands strictly better than before the Forearms change (6 out-of-band
+// combos vs 10, all six inherited day-time-capped cases, no day past the 90-minute hard cap).
+// 85 was tried and fixes one more combo, but inflates several default days to ~86-87 minutes,
+// which is further from the ~hour-long default day phase 7 aimed at than the residual unders are.
+const MAX_DAY_TIME_SEC = 75 * 60;
 // hard ceiling enforced regardless of source (initial generation or balancing) — a "recommended"
 // default should never hand a new user something in the neighborhood of a 3-hour workout, even
 // for demanding split/training-type combos (e.g. Full Body x Endurance) the balancer can't help.

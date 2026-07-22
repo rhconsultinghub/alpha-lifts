@@ -4,6 +4,13 @@
 // page already has gesture-unlocked audio).
 
 const ICON = () => `${import.meta.env.BASE_URL}icon-192.png`;
+// The small monochrome glyph Android draws in the status bar and beside the app name. Without it
+// the platform substitutes a generic bell, which is what these notifications used to show — the
+// large `icon` above is the app icon and only appears once the shade is pulled down, so the bell
+// was the *only* thing visible most of the time. badge-96.png is a solid-white barbell on
+// transparency (regenerate with scripts/make-badge.mjs): Android uses the alpha channel
+// only and tints the result, so any interior shading would flatten into a blob.
+const BADGE = () => `${import.meta.env.BASE_URL}badge-96.png`;
 // Two separate tags on purpose. The countdown ticker replaces itself in place every tick with
 // `silent: true`; if the final "Rest complete" alert reused that same tag it would be delivered as
 // an *update* to an existing, already-silenced notification, and Android generally won't re-alert
@@ -17,6 +24,45 @@ const TAG_DONE = 'alpha-lifts-rest-done';
 // Long, clearly-patterned buzz — the old [200,100,200] was easy to miss against a rack or through a
 // pocket, and the whole point of this alert is to be felt without looking.
 const REST_END_PATTERN = [400, 150, 400, 150, 600];
+
+// What the tray is told about the session in progress. Assembled by the caller (useApp's restTick)
+// because only the page knows the live workout — this module deliberately holds no state and does
+// no lookups, matching how the service worker stays out of the "which exercise?" question too.
+export interface RestContext {
+  exerciseName: string;
+  /** "Set 3 of 4" — already resolved, since set indexing lives in the workout state. */
+  setLabel: string;
+  /** "100 lb × 5", or '' for a lift with no target to show. */
+  targetText: string;
+  dayLabel: string;
+}
+
+// Motivational close-out, in the voice the user already picked for in-app coaching copy (Settings →
+// Coach Voice) rather than a fourth tone invented for the tray. Notification titles get truncated
+// hard on a phone — roughly 40 characters before the ellipsis on Android — so every line here is
+// written to survive that, with the workout detail carried in the body where there's more room.
+const REST_END_LINES: Record<string, string[]> = {
+  Direct: ['Rest is over.', 'Back to the bar.', 'Next set is up.', 'Time to work.'],
+  Encouraging: ['You’re recovered — go again.', 'Bar’s waiting for you.', 'Nice rest. Next set!', 'Ready when you are.'],
+  Hype: ['LET’S GO! 🔥', 'Bar’s waiting. 💪', 'Time to move some weight! ⚡', 'Go get that set! 🚀']
+};
+
+// Deliberately random per fire rather than cycling an index: the alternative needs persisted state
+// for something that genuinely doesn't matter, and a repeat now and then is unnoticeable.
+function restEndLine(voice: string): string {
+  const lines = REST_END_LINES[voice] || REST_END_LINES.Encouraging;
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
+// Body copy shared by both notifications. Joined from the parts that actually have content, so a
+// bodyweight lift with no target doesn't produce a dangling separator. `withName` is false for the
+// countdown, whose title already carries the exercise name — repeating it there costs one of the
+// two body lines a phone will show, to say something already on screen.
+function contextBody(ctx: RestContext | undefined, suffix: string, withName: boolean): string {
+  if (!ctx) return suffix;
+  const parts = [withName ? ctx.exerciseName : '', ctx.setLabel, ctx.targetText, ctx.dayLabel].filter(Boolean);
+  return parts.join(' · ') + (suffix ? '\n' + suffix : '');
+}
 
 // Returns whether the browser *accepted* the call. Chrome returns false when it refuses to vibrate
 // (most commonly because the frame has no user activation yet); it returns true once the request is
@@ -47,7 +93,7 @@ export function testVibration(): boolean {
 // plain constructor if no Service Worker is available (e.g. mid-development without the PWA
 // plugin's registration active) — vibration won't reach a backgrounded page in that fallback, but
 // the toast still will.
-export async function notifyRestEnd(vibrate: boolean): Promise<void> {
+export async function notifyRestEnd(vibrate: boolean, ctx?: RestContext, voice = 'Encouraging'): Promise<void> {
   try {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     // `vibrate` and `renotify` are spec options missing from this project's TS DOM lib typings,
@@ -59,8 +105,13 @@ export async function notifyRestEnd(vibrate: boolean): Promise<void> {
     // Vibration API is restricted to visible documents.
     // data.type is what the service worker's notificationclick handler keys off to reopen the app
     // on the right exercise (see src/sw.ts).
+    // The motivational line is the *title* rather than the body: on a locked phone the title is
+    // frequently all that renders, so burying the "get back to it" in the body would mean the one
+    // thing this alert exists to say is the part most likely to be cut off.
+    const title = restEndLine(voice);
     const options = {
-      body: 'Time to get back to it.', icon: ICON(), tag: TAG_DONE, renotify: true,
+      body: contextBody(ctx, 'Tap to jump back in.', true), icon: ICON(), badge: BADGE(),
+      tag: TAG_DONE, renotify: true,
       data: { type: 'rest-complete' },
       ...(vibrate ? { vibrate: [200, 100, 200] } : {})
     } as NotificationOptions;
@@ -69,10 +120,10 @@ export async function notifyRestEnd(vibrate: boolean): Promise<void> {
       // clear the silent countdown first so the completion lands as a brand-new notification
       const stale = await reg.getNotifications({ tag: TAG_PROGRESS });
       stale.forEach(n => n.close());
-      await reg.showNotification('Rest complete', options);
+      await reg.showNotification(title, options);
       return;
     }
-    new Notification('Rest complete', options);
+    new Notification(title, options);
   } catch { /* unsupported or blocked */ }
 }
 
@@ -84,14 +135,23 @@ export async function notifyRestEnd(vibrate: boolean): Promise<void> {
 // clock — the same best-effort ceiling documented for reminders.ts. Reuses the same tag as
 // notifyRestEnd so the final "Rest complete" alert cleanly replaces the last countdown update
 // rather than stacking a second notification.
-export async function updateRestProgressNotification(remainingSec: number): Promise<void> {
+export async function updateRestProgressNotification(remainingSec: number, ctx?: RestContext): Promise<void> {
   try {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     if (!('serviceWorker' in navigator)) return;
     const reg = await navigator.serviceWorker.ready;
     const mm = Math.floor(remainingSec / 60);
     const ss = String(remainingSec % 60).padStart(2, '0');
-    await reg.showNotification('Resting…', { body: `${mm}:${ss} remaining`, icon: ICON(), tag: TAG_PROGRESS, silent: true });
+    // Clock first in the title — it's the one thing being glanced at, and it stays readable even
+    // when the exercise name after it gets truncated. `data` matters as much as the copy here: it's
+    // what makes tapping the *countdown* return to the workout, which it previously didn't (the
+    // service worker's handler bails on any notification without a recognised type, and this one
+    // used to carry none — so a tap did nothing at all until the timer finished).
+    await reg.showNotification(`${mm}:${ss} rest · ${ctx ? ctx.exerciseName : 'Resting'}`, {
+      body: contextBody(ctx, 'Tap to return to your workout.', false),
+      icon: ICON(), badge: BADGE(), tag: TAG_PROGRESS, silent: true,
+      data: { type: 'rest-progress' }
+    } as NotificationOptions);
   } catch { /* unsupported or blocked */ }
 }
 

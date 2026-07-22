@@ -5,14 +5,17 @@ import { createInitialState } from '../data/initialState';
 import { exportBackup as exportBackupFile, mergeBackupIntoDefaults } from '../data/backup';
 import { SPLIT_PRESETS, buildProgramFromPreset, buildCustomProgram } from '../data/wizard';
 import type {
-  AppState, CoachVoice, ExerciseFormState, Muscle, ProgramExercise, RestPacing, Screen, TrainingType,
-  Units, WarmupStyle, WorkoutSetRow, WizardCustomDay
+  AppState, CoachChatMessage, CoachVoice, ExerciseFormState, Muscle, ProgramExercise, RestPacing, Screen,
+  TrainingType, Units, WarmupStyle, WorkoutSetRow, WizardCustomDay
 } from '../data/types';
+import { askCoach, buildCoachContext, COACH_HISTORY_CAP } from './coach';
 import {
   recommendation, restForExercise, dayMuscleRanks, isWeekComplete, fmtWeight,
   nextIncompleteIndex, defaultCompareLiftIds, bestSetScore, effectiveLast
 } from './logic';
+import { activeDeloadPct, advanceDeloadForWeek, SKIP_SUPPRESS_WEEKS } from './deload';
 import { vibrateRestEnd, playRestEndSound, notifyRestEnd, updateRestProgressNotification, clearRestProgressNotification } from './alerts';
+import type { RestContext } from './alerts';
 import { shouldFireReminder, fireReminder } from './reminders';
 
 const STORAGE_KEY = 'fitness-app-state-v1';
@@ -33,6 +36,10 @@ function loadInitial(): AppState {
       if (parsed.onboarded === undefined && parsed.dayOrder && parsed.dayOrder.length > 0) {
         state.onboarded = true;
       }
+      // An in-flight coach request can't survive a reload — if the app was closed mid-send, the
+      // persisted `true` would restore a chat stuck showing the typing indicator forever, with
+      // no request running to ever clear it.
+      state.coachPending = false;
     }
   } catch {
     state = defaults;
@@ -154,6 +161,7 @@ export function useApp() {
   const goProgress = useCallback(() => setState(s => ({ ...s, screen: 'progress' as Screen })), []);
   const goExercises = useCallback(() => setState(s => ({ ...s, screen: 'exercises' as Screen })), []);
   const goAchievements = useCallback(() => setState(s => ({ ...s, screen: 'achievements' as Screen })), []);
+  const goCoach = useCallback(() => setState(s => ({ ...s, screen: 'coach' as Screen })), []);
   // deliberately NOT bundled into goAchievements — it needs to fire *after* the screen has
   // already rendered once with the pre-visit seen set, or "NEW" badges would never be visible
   // (see AchievementsScreen.tsx's mount effect, which calls this).
@@ -194,6 +202,45 @@ export function useApp() {
   const setWarmupStyle = useCallback((v: WarmupStyle) => setState(s => ({ ...s, warmupStyle: v })), []);
   const renameProgram = useCallback((name: string) => setState(s => ({ ...s, programName: name })), []);
   const dismissDeloadSuggestion = useCallback(() => setState(s => ({ ...s, deloadDismissedWeek: s.weekNumber })), []);
+
+  // ---------- auto deload weeks ----------
+  const setDeloadEnabled = useCallback((on: boolean) => setState(s => ({
+    ...s, deloadEnabled: on,
+    // Turning it on mid-program anchors from right now, so someone who enables it in week 9 gets
+    // the settle-in minimum before any trigger can fire rather than being handed a deload
+    // immediately for fatigue accumulated before the feature existed. Off clears any week in
+    // progress.
+    ...(on
+      ? { deloadAnchorWeek: s.deloadAnchorWeek || s.weekNumber, deloadDeferUntilWeek: null }
+      : { deloadActiveWeek: null })
+  })), []);
+  const setDeloadIntensity = useCallback((pct: number) => setState(s => ({ ...s, deloadIntensityPct: pct })), []);
+  const setDeloadCadence = useCallback((weeks: number | null) => setState(s => ({ ...s, deloadCadenceWeeks: weeks })), []);
+  // Start one now, without waiting for a trigger or a week boundary. Unlike the automatic path
+  // this applies to the week already in progress — it's an explicit request, so there's no reason
+  // to make the user wait, and the targets it changes are only ever the ones still ahead of them.
+  const startDeloadNow = useCallback(() => setState(s => ({
+    ...s, deloadEnabled: true, deloadActiveWeek: s.weekNumber, deloadDeferUntilWeek: null,
+    deloadHistory: [...s.deloadHistory, { week: s.weekNumber, reason: 'manual' as const }]
+  })), []);
+  // Ends the deload early. Counts as done rather than skipped — the user got at least part of a
+  // light week — so both the backstop and the settle-in minimum are measured from here.
+  const endDeloadNow = useCallback(() => setState(s => ({
+    ...s, deloadActiveWeek: null, deloadAnchorWeek: s.weekNumber, deloadDeferUntilWeek: null
+  })), []);
+  const deferDeload = useCallback(() => setState(s => ({
+    ...s, deloadActiveWeek: null, deloadDeferUntilWeek: s.weekNumber + 1
+  })), []);
+  // Skip this one properly. Moving the anchor alone was enough back when a cadence clock was what
+  // proposed deloads, but a trigger doesn't reset: the lifts that read as flat this week are still
+  // flat next week, so the same banner would return one rollover later and "skip" would have meant
+  // nothing. The suppression window is what actually buys the quiet; the anchor still moves so the
+  // backstop counts from here too.
+  const skipDeload = useCallback(() => setState(s => ({
+    ...s, deloadActiveWeek: null, deloadAnchorWeek: s.weekNumber,
+    deloadDeferUntilWeek: s.weekNumber + SKIP_SUPPRESS_WEEKS,
+    deloadHistory: s.deloadHistory.filter(h => h.week !== s.weekNumber)
+  })), []);
 
   // ---------- backup export/import ----------
   const exportBackup = useCallback(() => { exportBackupFile(state); }, [state]);
@@ -384,14 +431,16 @@ export function useApp() {
           weekNumber: s.weekNumber, status: 'skipped' as const, exercises: []
         };
         let weekNumber = s.weekNumber, weekStartedAt = s.weekStartedAt;
+        let deloadFields = null as ReturnType<typeof advanceDeloadForWeek> | null;
         if (isWeekComplete(program, s.dayOrder, weekStartedAt)) {
           weekNumber += 1; weekStartedAt = now.toISOString();
+          deloadFields = advanceDeloadForWeek(s, weekNumber);
           s.dayOrder.forEach(k => {
             const d = program[k];
             if (d && (d.kind || 'training') !== 'rest') { d.skipped = false; d.lastCompletedAt = null; }
           });
         }
-        return { ...s, program, history: [entry, ...s.history], weekNumber, weekStartedAt };
+        return { ...s, program, history: [entry, ...s.history], weekNumber, weekStartedAt, ...(deloadFields || {}) };
       }
       return { ...s, program };
     });
@@ -419,6 +468,57 @@ export function useApp() {
   const openLibraryDetail = useCallback((id: string) => setState(s => ({ ...s, libraryDetailId: id })), []);
   const closeLibraryDetail = useCallback(() => setState(s => ({ ...s, libraryDetailId: null })), []);
   const setExerciseSearchQuery = useCallback((q: string) => setState(s => ({ ...s, exerciseSearchQuery: q })), []);
+
+  // ---------- AI coach ----------
+  const setCoachInput = useCallback((v: string) => setState(s => ({ ...s, coachInput: v })), []);
+  const clearCoachChat = useCallback(() => setState(s => ({ ...s, coachMessages: [], coachInput: '' })), []);
+
+  // Synchronous in-flight latch. Deliberately NOT `stateRef.current.coachPending`: stateRef is
+  // refreshed in a useEffect, i.e. after commit, so two sends dispatched in the same tick (a
+  // double-tap, or Enter landing on the same frame as a click) both read the stale `false` and
+  // both fire. Verified: that produced two API requests for one user message. A ref set before
+  // the first await closes the window, since it lands before React re-renders anything.
+  const coachInflightRef = useRef(false);
+
+  // Message ids were `c${Date.now()}` + a role suffix, which collided whenever two messages
+  // landed in the same millisecond — React logged duplicate-key warnings during testing when a
+  // request failed fast enough that the user turn and the error bubble shared a timestamp.
+  // A counter makes them unique regardless of clock resolution.
+  const coachMsgSeq = useRef(0);
+  const nextCoachId = () => `c${Date.now()}_${coachMsgSeq.current++}`;
+
+  const sendCoachMessage = useCallback(async () => {
+    const cur = stateRef.current;
+    const text = cur.coachInput.trim();
+    if (!text || coachInflightRef.current) return;
+    coachInflightRef.current = true;
+
+    const userMsg: CoachChatMessage = { id: nextCoachId(), role: 'user', content: text };
+    const nextMessages = [...cur.coachMessages, userMsg].slice(-COACH_HISTORY_CAP);
+    setState(s => ({ ...s, coachMessages: nextMessages, coachInput: '', coachPending: true }));
+
+    // Error bubbles are local UI state ("couldn't reach the coach"), not something the model
+    // said — sending them back as assistant turns would have it apologise for our network.
+    const wire = nextMessages.filter(m => !m.isError).map(m => ({ role: m.role, content: m.content }));
+
+    let result;
+    try {
+      result = await askCoach(wire, buildCoachContext(cur));
+    } finally {
+      // Must clear even if askCoach throws, or the latch wedges shut and the chat is dead for
+      // the rest of the session with no way to recover short of a reload.
+      coachInflightRef.current = false;
+    }
+
+    const reply: CoachChatMessage = result.ok
+      ? { id: nextCoachId(), role: 'assistant', content: result.reply }
+      : { id: nextCoachId(), role: 'assistant', content: result.error, isError: true };
+
+    // Append to `s.coachMessages`, not to the captured `nextMessages` — the user may have hit
+    // "clear chat" while this was in flight, and rebuilding from the stale array would
+    // resurrect the conversation they just deleted.
+    setState(s => ({ ...s, coachPending: false, coachMessages: [...s.coachMessages, reply].slice(-COACH_HISTORY_CAP) }));
+  }, []);
 
   const openAddExerciseForm = useCallback(() => {
     setState(s => ({
@@ -600,7 +700,7 @@ export function useApp() {
           const newEx = mkEx(swap.stagedExId, 3, 0, { weight: 0, reps: lib.repHi, hitTop: true });
           const dayExercises = [...s.workout.dayExercises, newEx];
           const newIdx = dayExercises.length - 1;
-          const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory);
+          const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory, activeDeloadPct(s));
           const sets: WorkoutSetRow[] = [];
           for (let i = 0; i < newEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
           const exSets = { ...s.workout.exSets, [newIdx]: sets };
@@ -624,7 +724,7 @@ export function useApp() {
         if (swap.tab === 'replace' && oldEx.supersetGroup) {
           dayExercises = dayExercises.map(e => (e.supersetGroup === oldEx.supersetGroup ? { ...e, supersetGroup: null } : e));
         }
-        const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory);
+        const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory, activeDeloadPct(s));
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < newEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         const exSets = { ...s.workout.exSets, [idx]: sets };
@@ -676,7 +776,7 @@ export function useApp() {
       // would otherwise show an empty working-sets list — build its default sets now.
       if (!exSets[exIndex]) {
         const landedEx = dayExercises[exIndex];
-        const rec = recommendation(landedEx, s.units, s.coachVoice, s.exerciseHistory[landedEx.id], s.exerciseHistory);
+        const rec = recommendation(landedEx, s.units, s.coachVoice, s.exerciseHistory[landedEx.id], s.exerciseHistory, activeDeloadPct(s));
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < landedEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         exSets[exIndex] = sets;
@@ -831,7 +931,7 @@ export function useApp() {
       let exSets = prevExSets;
       if (!exSets[exIndex]) {
         const ex = s.workout.dayExercises[exIndex];
-        const rec = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id], s.exerciseHistory);
+        const rec = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id], s.exerciseHistory, activeDeloadPct(s));
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < ex.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         exSets = { ...prevExSets, [exIndex]: sets };
@@ -860,6 +960,29 @@ export function useApp() {
   // all. State is read from stateRef here instead, and restDoneForRef makes completion idempotent
   // per rest period (keyed on that period's restEndAt) so the 1s interval and the visibilitychange
   // resync can both call this without ever alerting twice for the same rest.
+  // What the tray notifications say about the session in progress. Built from the same live state
+  // the in-app rest toast reads, so the two can't drift apart. Returns undefined rather than
+  // half-filled placeholders if the workout has gone away mid-flight — alerts.ts then falls back to
+  // its generic copy instead of announcing "undefined · Set NaN of 4".
+  const restContext = useCallback((s: AppState): RestContext | undefined => {
+    const w = s.workout;
+    if (!w) return undefined;
+    const ex = w.dayExercises[w.exIndex];
+    if (!ex) return undefined;
+    const sets = w.exSets[w.exIndex] || [];
+    // The set they're resting *into* — the first one not yet ticked. Once every set is done the
+    // rest is trailing the last set of the exercise, so fall back to naming that one.
+    const nextIdx = sets.findIndex(r => !r.done);
+    const setNo = nextIdx === -1 ? sets.length : nextIdx + 1;
+    const target = sets[nextIdx === -1 ? sets.length - 1 : nextIdx];
+    return {
+      exerciseName: EXLIB[ex.id]?.name || 'Next exercise',
+      setLabel: sets.length ? `Set ${setNo} of ${sets.length}` : '',
+      targetText: target ? (target.weight > 0 ? `${fmtWeight(target.weight, s.units)} × ${target.reps}` : `${target.reps} reps`) : '',
+      dayLabel: s.program[w.dayKey]?.label || ''
+    };
+  }, []);
+
   const restTick = useCallback(() => {
     const cur = stateRef.current;
     if (!cur.workout || !cur.workout.resting || cur.workout.restEndAt == null) return;
@@ -874,16 +997,16 @@ export function useApp() {
       // Fire the notification whenever vibrate OR notify is on, not just notify: the default
       // restAlertVibrate:true setting should still reach a backgrounded phone (where
       // navigator.vibrate is a no-op) via the OS alerting on the notification — see alerts.ts.
-      if (cur.restAlertVibrate || cur.restAlertNotify) notifyRestEnd(cur.restAlertVibrate);
+      if (cur.restAlertVibrate || cur.restAlertNotify) notifyRestEnd(cur.restAlertVibrate, restContext(cur), cur.coachVoice);
       setState(s => (s.workout ? { ...s, workout: { ...s.workout, resting: false, restRemaining: 0, restEndAt: null } } : s));
       return;
     }
     // Best-effort live countdown in the tray while backgrounded — the in-app toast (RestToast)
     // already covers the foreground case with a true every-second update, so this only needs to
     // run when the document is actually hidden.
-    if (cur.restAlertNotify && document.hidden) updateRestProgressNotification(Math.round(remainingMs / 1000));
+    if (cur.restAlertNotify && document.hidden) updateRestProgressNotification(Math.round(remainingMs / 1000), restContext(cur));
     setState(s => (s.workout && s.workout.resting ? { ...s, workout: { ...s.workout, restRemaining: Math.round(remainingMs / 1000) } } : s));
-  }, []);
+  }, [restContext]);
 
   // Vibrate/WebAudio are both restricted to a visible document by the browser (vibrate no-ops
   // outright when hidden; WebAudio typically self-suspends) — resyncing on visibilitychange is
@@ -909,7 +1032,7 @@ export function useApp() {
       program[dayKey].lastCompletedAt = null;
       const dayExercises: ProgramExercise[] = JSON.parse(JSON.stringify(program[dayKey].exercises));
       const ex0 = dayExercises[0];
-      const rec0 = recommendation(ex0, s.units, s.coachVoice, s.exerciseHistory[ex0.id], s.exerciseHistory);
+      const rec0 = recommendation(ex0, s.units, s.coachVoice, s.exerciseHistory[ex0.id], s.exerciseHistory, activeDeloadPct(s));
       const sets0: WorkoutSetRow[] = [];
       for (let i = 0; i < ex0.sets; i++) sets0.push({ weight: rec0.weight, reps: rec0.reps, done: false });
       return {
@@ -1038,6 +1161,10 @@ export function useApp() {
       if (!s.workout) return s;
       const dayKey = s.workout.dayKey;
       const dayLabel = s.program[dayKey].label;
+      // A deload session is light on purpose, so it must not be written back as this exercise's
+      // working target, and it can't count as a personal record. It's still logged, still counts
+      // toward volume/duration/achievements — it just doesn't move the progression baseline.
+      const deloading = activeDeloadPct(s) !== null;
       const summary: AppState['completeSummary'] = [];
       let totalVolume = 0;
       const exercisesDoneMask: boolean[] = [];
@@ -1056,14 +1183,21 @@ export function useApp() {
           const topSet = doneSets[doneSets.length - 1];
           const hitTop = doneSets.every(r => r.reps >= lib.repHi);
           // a fresh real log always supersedes a manual weight/reps correction, wherever it was set.
-          newEx = { ...ex, last: { weight: topSet.weight, reps: topSet.reps, hitTop, rir: topSet.rir }, lastSets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })), sets: doneSets.length, manualTarget: null };
+          // Not during a deload week though: the slot's stored target (and any manual correction)
+          // should survive the light week untouched, so normal training resumes from the real
+          // working weight rather than from 60% of it.
+          if (!deloading) {
+            newEx = { ...ex, last: { weight: topSet.weight, reps: topSet.reps, hitTop, rir: topSet.rir }, lastSets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })), sets: doneSets.length, manualTarget: null };
+          }
           doneSets.forEach(r => { totalVolume += (r.weight || 0) * r.reps; });
           const isBodyweight = equip.v === 'bodyweight' || equip.v === 'assisted';
           const isTime = lib.trackingMode === 'time';
           const prior = s.exerciseHistory[ex.id] || [];
           // a first-ever log has nothing to beat, so it's a PR by default — otherwise compare
           // against the best prior session the same way bestSetScore is used for the e1RM metric.
-          if (prior.length === 0) {
+          if (deloading) {
+            isPR = false;
+          } else if (prior.length === 0) {
             isPR = true;
           } else {
             const bestThisSession = Math.max(...doneSets.map(r => bestSetScore(r.weight, r.reps, isTime, isBodyweight)));
@@ -1096,7 +1230,7 @@ export function useApp() {
         if (!doneSets.length) return;
         loggedIds.add(ex.id);
         const prior = exerciseHistory[ex.id] || [];
-        const entry = { date: dateStr, weight: doneSets[0].weight, reps: doneSets[0].reps, day: dayLabel, sets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })) };
+        const entry = { date: dateStr, weight: doneSets[0].weight, reps: doneSets[0].reps, day: dayLabel, sets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })), ...(deloading ? { deload: true } : {}) };
         exerciseHistory[ex.id] = [...prior, entry].slice(-8);
       });
       const hasChanges = s.workout.changesMade > 0;
@@ -1107,7 +1241,7 @@ export function useApp() {
       // real log is fresher than any manual guess, on whichever day it was set) — clear it wherever
       // it appears, not just on the day just played, so effectiveLast() doesn't resurrect a months-
       // old correction the next time that other day is opened.
-      if (loggedIds.size) {
+      if (loggedIds.size && !deloading) {
         s.dayOrder.forEach(k => {
           const exercises = program[k]?.exercises;
           if (!exercises) return;
@@ -1117,8 +1251,10 @@ export function useApp() {
       if (!hasChanges) program[dayKey].exercises = updatedDayExercises;
 
       let weekNumber = s.weekNumber, weekStartedAt = s.weekStartedAt;
+      let deloadFields = null as ReturnType<typeof advanceDeloadForWeek> | null;
       if (isWeekComplete(program, s.dayOrder, weekStartedAt)) {
         weekNumber += 1; weekStartedAt = now.toISOString();
+        deloadFields = advanceDeloadForWeek(s, weekNumber);
         s.dayOrder.forEach(k => {
           const d = program[k];
           if (d && (d.kind || 'training') !== 'rest') { d.skipped = false; d.lastCompletedAt = null; }
@@ -1129,12 +1265,14 @@ export function useApp() {
         return {
           ...s, program, screen: 'complete' as Screen, completeSummary: summary, workout: null,
           history: [historyEntry, ...s.history], exerciseHistory, weekNumber, weekStartedAt,
+          ...(deloadFields || {}),
           pendingPlanUpdate: { dayKey, updatedDayExercises, changedCount: s.workout.changesMade }
         };
       }
       return {
         ...s, program, screen: 'complete' as Screen, completeSummary: summary, workout: null,
-        history: [historyEntry, ...s.history], exerciseHistory, weekNumber, weekStartedAt, pendingPlanUpdate: null
+        history: [historyEntry, ...s.history], exerciseHistory, weekNumber, weekStartedAt,
+        ...(deloadFields || {}), pendingPlanUpdate: null
       };
     });
     stopElapsedTimer();
@@ -1263,7 +1401,7 @@ export function useApp() {
       if (s.screen === 'dayBuilder') return { ...s, screen: 'dayView' as Screen };
       if (s.screen === 'dayView') return { ...s, screen: 'program' as Screen, activeDayKey: null };
       if (s.screen === 'workout') return { ...s, screen: 'program' as Screen };
-      if (s.screen === 'complete' || s.screen === 'progress' || s.screen === 'exercises' || s.screen === 'achievements') return { ...s, screen: 'program' as Screen };
+      if (s.screen === 'complete' || s.screen === 'progress' || s.screen === 'exercises' || s.screen === 'achievements' || s.screen === 'coach') return { ...s, screen: 'program' as Screen };
       return s; // already at rest — let the next back press through to the OS
     });
   }, []);
@@ -1289,12 +1427,15 @@ export function useApp() {
   return {
     state, setState,
     actions: {
-      goProgram, goProgress, goExercises, goAchievements, markAchievementsSeen, openDay, openDayBuilder, closeDayBuilder,
+      goProgram, goProgress, goExercises, goAchievements, goCoach, markAchievementsSeen, openDay, openDayBuilder, closeDayBuilder,
+      setCoachInput, sendCoachMessage, clearCoachChat,
       openExerciseHistory, closeExerciseHistory, openArchiveDetail, closeArchiveDetail,
       selectExerciseProgress, toggleProgressPicker, toggleCompareLift, toggleCompareLiftPicker, setProgressMetric,
       openWeekReview, closeWeekReview, selectReviewWeek, backToWeekList,
       setTrainingType, openSettings, closeSettings, setUnits, setRestPacing, setCoachVoice, setWarmupStyle,
       renameProgram, toggleSkipDay, dismissDeloadSuggestion,
+      setDeloadEnabled, setDeloadIntensity, setDeloadCadence, startDeloadNow, endDeloadNow,
+      deferDeload, skipDeload,
       exportBackup, stageBackupImport, cancelBackupImport, confirmBackupImport,
       requestResetApp, cancelResetApp, resetApp,
       setRestAlertSound, setRestAlertVibrate, setRestAlertNotify, setRemindersEnabled, setReminderTime,

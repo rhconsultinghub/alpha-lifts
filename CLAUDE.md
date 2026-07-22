@@ -966,4 +966,338 @@ through media volume and therefore ignores the silent/vibrate switch, which is t
 reported chime (turning Sound off silences it). Deliberately left alone: the
 `restAlertVibrate || restAlertNotify` gate on `notifyRestEnd()`, since with vibrate defaulting on that
 gate is what makes the notification fire at all. Verified both readouts by stubbing `navigator.vibrate`
-to return true and then false at runtime.
+to return true and then false at runtime. **Outcome: the user confirmed vibration works after this.**
+
+(27) achievement cadence — "make it very easy to hit some sort of achievement every workout".
+Phase 22's tiering fixed "nothing left to chase" but not *frequency*: the ladders jumped 10 → 25 → 50,
+so an established lifter could go 10+ sessions with nothing. Two changes:
+- **Denser ladders + two new families.** 37 tiers → **123**, 8,310 → **31,527** points. Rungs are now
+  tight low down (Workouts 1/2/3/5/8/10/15/20/25/30…, PRs 1/3/5/10/15/20/30…) and only stretch once
+  the numbers are genuinely impressive. Two new families are deliberately driven by metrics that move
+  on *every* completed session regardless of how it went — **Time Under the Bar** (`totalTrainingMinutes`,
+  a sum of `durationMin`) and **Biggest Session** (`bestSessionVolumeKg`, a max of per-session
+  `volumeKg`, so it's a beat-your-best-day target rather than a lifetime total). Both are retroactive
+  and monotonic like everything else here. Note what was rejected and why: a lifetime *sets/reps logged*
+  counter would have been the obvious high-frequency metric, but `HistoryEntry.exercises` is display
+  rows with no set counts and `exerciseHistory` is capped to 8 sessions per exercise — any count off it
+  would *decrease* as old sessions age out and un-earn badges. Volume and training time fill that role
+  safely. There's a comment in `logic.ts` recording this so it isn't "fixed" later.
+- **Newly-cleared badges now surface on the workout Complete screen** (`achievementsVM.newlyUnlocked`,
+  plus a per-item `tierPoints` — the family total `earnedPoints` was the wrong number for a "+X" on a
+  single fresh badge). Deliberately *not* marked seen there, so the Achievements tab still flags
+  anything skimmed past; the heading says "since you last checked" rather than "this session", which is
+  what the `isNew`/`seenAchievementIds` model can honestly claim.
+
+Cadence was tuned empirically rather than by eye, with a throwaway `.verify/` script simulating a
+typical lifter (~3,000kg and 55min per session, PRs tapering off) against the real thresholds: the
+first pass came out at 67% of sessions unlocking something with 3-session dry spells, so the ladders
+were tightened in the mid-band and re-measured at **80% of sessions, 12/12 across the first twelve, and
+a worst case of 2 consecutive sessions with nothing**. Chasing 100% was rejected on purpose — it would
+need rungs so close together they'd stop meaning anything. Verified live at 6 seeded sessions: 25/123
+tiers, and a completed workout surfaced Week Warrior / Two in a Row / Breaking Through / Heavy Hitter
+with correct per-tier points.
+
+(28) **scheduled deload weeks** (`src/state/deload.ts`), opt-in via Settings. Note this is the
+*second* deload feature — phase 13 added `deloadSuggestion()` in `logic.ts`, a reactive, dismissible
+"your compounds look flat, consider a deload" banner. That one only ever fires after progress has
+already stalled and can't do anything about it; this one pencils a lighter week in ahead of time.
+They share the plateau signal rather than duplicating it (`fatigueRead()` calls `deloadSuggestion()`),
+and the old banner is **suppressed entirely while `deloadEnabled`** — otherwise two banners say the
+same thing and only one is actionable. Scoping questions (via `AskUserQuestion`) settled: cut weight
+(not sets), hybrid cadence+early trigger (not purely fixed or purely adaptive), and full user control
+(defer / skip / start-now, nothing silently applied).
+
+- **Trigger is hybrid.** *(Superseded by phase 30 — the cadence is now a backstop, not a schedule,
+  and the weights/thresholds below have all changed. Kept for the reasoning, not the numbers.)*
+  Baseline cadence by training type (`DELOAD_CADENCE`: strength/hit 4,
+  progressive_overload 5, general/endurance 6), pulled earlier when `fatigueRead()` scores ≥0.6 from
+  three independent signals — plateaued compounds (0.4), recent sets averaging RIR ≤1 i.e. training
+  to failure (0.35), and mean session volume down >8% over the last three sessions vs. the three
+  before (0.25). So an early pull always needs at least two signals agreeing; no single one can do it
+  alone. Early pulls are also gated behind `MIN_WEEKS_BEFORE_EARLY` (3) so one bad session in week 1
+  of a cycle reads as noise, not fatigue.
+- **Weeks are `weekNumber`, not calendar weeks** — which already advances on actual completion of
+  every training day (phase 7), so "every 4 weeks" means four weeks of training actually done, not
+  four weeks elapsed while the app sat unopened. That's the right unit for a fatigue cycle.
+- **The plan is derived, not stored** — same approach as `data/achievements.ts`. `deloadPlan(state)`
+  recomputes from week number/training type/history every render. The only persisted fields are the
+  user's own choices (`deloadEnabled`/`deloadIntensityPct`/`deloadCadenceWeeks`) plus the bookkeeping
+  that genuinely can't be recomputed: `deloadActiveWeek` (which week is designated), `deloadAnchorWeek`
+  (where the current cycle is measured from), `deloadDeferUntilWeek`, and `deloadHistory`.
+- **Skip vs. push back are deliberately different.** "Push back a week" sets `deloadDeferUntilWeek`
+  and re-proposes next week; "Skip this one" moves the *anchor* to now, so the next deload is a full
+  cadence away rather than being re-asked at the very next rollover.
+- **Evaluated at the week boundary, not continuously.** `advanceDeloadForWeek()` is called from both
+  `useApp.ts` rollover sites (`completeWorkout` and `toggleSkipDay`) with the week being rolled into,
+  and handles both halves — closing out a finished deload (anchor moves, active clears) and opening
+  one if the new week is due. A deload has to apply to a whole week, so mid-week designation would cut
+  the weights out from under a week already in progress. The explicit "Start a deload week now"
+  action is the one exception, since it's a deliberate request.
+
+**The subtle part, and the thing most likely to be broken by a careless later change:** a deload
+session is light *by design*, so it must not feed anything that reads "how strong are you / are you
+progressing." `ExerciseHistoryEntry` gained a `deload?: boolean` flag, set in `completeWorkout()`, and
+four separate reads now exclude flagged entries:
+  - `effectiveLast()` prefers the most recent *non*-deload entry (falling back to a deload one only if
+    the exercise has literally never been logged outside one) — without this, the week after a deload
+    would progress up from 60% of the real working weight.
+  - `deloadSuggestion()` filters them before reading its trend, or a finished deload would
+    immediately register as a plateau and recommend another deload.
+  - `completeWorkout()` skips the PR comparison entirely (`isPR = false`) and leaves the program
+    slot's `ex.last`/`lastSets`/`sets`/`manualTarget` **untouched**, so normal training resumes from
+    the real target rather than the deloaded one.
+  - `fatigueRead()`'s RIR sampling ignores them.
+Note `logic.ts` checks `e.deload !== true` inline rather than importing `isDeloadEntry()` from
+`deload.ts` — `deload.ts` imports `deloadSuggestion()` from `logic.ts`, so importing back would be
+circular. Same reason the deloaded-weight rounding lives in `recommendation()` rather than in
+`deload.ts`: it needs `incrementForEquip()` to land on something actually loadable (60% of 102.5kg is
+61.5kg, which no barbell can make).
+
+The weight cut itself is a branch in `recommendation()` placed *after* the never-logged short-circuit
+(a lift with no history has no working weight to take a percentage of, so it still gets first-time
+baseline advice) but *before* every progression rule (none of them should run during a deload — the
+whole point is to not add). Bodyweight/assisted lifts have no external load to strip, so they cut
+reps/time instead. Warm-up ramps follow automatically, since `viewModel` already passes the current
+working weight into `warmupInfo()` (phase 25).
+
+Verified live end-to-end against `npm run dev` with seeded history: Push Day targets 100/60/175/80/30
+lb dropped to 60/35/105/45/15 lb (all ≈60%, rounded to loadable increments, sets/reps unchanged),
+the workout screen explained itself ("Deload week: 60% of your usual 100 lb"), a logged deload session
+was written with `deload: true` and fired **no** PR, and — the key check — ending the deload returned
+every target to *exactly* the pre-deload baseline rather than progressing from 60%. Also verified: the
+early trigger firing at 3-of-4 weeks with named reasons, "push back" deferring one week and correctly
+re-proposing after it, "skip" moving the anchor a full cadence out, auto-designation on week rollover
+(`reason: 'scheduled'`), the closing half of that rollover, and the legacy banner still appearing —
+alone — with the feature off. Zero console errors; `npx tsc -b` and `npm run build` both clean.
+
+(29) **AI coach chat** (`src/components/CoachScreen.tsx`, `src/state/coach.ts`, `worker/`) — a 5th tab
+that answers questions about the app, the user's own program/history, and general fitness, declining
+everything else. This is the first feature in the project that is **not** fully client-side, and that
+is forced, not a preference: the app is a static PWA on GitHub Pages, so an API key in the bundle
+would be world-readable. A Cloudflare Worker (`worker/`, deployed separately from Pages) holds the
+key and is the only thing that talks to the Anthropic API.
+
+Three things live server-side deliberately, and moving any of them to the client would defeat the
+feature: the API key; the system prompt + topic restriction (`worker/src/prompt.ts` — if the client
+sent the system prompt, a user could edit the request in devtools and use the key as a general
+purpose Claude, so the Worker ignores any `system` field a client sends and always builds its own);
+and usage metering (`worker/src/usage.ts` — token counts come from the API response and are converted
+to dollars server-side, since a client-reported number is trivially spoofable).
+
+Metering is **stubbed but shaped for real use**: `checkBudget()` always allows and `recordSpend()` is
+a no-op, but cost is really computed per request. Two decisions worth keeping if this is finished:
+meter in **dollars, not tokens** (input/output are priced differently per model, so a token count is
+not a budget), and prefer **D1 over KV** for the counter — KV is eventually consistent, so concurrent
+requests can both read a stale balance. The `userId` the client sends is a device UUID
+(`state/coach.ts`) and is explicitly **not** a security boundary: anyone can clear it for a fresh
+budget. It is a placeholder for a real subscription-backed identity. The app store subscription wall
+itself is not built and needs two things that don't exist yet — a native wrapper (Capacitor) since a
+PWA isn't in any store and has no IAP to gate behind, and real accounts, since everything is
+currently anonymous `localStorage`. See `worker/README.md`.
+
+Cost control is a design constraint here, not an afterthought, because the whole point is a fixed
+monthly budget. The dominant term is **history re-sending**: the full conversation is re-sent and
+re-billed on every message, so an uncapped chat costs quadratically more as it goes. Hence
+`MAX_HISTORY_MESSAGES = 20` in the Worker and `COACH_HISTORY_CAP = 40` client-side, plus
+`MAX_TOKENS = 1024`, `effort: 'low'`, and a hand-built context projection (`buildCoachContext()`)
+rather than sending `AppState` wholesale. At Opus 4.8 pricing a $5/month budget is roughly 150-400
+messages; `MODEL` is a one-line swap to Sonnet/Haiku (both already priced in `usage.ts`) if that's
+too few.
+
+Three real bugs were caught during verification, all by driving the live UI rather than by reading:
+- **Double-send double-spend.** The in-flight guard originally read `stateRef.current.coachPending`,
+  but `stateRef` is refreshed in a `useEffect` — i.e. after commit — so two sends dispatched in the
+  same tick both read the stale `false` and **both fired a request**. Confirmed against a mock
+  backend: two clicks, two requests, one user message. Fixed with a synchronous `useRef` latch set
+  before the first `await`, cleared in a `finally` (without the `finally`, a throw wedges the latch
+  shut and the chat is dead until reload). Worth remembering generally: `stateRef` in this file is
+  safe for reading state inside async work, but **not** as a same-tick re-entrancy guard.
+- **Duplicate React keys.** Message ids were `c${Date.now()}` + a role suffix, which collide when two
+  messages land in the same millisecond (a fast-failing request produces the user turn and the error
+  bubble together). Now a `Date.now()` + monotonic counter.
+- **"How's my Push Day day looking?"** — the suggested-prompt template appended " day" to a label
+  that already ends in "Day".
+
+Also: day labels repeat within a week (a PPL split has two different "Push Day"s), so the context
+prefixes each with its weekday or the model cannot tell them apart. The 5-tab bar needed the font
+dropped to 10px and horizontal padding to 8px to fit — measured, not guessed: "Achievements" is 69px
+of label in a 71px tab, so it fits with nothing to spare; any longer label needs shortening.
+
+Verified live at 375x812 against `npm run dev` with a mock backend standing in for the Worker
+(scratch script, deleted): real program context serialized correctly, `hasSystem: false` on the wire
+confirming the client never sends a system prompt, multi-turn history accumulating 1 -> 3 messages,
+the conversation surviving a reload, the offline error bubble rendering distinctly from advice, and
+three rapid clicks producing exactly one request. `npx tsc -b` clean for the app and
+`tsc --noEmit` clean for the Worker against the real SDK. **Not verified: a real Anthropic API call** —
+there was no API key available in this session, so the Worker's request/response path and the topic
+restriction itself have never been exercised against the live API. That is the first thing to test.
+Note `@anthropic-ai/sdk` had to be `^0.112.3` — 0.70 predates adaptive thinking and `output_config`
+and fails to compile.
+
+(30) **deloads are now trigger-based, not time-based** — a direct inversion of phase 28's hybrid.
+Previously the cadence clock proposed deloads and the fatigue signals could only pull one *earlier*;
+now the signals are the ordinary path and the week count survives only as a far-out backstop.
+Scoping questions (via `AskUserQuestion`) settled: keep a backstop rather than removing the week
+count entirely, keep evaluating at the week boundary rather than going session-scoped, and loosen
+the thresholds (since with no schedule doing the work, the old two-signals-must-agree bar would
+leave a genuinely stalled lifter waiting on the backstop).
+
+- **Scoring is now tiered rather than "any two of three."** A plateau across the compounds (0.6) or
+  recent sets averaging RIR ≤1 (0.6) each clear the 0.6 threshold *alone* — either is on its own the
+  thing a deload exists to fix. Volume down >8% (0.35) and a new softer RIR band (avg 1–1.5, 0.35)
+  are corroborators: too innocent to fire by themselves, but two of them together clear the bar.
+- **`DELOAD_CADENCE` → `DELOAD_BACKSTOP_WEEKS`** (strength/hit 8, progressive_overload 9,
+  general/endurance 12) and `cadenceFor()` → `backstopFor()`. Roughly double the old cadence values,
+  deliberately: a schedule that fires routinely wants 4–6 weeks, a ceiling that should almost never
+  be the reason you deload wants to sit well past where a real signal would have fired. Checked
+  *after* the trigger path, so when both would fire the banner names the training reason, not a
+  counter. `MIN_WEEKS_BEFORE_EARLY` (3) → `MIN_WEEKS_BEFORE_TRIGGER` (2), which doubles as the
+  refractory period after a deload runs — the plateau read excludes deload entries, so a lift that
+  was flat going in is still flat coming out, and without a floor the app proposes a second deload
+  the week after the first.
+- **"Skip this one" needed a real fix, not a rename.** It used to just move the anchor, which was
+  sufficient when a cadence clock was what proposed deloads. A trigger doesn't reset — the flat
+  lifts are still flat next week — so skip now also sets `deloadDeferUntilWeek` to
+  `weekNumber + SKIP_SUPPRESS_WEEKS` (3). Without this, "skip" would have meant "ask me again at the
+  next rollover." This is the one behavioural bug the inversion would have introduced silently.
+- **Two migration details, since `AppState` fields are persisted and shallow-merged.** The field is
+  still named `deloadCadenceWeeks` — renaming it would silently reset every existing user's choice —
+  and `backstopFor()` clamps a pinned value up to `MIN_BACKSTOP_WEEKS` (6), because someone who
+  pinned 3 under the old picker would otherwise keep a 3-week ceiling, i.e. the schedule this change
+  removes. The Settings picker highlights against the *effective* backstop for the same reason, or
+  those users see a picker with nothing selected. `deloadHistory.reason` gained `'fatigue'`/
+  `'backstop'` and keeps legacy `'scheduled'`/`'early'` in the union so old persisted history
+  typechecks.
+- **Copy follows the mechanic.** Settings no longer counts down to a date that doesn't exist —
+  `statusText` now reports what the app is actually seeing ("Watching — session volume is trending
+  down, not enough on its own to call a deload yet" / "Nothing flagging right now. Safety net at
+  week 9"), and the Program banner leads with the evidence ("Your training says deload — Bench
+  Press, Overhead Press have gone flat") rather than a week count. `DeloadPlan` exposes the fatigue
+  read even when it hasn't tripped, specifically so a quiet week has something honest to say.
+
+Verified live against `npm run dev` with seeded history, checking each path in turn: the plateau
+signal alone firing at week 4 (the old rules needed two signals and would have waited for the week-5
+cadence), skip holding through weeks 5 and 6 and correctly resuming at week 7, a quiet week showing
+no banner and the "nothing flagging / safety net at week 9" status, and the backstop firing at week
+9 with "Nothing's flagged, but you've trained 9 weeks straight." Zero console errors; `npx tsc -b`
+clean. Test state was cleared from `localStorage` afterward.
+
+(31) **rest notifications: barbell badge, workout context, tap-to-return, motivational close-out.**
+User report was that the phone toast "is a bell" and says nothing useful. Four parts:
+
+- **The bell was the `badge`, not the `icon`.** These notifications already passed `icon-192.png`
+  (the app icon), but that only renders once the shade is pulled down — the small monochrome glyph
+  in the status bar is `badge`, and with none supplied Android substitutes a generic bell, which is
+  therefore the *only* thing visible most of the time. Added `public/badge-96.png`, a solid-white
+  barbell on transparency. Android uses the alpha channel only and tints the result, so it has no
+  interior shading — anything shaded flattens into a blob at ~24dp. Generated by
+  **`scripts/make-badge.mjs`**, which is deliberately *kept in the repo* (unlike the app-icon
+  generator — see Deployment above, where losing it is recorded as a mistake); `sharp` stays a
+  `--no-save` install since it runs approximately never. `reminders.ts` got the same badge, and its
+  `icon` was fixed to be `BASE_URL`-relative — the bare `'icon-192.png'` resolved against the page
+  URL, which is wrong under the `/alpha-lifts/` production base.
+- **Both notifications now carry the live session.** New `RestContext` in `alerts.ts`
+  (exercise name / "Set 2 of 3" / "135 lb × 8" / day label), assembled by `restContext()` in
+  `useApp.ts` — the module holds no state and does no lookups, the same division that keeps the
+  service worker out of the "which exercise?" question. The set named is the one being rested
+  *into* (first not-yet-ticked), falling back to the last set when the exercise is finished.
+  Countdown title leads with the clock (`"1:59 rest · Bench Press"`) since that's what's being
+  glanced at, and its body omits the exercise name the title already carries; the completion body
+  keeps it, because its title is the motivational line instead.
+- **Tapping the countdown did nothing before.** `sw.ts`'s `notificationclick` bails on any
+  notification without a recognised `data.type`, and the countdown carried no `data` at all — so
+  only the *completion* alert was tappable. Both types are handled now.
+- **The completion line is motivational and voice-aware**, reusing the existing Coach Voice setting
+  (Direct / Encouraging / Hype) rather than inventing a fourth tone, picked at random from four
+  lines per voice. It's the notification **title**, not the body: on a locked phone the title is
+  frequently all that renders, so the one thing this alert exists to say has to be there. Lines are
+  written short deliberately — Android truncates titles around 40 characters.
+
+**Verifying this needs a production build, not the dev server.** There's no service worker under
+`npm run dev`, so `navigator.serviceWorker.ready` never resolves and every tray call silently hangs
+— the first attempt at verification looked like a code bug and wasn't. Use the documented subpath
+technique (build, copy `dist/` into a folder named `alpha-lifts`, serve its *parent*). Two traps
+found doing it: re-copying `dist/` into an existing staging folder leaves **stale hashed assets**
+alongside the new ones (wipe the folder first, or you'll verify against old code — this produced a
+genuinely confusing "the fix didn't apply" result), and the SW serves the previous precache until
+unregistered and reloaded twice.
+
+Verified that way with `ServiceWorkerRegistration.prototype.showNotification` patched to record
+every call: countdown posted `"1:59 rest · Bench Press"` / `"Set 2 of 3 · 135 lb × 8 · Push Day"`
+with `badge: /alpha-lifts/badge-96.png` and `data.type: 'rest-progress'`; completion posted
+`"Time to move some weight! ⚡"` / `"Bench Press · Set 2 of 3 · 135 lb × 8 · Push Day"` under the
+separate done tag. Badge asset served 200 as `image/png`, built `sw.js` contains both types, and
+the tap path was exercised by dispatching the worker's `open-rest-exercise` message at the page
+from the Program screen — it landed back in the workout on Bench Press. `npx tsc -b` and
+`npm run build` both clean.
+
+(32) **sixth muscle-diagram calibration pass (arms + legs, per user feedback), and Forearms became
+the 12th muscle.** User: the map was "still slightly off," primarily arms and legs; scoping
+questions settled that everything about the arms bothered them (spill past the elbow, coverage,
+position, *and* missing forearms), plus "quads aren't going up high enough — you should carefully
+trace the muscle that is drawn in," blocky glutes, and front calves sitting on the shin. Asked how
+forearms should light up, the user chose a real 12th muscle over a visual-only hack.
+
+Diagram (same sharp-crop-grid → author → composite → iterate technique as phase 21, coordinates
+read off zoomed grid crops before drawing anything, two candidate iterations):
+- **Quads now rise to y≈412** — the drawn rectus-femoris/TFL notch at the hip, upper-inner edge
+  following the sartorius diagonal. The old top at y≈490 left the entire upper quarter of the
+  drawn quad unshaded, which was the user's headline complaint.
+- **Biceps/Triceps end at the elbow crease** (drawn as a diagonal, so the bottom edges are too)
+  instead of spilling ~25px into the forearm; both retraced along with the delts/rear-delts.
+- **New Forearms regions on both views**, elbow to wrist band, seamed against the arm regions.
+- **Glutes are the drawn tilted egg** (rounded dome top under the lat tips, medial edge leaving
+  the sacrum gap) instead of a squared-top box; **hamstring bellies stop at y≈676** where the art
+  splits into the knee tendons (the old tip poked to 696, shading the back of the knee); **front
+  calves sit on the drawn lower-leg muscle mass** ending above the ankle tendons (the old blob ran
+  down the shin toward the ankle); back calves' bottom follows the two gastroc lobes.
+- Rule now explicit in the component comment: adjacent muscles are separate semi-transparent
+  paths, so any overlap renders as a visibly darker band — every seam (delt/biceps,
+  triceps/forearm, lat/glute) was trimmed to abut, not cross. The lat-wing bottom tips were
+  lifted to y≈394-410 as part of this.
+
+Forearms as a muscle — the four free-exercise-db forearm exercises
+(`palms_down_wrist_curl_over_a_bench`, `palms_up_wrist_curl_over_a_bench`, `reverse_curl`,
+`seated_palms_down_wrist_curl`) already existed tagged 'Biceps' (the import had nowhere else to
+put them, see the import notes above) and were **re-tagged rather than authoring new entries** —
+they keep their real photos, cues, and videos. Grip-heavy pulls (deadlift variants, rows, chins,
+shrugs, carries, hammer/zottman curls) got 'Forearms' secondary so they light the diagram;
+secondaries earn no volume-bar credit (muscleVolumes() is primary-only), which is why the wizard
+also programs direct work — Forearms joined the pull/upper/arms/full_body themes and lists, with
+the other two wrist curls as dedupe-pool alternates. Three interacting numbers were tuned by a
+before/after audit (via `git stash` for the baseline), not by feel:
+- **MUSCLE_TARGETS.Forearms = 7, not 6 or 8**: 6×0.4 (the HIT multiplier) = 2.4 target sets has
+  no integer inside the balancer's 85-115% band, so every HIT program under- or overshot;
+  7×0.4 = 2.8 rounds cleanly to 3.
+- **MAX_DAY_TIME_SEC 65→75 min** (wizard.ts): the forearm slot's initial sets consumed enough day
+  time that Back's balancer top-up on Upper/Lower × Progressive Overload was gated out entirely
+  (Back stuck at 75%). Audited at 65/75/85: 75 lands strictly better than pre-change (6
+  out-of-band combos vs 10, all six inherited day-time-capped cases like bro-split × endurance);
+  85 fixes one more combo but inflates several default days to ~86-87 minutes.
+- **Full Body achievement thresholds pinned at 6/11** instead of derived from the muscle count:
+  unlock state recomputes every render, so deriving would have raised the top tier to 12 and
+  silently re-locked the badge for anyone who'd earned it at 11 — the monotonicity rule's one
+  forbidden outcome. "Full Body" is thus earnable without direct forearm work, deliberately; if a
+  13th muscle is ever added, leave these pinned for the same reason.
+
+Two traps hit and worth remembering:
+- **PowerShell `(Get-Content -Raw) -replace ... | Set-Content` corrupts UTF-8** (em-dashes became
+  mojibake, including user-facing split descriptions in wizard.ts) — Windows PowerShell 5.1 reads
+  as ANSI without an explicit `-Encoding`. Repaired via the Edit tool; make source edits with the
+  Edit tool, not shell round-trips.
+- The dev-server console showed **"change in the order of Hooks" errors that were stale HMR
+  artifacts**, not bugs: the browser tool's console buffer is append-only per tab (it survives
+  reload and even `console.clear()`), and the recorded diffs matched the session's earlier
+  useApp.ts HMR patches exactly, with nothing new appended across fresh-reload navigations.
+  Diagnose by comparing error counts across reads before chasing a phantom conditional hook.
+
+Verified live against `npm run dev`: fresh onboard (PPL6 × PO) shows a Forearms bar at 114%, pull
+days at 7 exercises ~50 min, the Forearms drill modal lists wrist curl + reverse curl (deduped
+across the two pull days) with Biceps as linked secondary; the day-view body diagram was
+rasterized out of the live DOM for both views (the screenshot tool hung again — the
+XMLSerializer+canvas fallback documented in phase 20 worked, with the base64 pulled out in
+~140KB chunks and reassembled via PowerShell) confirming Pull Day lights back/rear-delts/forearms
+and Leg Day lights quads-to-the-hip/calves/core, all inside the drawn contours. The audit script
+was a throwaway `.verify/audit.ts` run with `npm install --no-save tsx` (deleted after, per
+convention — rebuild from the description above if needed). `npx tsc -b` and `npm run build`
+clean.

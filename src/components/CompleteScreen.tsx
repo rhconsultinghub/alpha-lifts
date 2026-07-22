@@ -2,6 +2,7 @@ import type { ViewModel } from '../state/viewModel';
 
 export function CompleteScreen({ vm }: { vm: ViewModel }) {
   const prCount = vm.completeSummary.filter(c => c.isPR).length;
+  const earned = (vm.achievements as any).newlyUnlocked as any[];
   return (
     <div style={{ padding: '60px 24px 40px', textAlign: 'center' }}>
       <div style={{ fontSize: 44, marginBottom: 12 }}>🏁</div>
@@ -9,6 +10,26 @@ export function CompleteScreen({ vm }: { vm: ViewModel }) {
       <div style={{ font: "400 13px 'Inter'", color: 'rgba(245,240,234,.5)', marginBottom: prCount > 0 ? 10 : 28 }}>{vm.completeSubtitle}</div>
       {prCount > 0 && (
         <div style={{ font: "700 13px 'Inter'", color: 'oklch(0.8 0.16 90)', marginBottom: 28 }}>🏆 {prCount} new record{prCount > 1 ? 's' : ''} this session!</div>
+      )}
+
+      {earned.length > 0 && (
+        <div style={{ textAlign: 'left', borderRadius: 16, padding: '14px 16px', background: 'oklch(0.65 0.19 35 / 0.1)', border: '1px solid oklch(0.65 0.19 35 / 0.35)', marginBottom: 24 }}>
+          <div style={{ font: "700 12px 'Inter'", color: 'oklch(0.82 0.15 35)', marginBottom: 10 }}>
+            🏅 {earned.length} badge{earned.length > 1 ? 's' : ''} earned since you last checked
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {earned.map(a => (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 17, flex: 'none' }}>{a.icon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ font: "600 13px 'Inter'", color: '#f5f0ea' }}>{a.tierName}</div>
+                  <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.45)' }}>{a.title} · {a.tierText}</div>
+                </div>
+                <div className="num" style={{ flex: 'none', font: "700 13px 'Inter'", color: 'oklch(0.78 0.15 35)' }}>+{a.tierPoints}</div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {vm.planPrompt.show && (

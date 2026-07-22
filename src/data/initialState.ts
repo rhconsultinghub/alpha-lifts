@@ -65,6 +65,14 @@ export function createInitialState(): AppState {
 
     deloadDismissedWeek: null,
 
+    deloadEnabled: false,
+    deloadIntensityPct: 60,
+    deloadCadenceWeeks: null,
+    deloadActiveWeek: null,
+    deloadAnchorWeek: 0,
+    deloadDeferUntilWeek: null,
+    deloadHistory: [],
+
     remindersEnabled: false,
     reminderTime: '18:00',
     lastReminderFiredDate: null,
@@ -73,6 +81,12 @@ export function createInitialState(): AppState {
 
     confirmResetApp: false,
 
-    seenAchievementIds: []
+    seenAchievementIds: [],
+
+    coachMessages: [],
+    coachInput: '',
+    // never persisted as true in practice: a send always resolves or errors before the state
+    // is written, and loadInitial()'s merge would otherwise strand a reloaded app "thinking"
+    coachPending: false
   };
 }

@@ -4,6 +4,8 @@ import { WARMUP_LIBRARY } from '../data/warmups';
 import { ACHIEVEMENT_FAMILIES, CATEGORY_LABELS, TOTAL_POSSIBLE_POINTS, TOTAL_TIERS, type AchievementCategory } from '../data/achievements';
 import type { AppState, HistoryEntry, Muscle, TrainingType } from '../data/types';
 import { testVibration } from './alerts';
+import { COACH_CONFIGURED } from './coach';
+import { deloadPlan, activeDeloadPct, backstopFor, DELOAD_BACKSTOP_WEEKS } from './deload';
 import type { Actions } from './useApp';
 import {
   muscleBarsList, dayWarning, recommendation, estimateDayTime, formatDuration,
@@ -12,6 +14,13 @@ import {
   volumeDonutData, durationTrendData, warmupForDay, bodyWeightChartData, platesBreakdown, deloadSuggestion,
   effectiveLast
 } from './logic';
+
+// "a", "a and b", "a, b and c" — the deload banner can cite up to three fatigue signals at once,
+// and joining them all with " and " reads as a run-on.
+function joinReasons(xs: string[]): string {
+  if (xs.length <= 1) return xs[0] || '';
+  return xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
+}
 
 const ACCENT = 'oklch(0.65 0.19 35)';
 const ACCENT_TEXT = 'oklch(0.72 0.17 35)';
@@ -46,6 +55,13 @@ function sessionRowVM(h: HistoryEntry, s: AppState, actions: Actions) {
 export function buildViewModel(state: AppState, actions: Actions) {
   const s = state;
   const bars = muscleBarsList(s);
+
+  // ---------- auto deload weeks (see state/deload.ts) ----------
+  // Derived fresh every render like the achievements block below — the plan is a pure function of
+  // logged history (plus the backstop's week count), so there's no deload state to keep in sync
+  // beyond the user's own choices (enabled/intensity/backstop, and any defer or skip).
+  const dPlan = deloadPlan(s);
+  const deloadPct = activeDeloadPct(s);
 
   // ---------- achievements ----------
   // Unlocked/progress state is always recomputed fresh from state.history/exerciseHistory/etc (see
@@ -95,6 +111,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
           : (unlocked ? `Next: ${nextTier!.name} at ${fmt(nextThreshold, f)}${nounSuffix}.` : `Reach ${fmt(nextThreshold, f)}${nounSuffix} to unlock.`),
         progressPct, progressLabel,
         earnedPoints, familyPoints, nextPoints: nextTier ? nextTier.points : 0,
+        // points for the tier currently held (not the family total) — what a freshly-cleared badge
+        // is worth on its own, used by the Complete screen's "+X" readout.
+        tierPoints: curTier ? curTier.points : 0,
         reachedTiers: reached + 1, totalTiers: f.tiers.length,
         isNew: unlocked && !s.seenAchievementIds.includes(seenId)
       };
@@ -112,6 +131,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
       totalTiers: TOTAL_TIERS,
       unlockedCount: items.filter(i => i.unlocked).length,
       totalCount: items.length,
+      // Surfaced on the workout Complete screen so clearing a tier actually lands in the moment,
+      // rather than only being discoverable by going looking for it. Not marked seen there on
+      // purpose — the Achievements tab should still flag them if the user skimmed past.
+      newlyUnlocked: items.filter(i => i.isNew),
       markSeen: () => actions.markAchievementsSeen(seenIds)
     };
   })();
@@ -167,6 +190,51 @@ export function buildViewModel(state: AppState, actions: Actions) {
       bg: s.warmupStyle === v ? ACCENT : 'rgba(255,255,255,.06)', color: s.warmupStyle === v ? '#0d0c0b' : 'rgba(245,240,234,.7)'
     })),
     warmupStyleDesc: 'Minimal skips warm-up suggestions entirely; Cautious adds an extra ramp-up set on heavy lifts.',
+    deload: {
+      enabled: s.deloadEnabled,
+      toggle: () => actions.setDeloadEnabled(!s.deloadEnabled),
+      desc: 'Watches your training for signs you need a lighter week — lifts gone flat, sets ending at failure, session volume sliding — and proposes one when they show up, not on a fixed schedule. Weights drop; sets and reps stay the same. Nothing happens without showing up on the Program screen first.',
+      // "Auto" is the default and follows the program's training type, since that's what actually
+      // determines how fast fatigue accumulates — a pinned number is for someone who already knows
+      // their own recovery. Options start at 6 rather than 3: anything shorter is a schedule
+      // wearing a backstop's name, and would fire before the signals ever got a chance to.
+      // Highlight against the *effective* backstop, not the raw stored number: a value pinned back
+      // when this was a cadence (3/4/5) is clamped up by backstopFor(), and matching on the raw
+      // field would leave those users looking at a picker with nothing selected.
+      cadenceOptions: ([null, 6, 8, 10, 12] as const).map(v => {
+        const selected = s.deloadCadenceWeeks === null ? v === null : v === backstopFor(s);
+        return {
+          label: v === null ? 'Auto' : v + ' wks',
+          select: () => actions.setDeloadCadence(v),
+          bg: selected ? ACCENT : 'rgba(255,255,255,.06)',
+          color: selected ? '#0d0c0b' : 'rgba(245,240,234,.7)'
+        };
+      }),
+      cadenceDesc: 'A safety net for when nothing trips: the longest you’ll go with no deload at all. Auto uses your training type — '
+        + TRAINING_LABELS[s.trainingType] + ' caps at ' + DELOAD_BACKSTOP_WEEKS[s.trainingType] + ' weeks.',
+      intensityOptions: ([50, 60, 70, 80] as const).map(v => ({
+        label: v + '%',
+        select: () => actions.setDeloadIntensity(v),
+        bg: s.deloadIntensityPct === v ? ACCENT : 'rgba(255,255,255,.06)',
+        color: s.deloadIntensityPct === v ? '#0d0c0b' : 'rgba(245,240,234,.7)'
+      })),
+      intensityDesc: 'What percentage of your usual working weight to lift during a deload week.',
+      // No countdown here any more — there's nothing honest to count down to. What the user wants
+      // to know in a normal week is what the app is currently seeing in their training, so that's
+      // what this says, with the backstop mentioned only as the far edge.
+      statusText: !s.deloadEnabled ? ''
+        : dPlan.isActive ? 'Deload week in progress — targets at ' + Math.round(dPlan.pct * 100) + '%.'
+        : dPlan.isDue ? 'A deload is recommended now — ' + joinReasons(dPlan.reasons) + '.'
+        : dPlan.suppressed ? 'Holding off for now' + (dPlan.lastDeloadWeek ? ' after your week ' + dPlan.lastDeloadWeek + ' deload' : '') + ' — watching again from week ' + dPlan.watchingFromWeek + '.'
+        : dPlan.fatigue.reasons.length ? 'Watching — ' + joinReasons(dPlan.fatigue.reasons) + ', not enough on its own to call a deload yet.'
+        : 'Nothing flagging right now. Safety net at week ' + dPlan.backstopWeek + ' if nothing trips before then'
+          + (dPlan.lastDeloadWeek ? '. Last deload was week ' + dPlan.lastDeloadWeek + '.' : '.'),
+      backstopInUse: backstopFor(s),
+      canStart: s.deloadEnabled && !dPlan.isActive,
+      isActive: dPlan.isActive,
+      start: actions.startDeloadNow,
+      end: actions.endDeloadNow
+    },
     restAlertSound: s.restAlertSound,
     restAlertVibrate: s.restAlertVibrate,
     restAlertNotify: s.restAlertNotify,
@@ -315,7 +383,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       exercises: day.exercises.map((ex, i) => {
         const lib = EXLIB[ex.id];
         const equip = lib.equip[ex.equipIdx];
-        const r = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id], s.exerciseHistory);
+        const r = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id], s.exerciseHistory, deloadPct);
         const isTime = lib.trackingMode === 'time';
         return {
           id: ex.id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label,
@@ -383,7 +451,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     const lib = EXLIB[ex.id];
     const equip = lib.equip[ex.equipIdx];
     const exHistory = s.exerciseHistory[ex.id];
-    const rec = recommendation(ex, s.units, s.coachVoice, exHistory, s.exerciseHistory);
+    const rec = recommendation(ex, s.units, s.coachVoice, exHistory, s.exerciseHistory, deloadPct);
     const currentSets = s.workout.exSets[exIndex] || [];
     // Warm-ups ramp to the heaviest set the user is actually about to do this session (their edited
     // working weight if they've changed it, otherwise today's recommendation) — not last session's.
@@ -772,6 +840,43 @@ export function buildViewModel(state: AppState, actions: Actions) {
     };
   })();
 
+  // ---------- AI coach ----------
+  // Starter prompts for the empty state. The first is program-aware when there's a program to
+  // be aware of — a generic list on someone's first launch is less useful than one that names
+  // their own training day.
+  const firstTrainingDay = s.dayOrder.map(k => s.program[k]).find(d => d && d.kind !== 'rest');
+  const coachSuggestions = [
+    // No " day" suffix here — preset labels are already "Push Day" / "Leg Day", so appending
+    // one produced "How's my Push Day day looking?". Custom labels may not contain "Day", but
+    // "How's my Chest looking?" still reads fine, whereas the duplicate never does.
+    firstTrainingDay ? `How's my ${firstTrainingDay.label} looking?` : 'How should I structure my first week?',
+    'How do I know if my bench press form is right?',
+    'How much rest do I need between sets?',
+    'What does RIR mean and how do I use it?'
+  ];
+
+  const coachVM = {
+    configured: COACH_CONFIGURED,
+    messages: s.coachMessages.map(m => ({
+      id: m.id,
+      text: m.content,
+      isUser: m.role === 'user',
+      isError: !!m.isError
+    })),
+    isEmpty: s.coachMessages.length === 0,
+    input: s.coachInput,
+    pending: s.coachPending,
+    // The send button is dead while a request is in flight or the box is empty; useApp's
+    // sendCoachMessage re-checks both, since the Enter key bypasses the button entirely.
+    canSend: s.coachInput.trim().length > 0 && !s.coachPending,
+    suggestions: coachSuggestions,
+    hasMessages: s.coachMessages.length > 0,
+    setInput: actions.setCoachInput,
+    send: actions.sendCoachMessage,
+    clear: actions.clearCoachChat,
+    useSuggestion: (text: string) => { actions.setCoachInput(text); }
+  };
+
   const idlePrompt = {
     show: !!s.workout && s.idleWorkoutPrompt,
     exerciseName: s.workout ? (EXLIB[s.workout.dayExercises[s.workout.exIndex]?.id]?.name || '') : '',
@@ -790,22 +895,56 @@ export function buildViewModel(state: AppState, actions: Actions) {
     isProgress: s.screen === 'progress',
     isExercises: s.screen === 'exercises',
     isAchievements: s.screen === 'achievements',
-    showTabs: ['program', 'progress', 'exercises', 'achievements'].includes(s.screen),
+    isCoach: s.screen === 'coach',
+    showTabs: ['program', 'progress', 'exercises', 'achievements', 'coach'].includes(s.screen),
     tabProgramColor: s.screen === 'program' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
     tabProgressColor: s.screen === 'progress' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
     tabExercisesColor: s.screen === 'exercises' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
     tabAchievementsColor: s.screen === 'achievements' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
+    tabCoachColor: s.screen === 'coach' ? '#f5f0ea' : 'rgba(245,240,234,.35)',
+    coach: coachVM,
     achievements: achievementsVM,
     idlePrompt,
     confirmRemoveExercise,
-    goProgram: actions.goProgram, goProgress: actions.goProgress, goExercises: actions.goExercises, goAchievements: actions.goAchievements,
+    goProgram: actions.goProgram, goProgress: actions.goProgress, goExercises: actions.goExercises, goAchievements: actions.goAchievements, goCoach: actions.goCoach,
     trainingTypes,
     muscleBars: bars.map(m => ({ ...m, drill: () => actions.openMuscleDrill(m.name) })),
     programDays, newProgramWizard,
     deload: (() => {
       const raw = deloadSuggestion(s);
-      return { ...raw, show: raw.show && s.deloadDismissedWeek !== s.weekNumber, dismiss: actions.dismissDeloadSuggestion };
+      // The reactive "you look plateaued" banner. Suppressed entirely once scheduled deloads are
+      // on: that feature already watches the same plateau signal (fatigueRead() folds
+      // deloadSuggestion in) and acts on it, so leaving this up too would mean two banners telling
+      // the user the same thing, one of which they can't act on.
+      return {
+        ...raw,
+        show: raw.show && !s.deloadEnabled && s.deloadDismissedWeek !== s.weekNumber,
+        dismiss: actions.dismissDeloadSuggestion
+      };
     })(),
+    // The proactive counterpart. Exactly one of `mode` is rendered by ProgramScreen: 'active' while
+    // a deload week is running, 'due' when one is proposed and awaiting a choice, 'none' the rest
+    // of the time (the vast majority of weeks — this banner is not a fixture).
+    deloadWeek: {
+      mode: dPlan.isActive ? 'active' as const : dPlan.isDue ? 'due' as const : 'none' as const,
+      pctText: Math.round(dPlan.pct * 100) + '%',
+      byTrigger: dPlan.trigger === 'fatigue',
+      title: dPlan.isActive
+        ? 'Deload week ' + (dPlan.activeWeek ?? s.weekNumber)
+        : dPlan.trigger === 'fatigue' ? 'Your training says deload' : 'Time for a deload',
+      // The trigger case leads with the evidence rather than a week count — it's the whole point of
+      // the change, and "your bench has gone flat" is a reason a lifter can actually check against
+      // their own sense of how the block is going.
+      text: dPlan.isActive
+        ? 'Targets are cut to ' + Math.round(dPlan.pct * 100) + '% of your working weights this week. Keep the sets and reps, drop the load — this is how the next block goes up.'
+        : dPlan.trigger === 'fatigue'
+          ? joinReasons(dPlan.reasons).replace(/^./, c => c.toUpperCase()) + '. A lighter week at ' + Math.round(dPlan.pct * 100) + '% now beats a stalled month.'
+          : 'Nothing’s flagged, but you’ve trained ' + dPlan.weeksSinceLast + ' weeks straight without a deload. Ready for a lighter one at ' + Math.round(dPlan.pct * 100) + '%?',
+      start: actions.startDeloadNow,
+      end: actions.endDeloadNow,
+      defer: actions.deferDeload,
+      skip: actions.skipDeload
+    },
     currentDay, builderExercises,
     openDayBuilder: actions.openDayBuilder, closeDayBuilder: actions.closeDayBuilder,
     startWorkout: actions.startWorkout, exitWorkout: actions.exitWorkout,

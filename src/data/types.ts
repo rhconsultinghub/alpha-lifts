@@ -1,5 +1,7 @@
+// 'Forearms' was added as the 12th muscle in phase 32 (previously free-exercise-db's forearm
+// exercises were collapsed into 'Biceps' for lack of anywhere better to put them).
 export type Muscle =
-  | 'Back' | 'Biceps' | 'Rear Delts' | 'Chest' | 'Triceps' | 'Shoulders'
+  | 'Back' | 'Biceps' | 'Rear Delts' | 'Chest' | 'Triceps' | 'Forearms' | 'Shoulders'
   | 'Quads' | 'Hamstrings' | 'Glutes' | 'Calves' | 'Core';
 
 export type TrainingType = 'progressive_overload' | 'strength' | 'hit' | 'endurance' | 'general';
@@ -118,6 +120,12 @@ export interface ExerciseHistoryEntry {
   reps: number;
   day: string;
   sets?: SetHistoryRow[];
+  // Logged during a scheduled deload week. Light by design, so every read that
+  // asks "how strong are you / are you still progressing" skips these entries —
+  // otherwise a deload would register as a plateau or a regression, and the next
+  // week's overload prompt would try to build up from 60% of the real working
+  // weight. See state/deload.ts and effectiveLast()/deloadSuggestion() in logic.ts.
+  deload?: boolean;
 }
 
 export interface HistoryEntry {
@@ -202,7 +210,15 @@ export interface NewProgramWizardState {
 
 export type Units = 'kg' | 'lb';
 export type BodyView = 'front' | 'back';
-export type Screen = 'program' | 'dayView' | 'dayBuilder' | 'workout' | 'complete' | 'progress' | 'exercises' | 'achievements';
+export type Screen = 'program' | 'dayView' | 'dayBuilder' | 'workout' | 'complete' | 'progress' | 'exercises' | 'achievements' | 'coach';
+
+export interface CoachChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  /** Set on an assistant turn that failed, so it renders as an error bubble rather than advice. */
+  isError?: boolean;
+}
 export type RestPacing = 'Relaxed' | 'Standard' | 'Aggressive';
 export type CoachVoice = 'Direct' | 'Encouraging' | 'Hype';
 export type WarmupStyle = 'Minimal' | 'Standard' | 'Cautious';
@@ -288,6 +304,32 @@ export interface AppState {
   // ---------- deload suggestion (dismissal is per-week, like other week-scoped state) ----------
   deloadDismissedWeek: number | null;
 
+  // ---------- auto deload weeks (opt-in, trigger-based) — see state/deload.ts ----------
+  // Off by default: this changes the weights the app tells you to lift, so it's
+  // something the user turns on deliberately, not a behaviour they discover.
+  deloadEnabled: boolean;
+  // Working-weight percentage during a deload week (50-80, default 60).
+  deloadIntensityPct: number;
+  // Backstop ceiling: the most trained weeks to go with no deload when the fatigue
+  // triggers never fire. null = derive it from trainingType (DELOAD_BACKSTOP_WEEKS);
+  // a number pins it. Named for the cadence it used to be, since it's persisted —
+  // renaming the field would silently reset every existing user's choice.
+  deloadCadenceWeeks: number | null;
+  // The week currently designated a deload. Nothing is applied unless this equals
+  // weekNumber, so a stale value from an abandoned program can't silently deload.
+  deloadActiveWeek: number | null;
+  // Week the last deload *resolved* — whether it ran or the user skipped it. Both
+  // the backstop countdown and the minimum-weeks-before-triggering floor measure
+  // from here, so skipping genuinely buys quiet rather than deferring by a week.
+  deloadAnchorWeek: number;
+  // Set when the user pushes a due deload back or skips one; both the triggers and
+  // the backstop stay suppressed until this week arrives.
+  deloadDeferUntilWeek: number | null;
+  // Deloads actually run, for the Settings status line. 'scheduled'/'early' are
+  // legacy values from when this ran on a cadence — kept in the union so persisted
+  // history from an older version still typechecks.
+  deloadHistory: { week: number; reason: 'fatigue' | 'backstop' | 'manual' | 'scheduled' | 'early' }[];
+
   // ---------- reminder notifications (local-only, best-effort — see state/reminders.ts) ----------
   remindersEnabled: boolean;
   reminderTime: string;
@@ -305,4 +347,13 @@ export interface AppState {
   // never stored here; it's always derived fresh from history/exerciseHistory/etc. (see
   // data/achievements.ts), which is what makes retroactive unlocking work for free.
   seenAchievementIds: string[];
+
+  // ---- AI coach (see state/coach.ts + the worker/ directory) ----
+  // Persisted like everything else, so a conversation survives closing the app. Trimmed to
+  // COACH_HISTORY_CAP on every send — an unbounded chat log would grow the single localStorage
+  // blob the whole app shares.
+  coachMessages: CoachChatMessage[];
+  coachInput: string;
+  /** True while a request is in flight; blocks a second send and drives the typing indicator. */
+  coachPending: boolean;
 }

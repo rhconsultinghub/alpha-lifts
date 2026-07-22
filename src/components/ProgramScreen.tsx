@@ -44,6 +44,32 @@ export function ProgramScreen({ vm }: { vm: ViewModel }) {
         </div>
       )}
 
+      {vm.deloadWeek.mode !== 'none' && (
+        <div style={{
+          display: 'flex', gap: 8, alignItems: 'flex-start', padding: '12px 14px', borderRadius: 14,
+          background: vm.deloadWeek.mode === 'active' ? 'oklch(0.72 0.14 155 / 0.12)' : 'oklch(0.7 0.13 230 / 0.1)',
+          border: '1px solid ' + (vm.deloadWeek.mode === 'active' ? 'oklch(0.72 0.14 155 / 0.4)' : 'oklch(0.7 0.13 230 / 0.35)'),
+          marginBottom: 20
+        }}>
+          <span style={{ fontSize: 15 }}>{vm.deloadWeek.mode === 'active' ? '🌱' : '😴'}</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ font: "600 12px 'Inter'", color: vm.deloadWeek.mode === 'active' ? 'oklch(0.8 0.14 155)' : 'oklch(0.78 0.13 230)', marginBottom: 2 }}>{vm.deloadWeek.title}</div>
+            <div style={{ font: "400 12px/1.4 'Inter'", color: 'rgba(245,240,234,.8)' }}>{vm.deloadWeek.text}</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              {vm.deloadWeek.mode === 'active' ? (
+                <button onClick={vm.deloadWeek.end} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: '1px solid oklch(0.72 0.14 155 / 0.5)', background: 'none', color: 'oklch(0.8 0.14 155)' }}>End deload early</button>
+              ) : (
+                <>
+                  <button onClick={vm.deloadWeek.start} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: 'none', background: 'oklch(0.7 0.13 230)', color: '#0d0c0b' }}>Start deload week</button>
+                  <button onClick={vm.deloadWeek.defer} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: '1px solid oklch(0.7 0.13 230 / 0.5)', background: 'none', color: 'oklch(0.78 0.13 230)' }}>Push back a week</button>
+                  <button onClick={vm.deloadWeek.skip} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: '1px solid rgba(255,255,255,.15)', background: 'none', color: 'rgba(245,240,234,.6)' }}>Skip this one</button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>TRAINING DAYS</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {vm.programDays.map(d => (
