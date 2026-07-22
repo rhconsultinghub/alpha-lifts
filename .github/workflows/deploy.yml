@@ -26,13 +26,19 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          # The deployed Worker URL for the AI coach. A repository *variable* rather than a
-          # secret on purpose: Vite inlines every VITE_* value into the JS bundle, so this is
-          # world-readable once shipped and pretending otherwise just makes it harder to debug.
-          # The Worker's origin allowlist, not obscurity, is what stops other sites using it.
-          # Unset is a supported state — coach.ts renders a "not configured" tab, so the build
-          # succeeds and the rest of the app is unaffected until this is populated.
-          VITE_COACH_API_URL: ${{ vars.VITE_COACH_API_URL }}
+          # The deployed Worker URL for the AI coach. Belongs in a repository *variable*: Vite
+          # inlines every VITE_* value into the JS bundle, so it is world-readable once shipped
+          # and pretending otherwise just makes it harder to debug. The Worker's origin
+          # allowlist, not obscurity, is what stops other sites using it.
+          #
+          # `secrets` is checked as a fallback because `vars.X` resolves to an empty string when
+          # X was stored as a secret instead — the build then succeeds and silently ships the
+          # "not configured" tab, which is a genuinely hard failure to diagnose from the outside
+          # (nothing errors; the app just acts as though the coach was never set up). Accepting
+          # either costs nothing and removes that trap.
+          #
+          # Unset remains a supported state, so the build still succeeds with neither set.
+          VITE_COACH_API_URL: ${{ vars.VITE_COACH_API_URL || secrets.VITE_COACH_API_URL }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
