@@ -1,18 +1,45 @@
 /**
  * Usage metering.
  *
- * STUBBED FOR THE TEST PHASE — this records cost and always allows the request. The shape
- * is the real one, so turning enforcement on later is filling in two function bodies plus a
- * KV binding, not a rewrite of the request path.
+ * Enforces a per-device monthly spend cap, backed by a KV namespace (binding `USAGE`). When the
+ * binding isn't present (e.g. `wrangler dev` without KV, or a build that never created the
+ * namespace) it fails OPEN — allows the request and reports `limit: 0` (not enforced) — so a
+ * missing binding degrades to the old stub behaviour rather than locking the coach out entirely.
  *
  * Two decisions baked in here, both deliberate:
  *
  * 1. We meter in DOLLARS, not tokens. Token counts are meaningless as a budget — input and
- *    output are priced differently and every model has its own rate. "$5 of tokens" only has
- *    a stable meaning as $5 of spend.
+ *    output are priced differently and every model has its own rate. "$1.50 of tokens" only has
+ *    a stable meaning as $1.50 of spend.
  * 2. Cost is computed server-side from the API's own `usage` response. A client-reported
  *    count is trivially spoofable by anyone who opens devtools.
+ *
+ * Scope caveat (unchanged from the design notes): `userId` is a device UUID the client mints,
+ * not a verified identity — anyone can clear it for a fresh budget. So this cap limits an
+ * ordinary user's spend on their own device; it is NOT a defence against a determined caller
+ * forging requests. The real backstop for that is an Anthropic Console monthly spend limit.
+ * KV (not D1) is used deliberately here: it's eventually consistent, so two requests racing can
+ * both read a stale balance and slightly overshoot — fine for a ~$1.50 personal cap, where a
+ * few cents of overshoot is acceptable and simplicity/zero-setup-friction wins.
  */
+
+/** Per-device monthly budget, in micro-dollars. 1,500,000 µUSD = $1.50. */
+export const MONTHLY_LIMIT_MICRO_USD = 1_500_000;
+
+/** The KV binding we read/write. Declared structurally so usage.ts doesn't force a KVNamespace
+ *  type onto every caller — the real binding satisfies it, and it's optional so a Worker without
+ *  the namespace still typechecks and runs (fail-open, see above). */
+export interface UsageEnv {
+  USAGE?: KVNamespace;
+}
+
+/** KV key for a user's spend this calendar month (UTC). A new month = a fresh key = a reset
+ *  budget, with no cron needed; old keys self-expire (see recordSpend). */
+function periodKey(userId: string): string {
+  const now = new Date();
+  const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  return `spend:${userId}:${month}`;
+}
 
 /** Per-million-token USD pricing, keyed by model id. Update when you change MODEL. */
 const PRICING: Record<string, { input: number; output: number }> = {
@@ -53,24 +80,31 @@ export interface BudgetVerdict {
 }
 
 /**
- * Called BEFORE the API request. Today: always allows.
- *
- * Phase 2 (real subscribers): look up `userId` in KV/D1, compare spend against the period's
- * allotment, and return allowed:false when over. That userId must come from a verified
- * subscription receipt — see README. The device UUID the client sends today is a stand-in
- * with no security value: anyone can generate a new one to reset their own budget.
+ * Called BEFORE the API request. Reads this device's spend for the current month and blocks
+ * once it's at/over the monthly cap. Fails open when KV isn't bound (limit: 0 = not enforced).
  */
-export async function checkBudget(_env: unknown, _userId: string): Promise<BudgetVerdict> {
-  return { allowed: true, spent: 0, limit: 0 };
+export async function checkBudget(env: UsageEnv, userId: string): Promise<BudgetVerdict> {
+  const kv = env.USAGE;
+  if (!kv) return { allowed: true, spent: 0, limit: 0 };
+
+  const raw = await kv.get(periodKey(userId));
+  const spent = raw ? parseInt(raw, 10) || 0 : 0;
+  return { allowed: spent < MONTHLY_LIMIT_MICRO_USD, spent, limit: MONTHLY_LIMIT_MICRO_USD };
 }
 
 /**
- * Called AFTER a successful API response, with the real cost.
- *
- * Phase 2: atomically increment the user's period spend. Note KV is eventually consistent —
- * if exact accounting matters, use D1 (or Durable Objects) rather than KV here. Slight
- * over-spend on a $5 budget is acceptable; double-counting or silent loss is not.
+ * Called AFTER a successful API response, with the real cost. Read-modify-write on the month's
+ * counter. Not atomic (KV has no atomic increment) — two racing requests can under-count by
+ * one, which for a ~$1.50 personal cap is acceptable slop, not a correctness problem. The key
+ * is written with a ~40-day TTL so a month's counter self-cleans well after that month ends,
+ * refreshed on every write within the month.
  */
-export async function recordSpend(_env: unknown, _userId: string, _microUsd: number): Promise<void> {
-  // no-op during the test phase
+export async function recordSpend(env: UsageEnv, userId: string, microUsd: number): Promise<void> {
+  const kv = env.USAGE;
+  if (!kv || microUsd <= 0) return;
+
+  const key = periodKey(userId);
+  const raw = await kv.get(key);
+  const spent = raw ? parseInt(raw, 10) || 0 : 0;
+  await kv.put(key, String(spent + microUsd), { expirationTtl: 60 * 60 * 24 * 40 });
 }

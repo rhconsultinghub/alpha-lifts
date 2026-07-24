@@ -1364,3 +1364,193 @@ always allows and `recordSpend()` is a no-op (deliberate stubs, see phase 29). T
 allowlist stops another *website*, but not a script posting a forged `Origin` — and the Worker
 URL is public in the bundle by design. Fine for single-user testing; closing it is the same work
 as the subscription phase. An Anthropic console monthly spend limit is the interim backstop.
+
+(34) **the coach can now act on the app, not just talk** — tool use, wired as **propose-and-confirm**.
+Scoping questions (via `AskUserQuestion`) settled: changes are *proposed* (a confirm card in chat,
+nothing mutates until the user taps Apply), and all four capability groups ship at once — stats/read,
+edit-a-day (add/swap/remove/set-params), build-a-plan, and log/navigate.
+
+The load-bearing design decision is that **the coach's tools are all `propose_*` and the Worker
+treats a tool call as *terminal* — it never sends a `tool_result` back for another round trip**
+(`worker/src/tools.ts`, `worker/src/index.ts`). A tool call *is* the answer: the Worker forwards the
+tool name + input to the client as a proposal, and the real mutation only runs locally when the user
+confirms. Consequences that make this the right shape here:
+- **The Worker stays stateless and app-agnostic** — it never needs EXLIB or AppState, only relays
+  intent. It also never mutates anything, so the security surface is unchanged from the read-only coach.
+- **Cost stays close to the read-only coach** because there's no second billed API call to resolve a
+  `tool_result`. Reads are handled the *same* cheap way — not as tools, but by an **expanded context
+  block** (`buildCoachContext` in `state/coach.ts` now ships aggregate stats: `muscleBarsList` %s,
+  top lifts by est. 1RM, PR count, best-ever streak, lifetime & best-session volume) plus a compact
+  **exercise catalog** (id-less, name-only, grouped by muscle). So "what's my bench 1RM / is my back
+  volume ok" needs no tool at all. The catalog + stats add ~700–1500 input tokens/message (re-sent and
+  re-billed every turn like all context), pushing a typical exchange from ~$0.005–0.007 toward
+  ~$0.012–0.02 — still inside the worker README's original estimate. If that's too much later, the
+  catalog is the thing to trim first.
+
+**Name resolution is client-side and deliberately forgiving.** The model references exercises and days
+by their *human names* (exactly as they appear in the context it was given), never machine ids —
+`parseProposals()` in `state/coach.ts` resolves those back to ids/day-keys with the same normalized-name
+match the rest of the app uses (phase 22), plus substring and a ≥0.6 token-overlap fallback so a
+paraphrase like "Romanian Deadlift" still lands on `rdl`. An unresolvable name (unknown exercise, wrong
+day) becomes a **dismissable error card with no Apply button**, never a wrong mutation. Resolution runs
+against `stateRef.current` at parse time (post-await), not the pre-request snapshot, so a proposal
+resolves against the program as it actually is now if the user edited it mid-request.
+
+**Applying** is done by new *direct* program actions in `useApp.ts` (`applyProposalToState` +
+`applyCoachProposal`/`dismissCoachProposal`), not by driving the swap/add **modal** state machines — the
+coach isn't in a modal flow. Each mutation mirrors an existing, already-verified action almost
+line-for-line (e.g. swap mirrors `swapConfirm`'s non-session replace path, including clearing a dangling
+`supersetGroup` on the touched exercise's former partner). `set_params`' rep change writes a
+`manualTarget` override (cleared on next log), same reasoning as the Day-View quick-edit — `ex.last`
+alone is silently outranked by cross-day `exerciseHistory` in `effectiveLast()`. `build_program`
+replaces the active program via `buildProgramFromPreset` and stashes the outgoing one into
+`savedPrograms` (like `createProgramFromWizard`) but deliberately **stays on the coach screen** — the
+confirmation card is the feedback; yanking the user to the Program tab mid-conversation isn't. Only a
+`propose_navigate` proposal changes the screen. Proposals live on the assistant `CoachChatMessage`
+(`proposals?: CoachProposal[]`, each with a resolved `payload` or an `error`, and a `pending →
+applied|dismissed` status that's terminal); the card UI is `ProposalCard` in `CoachScreen.tsx`.
+
+The Worker's system prompt gained a `TOOL_RULES` block (`worker/src/prompt.ts`) telling the model to
+call a `propose_*` tool rather than describe manual steps, reference exercises/days by their exact
+catalogued names, include one line of text alongside a tool call, ask (don't guess) when a request is
+ambiguous, and *not* use a tool for pure questions.
+
+Small robustness change worth noting: `COACH_API_URL` now reads `import.meta.env?.VITE_COACH_API_URL`
+(optional chain) so `state/coach.ts` can be imported in a bare Node/tsx context for `.verify` scripts;
+harmless under Vite.
+
+Verified two ways. (1) A throwaway `.verify/` tsx script (deleted after, per convention) drove
+`buildCoachContext` + `parseProposals` against a real `buildProgramFromPreset` program: exact names,
+the "Close Grip Bench Press" and fuzzy "Romanian Deadlift" cases, and all three failure cases (unknown
+day, unknown exercise, exercise-not-on-that-day) resolved correctly, and stats/catalog/day-name format
+came out right. (2) **Live end-to-end against `npm run dev` with a mock Worker** (a scratch node server
+that reads the real `context` the client sends and returns proposals referencing the user's actual first
+training day — since there was no API key in this session, exactly as phase 29 did): sending a message
+rendered the three proposal cards (add / log-bodyweight / an intentionally-unresolvable one showing
+Dismiss-only); tapping Apply on the add card **actually appended `face_pull` to the Push day** in
+`localStorage` and flipped only that card to "✓ Applied" (the others stayed pending); the bodyweight
+Apply logged 180 lb → 81.65 kg dated today; the error card dismissed; and a "build me a strength plan"
+message's `build_program` card, on Apply, **replaced the program with an Upper/Lower Strength split,
+stashed the old "Test PPL" into saved programs, and stayed on the coach screen**. Zero console errors;
+`npx tsc -b` (app) and `tsc --noEmit` (worker) both clean, `npm run build` clean.
+
+**Not verified: a real Anthropic API call.** No API key was available this session, so the actual
+tool-emitting behaviour of the deployed model — whether it reliably calls `propose_*` vs. describing
+steps, and picks correct catalogued names — has never been exercised against the live API, only against
+the mock. That's the first thing to test, and it needs the Worker **redeployed** (the `worker/` changes
+— tools, prompt, terminal-tool response shape — are not live until `wrangler deploy`); the Pages build
+picks up the client changes automatically on push. Same live-vs-mock caveat as phase 29/33.
+
+(35) **per-device monthly spend cap turned on** — closing part of phase 33's "the coach is unmetered"
+open item. `checkBudget()`/`recordSpend()` in `worker/src/usage.ts` are no longer stubs: they read/write
+a KV namespace (binding `USAGE`, added to `wrangler.toml` + `Env`) keyed `spend:<userId>:<YYYY-MM>` (UTC
+month, ~40-day TTL so a new month self-resets with no cron), and block with the existing 402
+`budget_exhausted` (already mapped client-side to "You've used up this month's coach messages") once a
+device passes `MONTHLY_LIMIT_MICRO_USD = 1_500_000` ($1.50). Requested scope (via `AskUserQuestion`):
+**per-device**, not a global worker-wide cap — matches the existing `checkBudget(userId)` shape and the
+"don't waste your own budget" framing. The caveat is recorded in-code and in the README: `userId` is a
+bypassable device UUID, so this limits an ordinary user on their own device but is **not** a defence
+against a forged-Origin script — an Anthropic Console monthly spend limit remains the real global
+backstop, and is the recommended companion. KV (not D1) chosen deliberately: eventually consistent, so a
+race can under-count by a message or two, which is fine slop on a $1.50 personal cap and needs zero
+schema/setup beyond `wrangler kv namespace create`. **Fails open** when the binding is absent
+(`limit: 0`), so a build without the namespace behaves like the old stub rather than locking the coach
+out. Verified the logic against a fake KV (throwaway, deleted): fresh device allowed, blocks at exactly
+$1.50 after ~100 × $0.015 exchanges, a second device independent, and no-binding → allowed. `tsc
+--noEmit` clean. **Not verified against real KV/live API** (no key/deploy this session) — same gate as
+phase 34: needs `wrangler kv namespace create USAGE`, the id pasted into `wrangler.toml`, then
+`wrangler deploy`. To change the cap later, edit `MONTHLY_LIMIT_MICRO_USD` and redeploy.
+
+(36) **coach access allowlist** — an opt-in invite gate for the "private now, paid later" plan the
+user described (private for now; eventual Google Play / App Store paid release). The key design idea,
+which is what makes it not-throwaway: access is **one swappable function** `isEntitled(env, userId)`
+in `worker/src/access.ts`, sitting right before `checkBudget` in the request path
+(`isEntitled → checkBudget → API`). Today it checks an allowlist; the public-web phase replaces the
+*body* of that one function with a Stripe-subscription lookup, and the app-store phase with an
+Apple/Google IAP-receipt lookup — nothing else in the Worker changes. Scoping (via `AskUserQuestion`
+across three turns): monetization is wanted *eventually* and via the app stores (which means IAP, not
+Stripe, for the store builds — and a native wrapper, a separate future project — since Apple/Google
+require their own billing for in-app digital subscriptions and reject thin webview wrappers); for
+*now* the user chose a **lightweight allowlist** over a shared code or leaving it open.
+
+- Gate is controlled by `REQUIRE_ALLOWLIST` (`wrangler.toml` var, default `"false"` = off/allow-all).
+  When `"true"`, an id must have an `allow:<id>` key in the **same `USAGE` KV namespace** as the spend
+  counters (approve/revoke with `wrangler kv key put/delete --binding=USAGE "allow:<id>" "1"`).
+- **Fails closed** when required-but-KV-missing (opposite of `checkBudget`, which fails open) — an
+  access gate that can't read its list must deny, or "require allowlist" would silently mean "allow
+  everyone" on a misconfig. Documented inline in `access.ts`.
+- Identity is still the client's device UUID (`userId`), explicitly not a security boundary — an
+  invite list you hand-approve, not abuse-proof (someone can mint a fresh id; you'd approve each). It
+  becomes a verified account id in the paid phases. This is *why* the eventual real gate is a paywall,
+  not this list.
+- Client: new `not_entitled` 403 → error bubble "This device isn't approved… share your Coach ID";
+  the id itself is now surfaced at the bottom of the Coach tab (`coachVM.deviceId` → `CoachIdFooter`
+  in `CoachScreen.tsx`, with a copy button) so a user can send it to be approved. `deviceId()` is the
+  same value already sent as `userId`, so nothing new is minted.
+
+Verified: `isEntitled` against a fake KV (gate off → allow; on+no-KV → deny; on+not-listed → deny;
+on+listed → allow; other device → deny) and **live against `npm run dev` + a mock returning 403
+`not_entitled`** — the Coach ID footer rendered with its Copy button, and a send produced the correct
+"not approved / share your Coach ID" error bubble directly above the id. (Browser-tool button clicks
+didn't register in this run — a coordinate/focus quirk, not a bug; a programmatic `.click()` fired
+`sendCoachMessage` correctly, confirmed via the resulting user+error messages in `localStorage`.) Zero
+console errors; `npx tsc -b` (app), `tsc --noEmit` (worker), and `npm run build` all clean.
+
+**A note on the paid roadmap for whoever picks this up** (captured so the plan isn't re-derived): the
+worker README's old "you need a native app + IAP" framing conflated *identity* with *the store*. For a
+**web** release, Stripe (or a merchant-of-record like Paddle/Lemon Squeezy, which also handles global
+sales tax) subscribes users directly with no app-store cut — the lighter path. App-store builds are a
+genuinely separate, heavier phase (native wrapper: TWA for Play is easy, Apple needs Capacitor + real
+native feel; plus StoreKit/Play Billing IAP + server-side receipt verification writing the same
+entitlement record). All three monetization methods are just different *writers* to the entitlement
+`isEntitled` reads. A per-user budget stays relevant even behind a paywall — there it's unit-economics
+(cap a subscriber's token cost below their price), not abuse defence.
+
+(37) **premium-locked screen for the coach** — the free/premium split made visible. Confirmed model:
+the whole tracker (programs, workouts, history, progress, achievements, body diagram — all offline,
+client-side) stays **free**; only the coach and any future AI feature sit behind the gate, because the
+coach is the only thing that talks to the Worker. This phase adds the proactive upsell screen a
+non-entitled user sees *instead of* the chat, rather than only discovering the block on first send.
+
+The problem it solves: entitlement was only known server-side at send time, so a locked user saw a
+normal chat and hit the wall on send. To show a locked screen *upfront*, the client has to know
+entitlement before interaction — so the Worker gained a **status probe**: a POST with `{ op: 'status' }`
+that runs `isEntitled` (+ `checkBudget`) and returns `{ entitled, budgetOk, spent, limit }` with **no
+Anthropic call and no cost**. `index.ts` now evaluates `isEntitled` once up top and reuses it for both
+the probe and the real send. The probe's `entitled` is **advisory UI state only** — the real block is
+still the server-side gate on the actual send, so a spoofed `entitled: true` buys nothing (the send
+still 403s).
+
+Client wiring:
+- `fetchCoachStatus()` in `state/coach.ts` → 'entitled' | 'locked' | 'unknown'. **'unknown' on any
+  network/parse failure** (offline, Worker down) and renders as the chat, never the lock — we don't
+  strand someone behind a paywall because a probe failed; the send is gated regardless.
+- `AppState.coachEntitlement` (default 'unknown', in `types.ts`/`initialState.ts`; the type lives in
+  `types.ts` to avoid a coach.ts↔types circular import). `refreshCoachEntitlement()` action probes and
+  stores it, called from a mount-only `useEffect` in `CoachScreen` (same pattern as
+  `markAchievementsSeen`) so it re-checks each time the tab opens.
+- `viewModel` exposes `coach.locked` (= entitlement === 'locked') + `coach.refreshEntitlement`.
+  `CoachScreen` renders `<CoachLockedScreen>` when `configured && locked`, else the chat.
+- `CoachLockedScreen` is the premium pitch: 🔒, "The AI Coach is a Premium feature", a "everything else
+  stays free" line, a four-item feature list (ask about lifts/form, stats explained, add/swap by asking,
+  build a plan from chat), and a "Getting access" block reusing `CoachIdFooter` (the Coach ID + Copy).
+  **In this private phase the CTA is the Coach ID** (share it to be allowlisted) since there's no
+  checkout yet — when payments ship, that block becomes a real Subscribe button and nothing else about
+  the screen changes. It's the reusable template for gating any future AI feature.
+
+Verified live against `npm run dev` + a mock returning `entitled: false` on the status probe: opening
+the Coach tab fired the probe on mount and rendered the locked/upsell screen (full feature list + access
+copy + Coach ID/Copy) with no send, while the Program tab (a free feature) still loaded normally —
+confirming only the coach is gated. Zero console errors; `npx tsc -b` (app), `tsc --noEmit` (worker),
+`npm run build` all clean. Not exercised against real KV/live API (no key/deploy this session), same as
+phases 34–36; the status route ships with the next `wrangler deploy`.
+
+Follow-up: intended price set to **$5/month** (`PREMIUM_PRICE`/`PREMIUM_PERIOD` constants in
+`CoachScreen.tsx`, single source of truth). The locked screen now shows "$5 / month" + a **disabled
+Subscribe button labelled "Coming soon"** above the invite block — the offer is visible, but the button
+is inert until checkout exists (wire its `onClick` to Stripe/IAP in the payments phase, then drop the
+"Get access now" Coach-ID block). Verified live: the price, button, and invite path all render.
+Unit-economics sanity check for later: at $5/month against the current $1.50/device token budget
+(phase 35), margin is ~$3.50 before Stripe/app-store fees, and a subscriber can send ~75–150 messages
+before the cap — raise `MONTHLY_LIMIT_MICRO_USD` if that headroom is too tight for a paid tier, keeping
+it under $5.

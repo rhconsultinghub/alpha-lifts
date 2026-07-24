@@ -218,7 +218,42 @@ export interface CoachChatMessage {
   content: string;
   /** Set on an assistant turn that failed, so it renders as an error bubble rather than advice. */
   isError?: boolean;
+  /**
+   * App changes the coach proposed on this turn. Each is a confirm-and-apply card: nothing
+   * mutates until the user taps Apply. Resolved and validated client-side from the Worker's
+   * raw tool calls (see state/coach.ts#parseProposals), so `payload` is present only when the
+   * proposal maps to something real; otherwise `error` carries why it couldn't.
+   */
+  proposals?: CoachProposal[];
 }
+
+export type CoachProposalKind =
+  | 'add_exercise' | 'swap_exercise' | 'remove_exercise'
+  | 'set_params' | 'build_program' | 'log_bodyweight' | 'navigate';
+
+/** Resolved, validated payload for a proposal — ids/keys, not the model's raw names. */
+export type CoachProposalPayload =
+  | { kind: 'add_exercise'; dayKey: string; exId: string; sets?: number; reps?: number }
+  | { kind: 'swap_exercise'; dayKey: string; fromExId: string; toExId: string }
+  | { kind: 'remove_exercise'; dayKey: string; exId: string }
+  | { kind: 'set_params'; dayKey: string; exId: string; sets?: number; reps?: number }
+  | { kind: 'build_program'; splitId: string; trainingType: TrainingType; name?: string }
+  | { kind: 'log_bodyweight'; displayValue: number }
+  | { kind: 'navigate'; screen?: Screen; dayKey?: string };
+
+export interface CoachProposal {
+  kind: CoachProposalKind;
+  /** One-line human summary shown on the card, e.g. "Add Incline DB Press to Push Day". */
+  summary: string;
+  /** Present when the proposal resolved to a real, applicable change. */
+  payload?: CoachProposalPayload;
+  /** Present when the proposal couldn't be resolved (unknown exercise/day). */
+  error?: string;
+  /** Applied/dismissed are terminal; a card renders its outcome and hides its buttons. */
+  status: 'pending' | 'applied' | 'dismissed';
+}
+/** Whether this device may use the coach (a gated premium feature). See fetchCoachStatus(). */
+export type CoachEntitlement = 'unknown' | 'entitled' | 'locked';
 export type RestPacing = 'Relaxed' | 'Standard' | 'Aggressive';
 export type CoachVoice = 'Direct' | 'Encouraging' | 'Hype';
 export type WarmupStyle = 'Minimal' | 'Standard' | 'Cautious';
@@ -356,4 +391,11 @@ export interface AppState {
   coachInput: string;
   /** True while a request is in flight; blocks a second send and drives the typing indicator. */
   coachPending: boolean;
+  /**
+   * Whether this device may use the coach (a premium/gated feature), per the Worker's status
+   * probe. 'unknown' until the first probe resolves (or if it can't reach the Worker); 'locked'
+   * shows the subscribe/upsell screen instead of the chat. Advisory UI state only — the real
+   * gate is server-side. Not meaningfully persisted; re-probed whenever the Coach tab opens.
+   */
+  coachEntitlement: CoachEntitlement;
 }

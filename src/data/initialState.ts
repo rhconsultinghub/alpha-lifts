@@ -87,6 +87,8 @@ export function createInitialState(): AppState {
     coachInput: '',
     // never persisted as true in practice: a send always resolves or errors before the state
     // is written, and loadInitial()'s merge would otherwise strand a reloaded app "thinking"
-    coachPending: false
+    coachPending: false,
+    // re-probed each time the Coach tab opens (see refreshCoachEntitlement in useApp)
+    coachEntitlement: 'unknown'
   };
 }

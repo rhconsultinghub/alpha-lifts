@@ -15,12 +15,23 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 ALLOWED_ORIGINS = "https://rhconsultinghub.github.io,http://localhost:5173"
 
+# Set to "true" to require the coach access allowlist (see src/access.ts + README "Access
+# allowlist"). While off, anyone whose Origin is allowed can use the coach. Approved ids are KV
+# keys `allow:<id>` in the USAGE namespace:
+#   npx wrangler kv key put --binding=USAGE "allow:<coach-id-from-app>" "1"
+# The <coach-id> is shown to each user at the bottom of the Coach tab.
+REQUIRE_ALLOWLIST = "false"
+
 # ANTHROPIC_API_KEY is NOT set here — wrangler.toml is committed to git.
 # Set it as an encrypted secret instead:
 #   npx wrangler secret put ANTHROPIC_API_KEY
 # For local dev, put it in worker/.dev.vars (gitignored).
 
-# Uncomment once you add real usage metering (see README "Phase 2").
-# [[kv_namespaces]]
-# binding = "USAGE"
-# id = "<created by: npx wrangler kv namespace create USAGE>"
+# Per-device monthly spend cap ($1.50, see src/usage.ts). Create the namespace once with
+#   npx wrangler kv namespace create USAGE
+# and paste the printed id below (replacing REPLACE_WITH_KV_NAMESPACE_ID). Until a real id is
+# in place, deploy will fail on this binding; usage.ts fails open if the binding is absent, so
+# you can also just delete this block to ship without enforcement.
+[[kv_namespaces]]
+binding = "USAGE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

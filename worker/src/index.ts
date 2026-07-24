@@ -9,11 +9,18 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { buildSystem, type CoachContext } from './prompt';
+import { COACH_TOOLS } from './tools';
+import { isEntitled } from './access';
 import { checkBudget, costMicroUsd, recordSpend } from './usage';
 
 export interface Env {
   ANTHROPIC_API_KEY: string;
   ALLOWED_ORIGINS: string;
+  // KV namespace backing both the per-device monthly spend cap (usage.ts) and the access
+  // allowlist (access.ts). Optional so the Worker still runs without it.
+  USAGE?: KVNamespace;
+  // "true" enforces the coach access allowlist (access.ts). Unset/anything else = gate off.
+  REQUIRE_ALLOWLIST?: string;
 }
 
 const MODEL = 'claude-opus-4-8';
@@ -35,6 +42,10 @@ interface ChatRequest {
   messages?: { role: string; content: string }[];
   context?: CoachContext;
   userId?: string;
+  // "status" = a lightweight entitlement/budget probe with no Anthropic call (and no cost),
+  // used by the app to decide whether to show the coach or a locked/upsell screen. Anything
+  // else (incl. absent) is a normal chat request.
+  op?: string;
 }
 
 function corsHeaders(origin: string | null, env: Env): Record<string, string> {
@@ -83,6 +94,20 @@ export default {
       return json({ error: 'Invalid JSON' }, 400, cors);
     }
 
+    const userId = typeof body.userId === 'string' ? body.userId.slice(0, 128) : 'anonymous';
+
+    // Entitlement, evaluated once and reused for both the status probe and the real request.
+    const entitled = await isEntitled(env, userId);
+
+    // Status probe: report whether this caller may use the coach, without an Anthropic call. The
+    // app calls this on opening the Coach tab to decide chat-vs-locked screen. `entitled` here is
+    // advisory UI state only — the real block still happens server-side on the actual send below,
+    // so a spoofed "entitled: true" buys nothing.
+    if (body.op === 'status') {
+      const b = await checkBudget(env, userId);
+      return json({ entitled, budgetOk: b.allowed, spent: b.spent, limit: b.limit }, 200, cors);
+    }
+
     const incoming = Array.isArray(body.messages) ? body.messages : [];
     const messages = incoming
       .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
@@ -97,7 +122,11 @@ export default {
       return json({ error: 'Last message must be from the user' }, 400, cors);
     }
 
-    const userId = typeof body.userId === 'string' ? body.userId.slice(0, 128) : 'anonymous';
+    // Access gate (allowlist today; a subscription/receipt check later — same seam). Checked
+    // before the budget so an un-approved caller is rejected without touching KV spend or the API.
+    if (!entitled) {
+      return json({ error: 'not_entitled' }, 403, cors);
+    }
 
     const budget = await checkBudget(env, userId);
     if (!budget.allowed) {
@@ -120,6 +149,10 @@ export default {
         system: buildSystem(body.context),
         thinking: { type: 'adaptive' },
         output_config: { effort: 'low' },
+        // The coach can propose app changes via tools. These are deliberately single-turn:
+        // a tool_use block is a *proposal* the client will confirm-and-apply locally, so we
+        // never send a tool_result back for another (billed) round trip. See tools.ts.
+        tools: COACH_TOOLS,
         messages
       });
     } catch (err) {
@@ -147,9 +180,19 @@ export default {
       .join('')
       .trim();
 
+    // Each tool_use block becomes a proposal for the client to confirm and apply locally. We
+    // forward only the tool name and its input — the client validates both (resolving names to
+    // ids, checking the day/exercise exists) before it ever shows an Apply button, so a
+    // hallucinated tool name or bad argument degrades to a dismissable "couldn't do that" card
+    // rather than anything executing.
+    const proposals = response.content
+      .filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use')
+      .map(b => ({ tool: b.name, input: b.input }));
+
     return json(
       {
         reply,
+        proposals,
         truncated: response.stop_reason === 'max_tokens',
         usage: { microUsd, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens }
       },

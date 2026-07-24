@@ -57,15 +57,38 @@ every request failing while costing nothing.
 | `MAX_MESSAGE_CHARS = 2000` | `index.ts` | Stops one giant paste from costing a lot. |
 | `effort: 'low'` | `index.ts` | Short factual answers don't need deep reasoning; also cuts latency. |
 | Origin allowlist | `index.ts` | Stops other sites spending your key through this Worker. |
+| Per-device monthly cap | `usage.ts` (KV `USAGE`) | Hard $1.50/device/month spend limit — `checkBudget()` blocks (402 `budget_exhausted`) once a device's month-to-date spend hits `MONTHLY_LIMIT_MICRO_USD`. |
 
 At Opus 4.8 pricing ($5/M in, $25/M out), a typical exchange lands around $0.01–0.03 once
-context and history are included. **A $5 monthly budget is therefore roughly 150–400 messages.**
-If that's too few, switching `MODEL` to `claude-sonnet-5` or `claude-haiku-4-5` (both already
-priced in `usage.ts`) is a one-line change — quality drops, message count rises several-fold.
+context, history, and the coach-actions catalog/stats are included. **The enforced $1.50/device
+monthly cap is therefore roughly 75–150 messages.** If that's too few, switching `MODEL` to
+`claude-sonnet-5` or `claude-haiku-4-5` (both already priced in `usage.ts`) is a one-line change
+— quality drops, message count rises several-fold. To change the cap, edit
+`MONTHLY_LIMIT_MICRO_USD` in `usage.ts` (µUSD; 1,500,000 = $1.50) and redeploy.
+
+**The cap is backed by a KV namespace** bound as `USAGE` (`wrangler.toml`). Create it once:
+
+```sh
+cd worker
+npx wrangler kv namespace create USAGE     # prints an id
+# paste that id into wrangler.toml's [[kv_namespaces]] block (replacing the placeholder)
+npm run deploy
+```
+
+Keys are `spend:<userId>:<YYYY-MM>` (UTC month), self-expiring ~40 days out, so a new month
+resets the budget with no cron. `usage.ts` **fails open** if the binding is absent — delete the
+`[[kv_namespaces]]` block (or skip creating the namespace) to ship with metering off.
+
+Scope caveat: `userId` is a device UUID the client mints, not a verified identity — clearing it
+resets the budget, and a script can send fresh ids. So this cap limits an ordinary user on their
+own device; it is not a defence against a determined forger. For that, set an **Anthropic Console
+monthly spend limit** as the global backstop (recommended regardless).
 
 ## Phase 2 — the subscription wall
 
-Two things must exist before metering means anything, and neither is built yet:
+Per-device metering is now **implemented** (`checkBudget`/`recordSpend` against KV, see above).
+What's still missing before that metering means anything as a *paid product* — two things,
+neither built yet:
 
 **1. A native app.** A PWA installed from a URL isn't in any store, so there's no IAP to gate
 behind. This means wrapping the app — Capacitor is the natural fit for an existing Vite/React
@@ -88,9 +111,11 @@ App Store / Play  --receipt-->  your server: verify with Apple/Google
    app --POST /chat + auth token-->  Worker: checkBudget() -> call API -> recordSpend()
 ```
 
-Fill in `checkBudget()` and `recordSpend()` in `src/usage.ts` against KV or D1. **Prefer D1** —
-KV is eventually consistent, so concurrent requests can both read a stale balance. Slight
-overspend on $5 is fine; silently losing charges is not.
+`checkBudget()`/`recordSpend()` in `src/usage.ts` are implemented against KV today, keyed on the
+device `userId`. For a real paid product, swap that key for the verified user id and consider
+**D1** instead of KV — KV is eventually consistent, so concurrent requests can both read a stale
+balance (fine for a ~$1.50 personal cap; not fine when charges map to revenue). Slight overspend
+is acceptable; silently losing charges is not.
 
 Also worth deciding before you price this:
 
@@ -101,6 +126,32 @@ Also worth deciding before you price this:
   the same way the token count would be.
 - **Add a rate limit** (per-minute, per-user) alongside the budget. The budget caps the month;
   it doesn't stop a script burning it all in ten minutes.
+
+## Access allowlist
+
+An optional invite-style gate: while on, only pre-approved ids may use the coach. It's the
+private-phase form of a single, swappable "is this caller entitled?" check (`src/access.ts`) that
+the paid phases later replace with a subscription/receipt lookup — the rest of the request path
+(`isEntitled → checkBudget → API`) doesn't change.
+
+Turn it on by setting `REQUIRE_ALLOWLIST = "true"` in `wrangler.toml` (default `"false"` = gate
+off, anyone whose Origin is allowed can use the coach) and redeploy. Approve an id:
+
+```sh
+# The id is shown to each user at the bottom of the Coach tab ("Coach ID: …").
+npx wrangler kv key put --binding=USAGE "allow:<coach-id>" "1"
+# Revoke:
+npx wrangler kv key delete --binding=USAGE "allow:<coach-id>"
+```
+
+Approved ids live as `allow:<id>` keys in the same `USAGE` KV namespace as the spend counters. An
+unapproved caller gets a 403 `not_entitled` (mapped client-side to a "share your Coach ID" message
+next to the id). Fails **closed** when the gate is required but KV is missing — a "require
+allowlist" that couldn't read its list must deny, not allow.
+
+Caveat, same as the budget: the id is a device UUID, not a verified identity — someone can mint a
+new one, and you'd have to approve each. Fine for an invite list you control; it becomes a real
+account id in the paid phases.
 
 ## Topic restriction
 

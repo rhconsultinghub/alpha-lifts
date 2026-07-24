@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { EXLIB, EQUIP_CATALOG, MUSCLE_TARGETS } from '../data/exercises';
+import { EXLIB, EQUIP_CATALOG, MUSCLE_TARGETS, planRepDefault } from '../data/exercises';
 import { mkEx, slugify } from '../data/program';
 import { createInitialState } from '../data/initialState';
 import { exportBackup as exportBackupFile, mergeBackupIntoDefaults } from '../data/backup';
 import { SPLIT_PRESETS, buildProgramFromPreset, buildCustomProgram } from '../data/wizard';
 import type {
-  AppState, CoachChatMessage, CoachVoice, ExerciseFormState, Muscle, ProgramExercise, RestPacing, Screen,
+  AppState, CoachChatMessage, CoachProposalPayload, CoachVoice, ExerciseFormState, Muscle, ProgramExercise, RestPacing, Screen,
   TrainingType, Units, WarmupStyle, WorkoutSetRow, WizardCustomDay
 } from '../data/types';
-import { askCoach, buildCoachContext, COACH_HISTORY_CAP } from './coach';
+import { askCoach, buildCoachContext, parseProposals, fetchCoachStatus, COACH_CONFIGURED, COACH_HISTORY_CAP } from './coach';
 import {
   recommendation, restForExercise, dayMuscleRanks, isWeekComplete, fmtWeight,
   nextIncompleteIndex, defaultCompareLiftIds, bestSetScore, effectiveLast
@@ -473,6 +473,16 @@ export function useApp() {
   const setCoachInput = useCallback((v: string) => setState(s => ({ ...s, coachInput: v })), []);
   const clearCoachChat = useCallback(() => setState(s => ({ ...s, coachMessages: [], coachInput: '' })), []);
 
+  // Probes whether this device may use the coach and stores it, so the Coach tab can show the
+  // chat or a locked/upsell screen without the user having to send a message first. Called on
+  // opening the tab. A failed probe (offline) leaves it 'unknown', which renders as the chat —
+  // the actual send is gated server-side regardless, so we never falsely lock anyone out.
+  const refreshCoachEntitlement = useCallback(async () => {
+    if (!COACH_CONFIGURED) return;
+    const status = await fetchCoachStatus();
+    setState(s => ({ ...s, coachEntitlement: status }));
+  }, []);
+
   // Synchronous in-flight latch. Deliberately NOT `stateRef.current.coachPending`: stateRef is
   // refreshed in a useEffect, i.e. after commit, so two sends dispatched in the same tick (a
   // double-tap, or Enter landing on the same frame as a click) both read the stale `false` and
@@ -510,14 +520,148 @@ export function useApp() {
       coachInflightRef.current = false;
     }
 
+    // Resolve the Worker's raw tool calls into apply-ready proposal cards against the *latest*
+    // state (stateRef, not the pre-await `cur`) — the user may have edited their program while
+    // the request was in flight, and a proposal must resolve day/exercise names against what's
+    // actually there now.
+    const proposals = result.ok ? parseProposals(result.rawProposals, stateRef.current) : [];
     const reply: CoachChatMessage = result.ok
-      ? { id: nextCoachId(), role: 'assistant', content: result.reply }
+      ? { id: nextCoachId(), role: 'assistant', content: result.reply, ...(proposals.length ? { proposals } : {}) }
       : { id: nextCoachId(), role: 'assistant', content: result.error, isError: true };
 
     // Append to `s.coachMessages`, not to the captured `nextMessages` — the user may have hit
     // "clear chat" while this was in flight, and rebuilding from the stale array would
     // resurrect the conversation they just deleted.
     setState(s => ({ ...s, coachPending: false, coachMessages: [...s.coachMessages, reply].slice(-COACH_HISTORY_CAP) }));
+  }, []);
+
+  // Applies one confirmed coach proposal to the real state. Pure: returns the next AppState.
+  // These are direct program mutations (like muscleSwapConfirm) rather than driving the swap/add
+  // modal state machines — the coach isn't in a modal flow. Every path mirrors the existing
+  // add/swap/remove logic, including clearing a dangling superset link on the touched exercise's
+  // former partner so no group id ever points at an exercise that's no longer there.
+  const applyProposalToState = (s: AppState, p: CoachProposalPayload): AppState => {
+    switch (p.kind) {
+      case 'add_exercise': {
+        const lib = EXLIB[p.exId];
+        const program = JSON.parse(JSON.stringify(s.program));
+        const day = program[p.dayKey];
+        if (!day || !lib) return s;
+        const reps = p.reps ?? planRepDefault(s.trainingType, lib);
+        const sets = p.sets ?? 3;
+        day.exercises.push(mkEx(p.exId, sets, 0, { weight: 0, reps, hitTop: true }));
+        return { ...s, program };
+      }
+      case 'swap_exercise': {
+        const lib = EXLIB[p.toExId];
+        const program = JSON.parse(JSON.stringify(s.program));
+        const day = program[p.dayKey];
+        if (!day || !lib) return s;
+        const idx = day.exercises.findIndex((e: ProgramExercise) => e.id === p.fromExId);
+        if (idx < 0) return s;
+        const oldGroup = day.exercises[idx].supersetGroup;
+        day.exercises[idx] = mkEx(p.toExId, day.exercises[idx].sets, 0, { weight: 0, reps: lib.repHi, hitTop: true });
+        if (oldGroup) {
+          const partner = day.exercises.find((e: ProgramExercise) => e.supersetGroup === oldGroup);
+          if (partner) partner.supersetGroup = null;
+        }
+        return { ...s, program };
+      }
+      case 'remove_exercise': {
+        const program = JSON.parse(JSON.stringify(s.program));
+        const day = program[p.dayKey];
+        if (!day) return s;
+        const idx = day.exercises.findIndex((e: ProgramExercise) => e.id === p.exId);
+        if (idx < 0) return s;
+        const removed = day.exercises[idx];
+        day.exercises.splice(idx, 1);
+        if (removed?.supersetGroup) {
+          const partner = day.exercises.find((e: ProgramExercise) => e.supersetGroup === removed.supersetGroup);
+          if (partner) partner.supersetGroup = null;
+        }
+        return { ...s, program };
+      }
+      case 'set_params': {
+        const program = JSON.parse(JSON.stringify(s.program));
+        const day = program[p.dayKey];
+        if (!day) return s;
+        const ex: ProgramExercise | undefined = day.exercises.find((e: ProgramExercise) => e.id === p.exId);
+        if (!ex) return s;
+        if (p.sets != null) ex.sets = Math.max(1, Math.min(8, p.sets));
+        // A rep-target change writes a manualTarget override (cleared on next log), same as the
+        // Day View quick-edit — ex.last alone would be silently outranked by cross-day history.
+        if (p.reps != null) {
+          const base = ex.manualTarget || effectiveLast(ex, s.exerciseHistory[ex.id]);
+          ex.manualTarget = { weight: base.weight, reps: Math.max(1, p.reps) };
+        }
+        return { ...s, program };
+      }
+      case 'build_program': {
+        const preset = SPLIT_PRESETS.find(pr => pr.id === p.splitId) || SPLIT_PRESETS[0];
+        const built = buildProgramFromPreset(preset, p.trainingType, 'recommended');
+        const newId = 'prog_' + Date.now();
+        const savedPrograms = { ...s.savedPrograms };
+        // stash the outgoing program so switching back to it later is possible, same as
+        // createProgramFromWizard.
+        savedPrograms[s.activeProgramId] = { name: s.programName, trainingType: s.trainingType, dayOrder: s.dayOrder, startedAt: s.startedAt, days: s.program, weekNumber: s.weekNumber, weekStartedAt: s.weekStartedAt };
+        return {
+          ...s,
+          activeProgramId: newId, programName: p.name || preset.label, trainingType: p.trainingType,
+          program: built.days, dayOrder: built.dayOrder, startedAt: new Date().toISOString(),
+          weekNumber: 1, weekStartedAt: new Date().toISOString(), savedPrograms,
+          // stay on the coach screen (the card shows the confirmation); just clear a now-stale
+          // active day, since the new program has different day keys.
+          activeDayKey: null
+        };
+      }
+      case 'log_bodyweight': {
+        const weightKg = s.units === 'lb' ? p.displayValue / 2.20462 : p.displayValue;
+        const todayKey = new Date().toISOString().slice(0, 10);
+        const bodyWeightLog = [...s.bodyWeightLog.filter(e => e.date !== todayKey), { date: todayKey, weightKg }];
+        return { ...s, bodyWeightLog };
+      }
+      case 'navigate': {
+        if (p.dayKey && s.program[p.dayKey]) {
+          const ranks = dayMuscleRanks(s, p.dayKey);
+          const top = Object.keys(ranks).sort((a, b) => ranks[b] - ranks[a])[0];
+          const BACK_MUSCLES = ['Back', 'Rear Delts', 'Triceps', 'Hamstrings', 'Glutes'];
+          const view = top && BACK_MUSCLES.includes(top) ? 'back' : 'front';
+          return { ...s, screen: 'dayView' as Screen, activeDayKey: p.dayKey, bodyView: view as 'front' | 'back' };
+        }
+        if (p.screen) return { ...s, screen: p.screen, ...(p.screen === 'program' ? { activeDayKey: null } : {}) };
+        return s;
+      }
+      default:
+        return s;
+    }
+  };
+
+  const applyCoachProposal = useCallback((messageId: string, index: number) => {
+    setState(s => {
+      const msg = s.coachMessages.find(m => m.id === messageId);
+      const prop = msg?.proposals?.[index];
+      if (!msg || !prop || prop.status !== 'pending' || !prop.payload) return s;
+      const next = applyProposalToState(s, prop.payload);
+      return {
+        ...next,
+        coachMessages: next.coachMessages.map(m =>
+          m.id === messageId
+            ? { ...m, proposals: m.proposals?.map((pr, i) => (i === index ? { ...pr, status: 'applied' as const } : pr)) }
+            : m
+        )
+      };
+    });
+  }, []);
+
+  const dismissCoachProposal = useCallback((messageId: string, index: number) => {
+    setState(s => ({
+      ...s,
+      coachMessages: s.coachMessages.map(m =>
+        m.id === messageId
+          ? { ...m, proposals: m.proposals?.map((pr, i) => (i === index && pr.status === 'pending' ? { ...pr, status: 'dismissed' as const } : pr)) }
+          : m
+      )
+    }));
   }, []);
 
   const openAddExerciseForm = useCallback(() => {
@@ -1428,7 +1572,7 @@ export function useApp() {
     state, setState,
     actions: {
       goProgram, goProgress, goExercises, goAchievements, goCoach, markAchievementsSeen, openDay, openDayBuilder, closeDayBuilder,
-      setCoachInput, sendCoachMessage, clearCoachChat,
+      setCoachInput, sendCoachMessage, clearCoachChat, applyCoachProposal, dismissCoachProposal, refreshCoachEntitlement,
       openExerciseHistory, closeExerciseHistory, openArchiveDetail, closeArchiveDetail,
       selectExerciseProgress, toggleProgressPicker, toggleCompareLift, toggleCompareLiftPicker, setProgressMetric,
       openWeekReview, closeWeekReview, selectReviewWeek, backToWeekList,
