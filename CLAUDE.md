@@ -209,6 +209,19 @@ Static PWA on GitHub Pages, project site (not a custom domain), auto-deployed vi
 `rhconsultinghub`, not the user's personal handle. Anything that needs the deployed *origin*
 (the Worker's `ALLOWED_ORIGINS`, for one) wants `https://rhconsultinghub.github.io` with no path.
 
+**Two separate deploy targets — don't conflate them.** The *frontend* auto-deploys via Pages on
+every push to `main` (no manual step). The *Worker* does NOT — it only updates when someone runs
+`wrangler deploy` manually, and it must be run **from `L:\Personal Projects\Alpha Lifts\alpha-lifts\worker`**
+(the only git-connected copy — see the Windows notes about the deleted stale Desktop copy). This bit
+once for real: a `wrangler deploy` from the old Desktop copy shipped pre-accounts Worker code, so every
+`/auth/*` route 404'd and signup failed with a generic error even though the frontend looked correct
+and healthy. To diagnose "is the *deployed* Worker actually current?", hit it directly — e.g.
+`GET https://alpha-lifts-coach.alpha-lifts.workers.dev/state` returns 401 on current code but 405 on the
+old coach-only Worker; `POST /auth/signup` returns 201/400-validation on current code but `{"error":"No
+messages"}` (the coach handler) on old code. The deployed Worker is
+**`https://alpha-lifts-coach.alpha-lifts.workers.dev`** (worker name `alpha-lifts-coach`,
+account subdomain `alpha-lifts`), which is what `VITE_COACH_API_URL` points to.
+
 - `vite.config.ts`: `base: '/alpha-lifts/'` in production builds (must match the GitHub repo
   name — this repo is named `alpha-lifts`). Dev server stays at `/`.
 - **`VITE_COACH_API_URL` must be a repository variable under the *Actions* scope** (Settings →
@@ -247,10 +260,16 @@ remembering if setup issues resurface:
   real GitHub repo fresh and copying files in via `robocopy ... /XD node_modules .git`. If git
   ever starts saying `warning: could not open directory 'AppData/'` or similar, that's the same
   mistake recurring — check `git status` isn't walking up into `C:\Users\Ryan`.
-- Project folder is at `C:\Users\Ryan\Desktop\Personal Projects\Alpha Lifts\alpha-lifts` (a
-  prior handoff had it under OneDrive instead — it's since moved to Desktop; update this note
-  again if it moves again, since tooling that hardcodes a path — e.g. a dev-server launcher
-  config — will silently break otherwise).
+- **Project folder is at `L:\Personal Projects\Alpha Lifts\alpha-lifts`** — this is the ONLY live,
+  git-connected copy. Earlier handoffs had it under OneDrive, then the Desktop
+  (`C:\Users\Ryan\Desktop\Personal Projects\...`); both of those are gone/stale. The Desktop copy in
+  particular caused a real production incident: a `wrangler deploy` run from that stale Desktop copy
+  shipped **old** Worker code (pre-accounts), so the live Worker 404'd every `/auth/*` route and
+  account signup failed with a generic error while the (Pages-deployed) frontend looked fine — see
+  the deployment section's Worker-deploy note. The Desktop copy was confirmed safe to delete
+  (old commit, clean tree, nothing unpushed, its one backup byte-identical to `L:\…\Backups`) and
+  removed. If the folder ever moves again, update this note, since tooling that hardcodes a path
+  (e.g. a dev-server launcher config) will silently break otherwise.
 - Windows paths with spaces (this one has several) can trip up tools that spawn child processes
   without proper quoting/escaping. A directory junction (`mklink /J` or PowerShell's
   `New-Item -ItemType Junction`) pointed at the real project folder works as a space-free
