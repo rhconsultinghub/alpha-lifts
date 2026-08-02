@@ -12,6 +12,15 @@ import { buildSystem, type CoachContext } from './prompt';
 import { COACH_TOOLS } from './tools';
 import { isEntitled } from './access';
 import { checkBudget, costMicroUsd, recordSpend } from './usage';
+import { corsHeaders, json } from './http';
+import { authenticate } from './auth';
+import {
+  handleGetState,
+  handleLogin,
+  handleMe,
+  handlePutState,
+  handleSignup
+} from './handlers';
 
 export interface Env {
   ANTHROPIC_API_KEY: string;
@@ -21,6 +30,13 @@ export interface Env {
   USAGE?: KVNamespace;
   // "true" enforces the coach access allowlist (access.ts). Unset/anything else = gate off.
   REQUIRE_ALLOWLIST?: string;
+  // D1 database backing user accounts + synced state (db.ts / handlers.ts). Optional so the
+  // coach still runs on a build that hasn't created the database yet — the account routes 503
+  // ("accounts_not_configured") when it's absent.
+  DB?: D1Database;
+  // HMAC secret that signs session tokens (auth.ts). Set via `wrangler secret put SESSION_SECRET`.
+  // Absent = account routes 503, same as a missing DB.
+  SESSION_SECRET?: string;
 }
 
 const MODEL = 'claude-opus-4-8';
@@ -48,27 +64,6 @@ interface ChatRequest {
   op?: string;
 }
 
-function corsHeaders(origin: string | null, env: Env): Record<string, string> {
-  const allowed = env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean);
-  // Echo the origin only when it's on the list — never `*`. A wildcard here would let any
-  // page on the internet spend this key.
-  if (!origin || !allowed.includes(origin)) return {};
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400',
-    Vary: 'Origin'
-  };
-}
-
-function json(body: unknown, status: number, cors: Record<string, string>): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', ...cors }
-  });
-}
-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const origin = request.headers.get('Origin');
@@ -77,16 +72,33 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: cors });
     }
-    if (request.method !== 'POST') {
-      return json({ error: 'Method not allowed' }, 405, cors);
-    }
     // An empty `cors` map means the Origin wasn't on the allowlist. Reject outright rather
     // than serving the request with no CORS header — the browser would block the *response*,
-    // but only after we'd already paid for the API call.
+    // but only after we'd already done the work. Applies to every route.
     if (Object.keys(cors).length === 0) {
       return json({ error: 'Origin not allowed' }, 403, {});
     }
 
+    // Route by path. `/` (POST) is the coach — the original behaviour — and everything under
+    // /auth and /state is accounts + cloud sync (handlers.ts). Method-mismatched routes 405.
+    const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
+    const method = request.method;
+
+    if (path === '/auth/signup' && method === 'POST') return handleSignup(request, env, cors);
+    if (path === '/auth/login' && method === 'POST') return handleLogin(request, env, cors);
+    if (path === '/auth/me' && method === 'GET') return handleMe(request, env, cors);
+    if (path === '/state' && method === 'GET') return handleGetState(request, env, cors);
+    if (path === '/state' && method === 'PUT') return handlePutState(request, env, cors);
+
+    // The coach lives at POST / (unchanged contract).
+    if (path !== '/') return json({ error: 'Not found' }, 404, cors);
+    if (method !== 'POST') return json({ error: 'Method not allowed' }, 405, cors);
+
+    return handleCoach(request, env, cors);
+  }
+};
+
+async function handleCoach(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
     let body: ChatRequest;
     try {
       body = (await request.json()) as ChatRequest;
@@ -94,7 +106,17 @@ export default {
       return json({ error: 'Invalid JSON' }, 400, cors);
     }
 
-    const userId = typeof body.userId === 'string' ? body.userId.slice(0, 128) : 'anonymous';
+    // Identity for entitlement + budget. Prefer the verified account from the session token — so
+    // spend and access follow the *account* across devices and reinstalls — and fall back to the
+    // client-supplied device UUID only when there's no valid session (anonymous / local-only
+    // builds, or a signed-out user). Deriving it server-side from the signed token means a client
+    // can't claim to be a different account by editing the body.
+    const session = env.SESSION_SECRET ? await authenticate(request, env.SESSION_SECRET) : null;
+    const userId = session
+      ? session.sub
+      : typeof body.userId === 'string'
+        ? body.userId.slice(0, 128)
+        : 'anonymous';
 
     // Entitlement, evaluated once and reused for both the status probe and the real request.
     const entitled = await isEntitled(env, userId);
@@ -199,5 +221,4 @@ export default {
       200,
       cors
     );
-  }
-};
+}

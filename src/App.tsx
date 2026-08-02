@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useApp } from './state/useApp';
+import { useCloudSync } from './state/useCloudSync';
 import { buildViewModel } from './state/viewModel';
 import { OnboardingScreen } from './components/OnboardingScreen';
 import { ProgramScreen } from './components/ProgramScreen';
@@ -32,6 +33,8 @@ import { WeekReviewModal } from './components/modals/WeekReviewModal';
 
 export default function App() {
   const { state, actions } = useApp();
+  // Mirror local state to the server (debounced) while signed in; no-op otherwise.
+  useCloudSync(state);
   const vm = buildViewModel(state, actions);
   const scrollRef = useRef<HTMLDivElement>(null);
 

@@ -24,6 +24,30 @@ export const COACH_API_URL: string = import.meta.env?.VITE_COACH_API_URL || '';
 
 export const COACH_CONFIGURED = COACH_API_URL !== '';
 
+/**
+ * Headers for a coach request. When the user is signed in we attach the session bearer token so
+ * the Worker keys entitlement + budget on their *account* (surviving reinstalls and shared across
+ * their devices), not the throwaway device UUID. The device UUID is still sent in the body as the
+ * fallback identity for anonymous/local-only builds. Imported lazily-ish via a function so this
+ * module doesn't hard-depend on auth being configured.
+ */
+function coachHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+// Read the token without a static import cycle (auth.ts imports from this module). Kept tiny and
+// failure-tolerant — no token just means the request falls back to device-id identity.
+function getAuthToken(): string | null {
+  try {
+    return localStorage.getItem('alpha-lifts-auth-token');
+  } catch {
+    return null;
+  }
+}
+
 /** How many past sessions to summarise into the prompt. Every message re-sends this and is
  *  billed for it, so this is a cost knob as much as a quality one. */
 const RECENT_WORKOUT_LIMIT = 5;
@@ -442,7 +466,7 @@ export async function fetchCoachStatus(): Promise<CoachEntitlement> {
   try {
     const res = await fetch(COACH_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: coachHeaders(),
       body: JSON.stringify({ op: 'status', userId: deviceId() })
     });
     if (!res.ok) return 'unknown';
@@ -466,7 +490,7 @@ export async function askCoach(messages: CoachMessage[], context: CoachContext):
   try {
     res = await fetch(COACH_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: coachHeaders(),
       body: JSON.stringify({ messages, context, userId: deviceId() })
     });
   } catch {

@@ -14,11 +14,16 @@
  * becomes a real, verified account id when the paid phases land. See worker/README.md.
  */
 
+import { findUserById } from './db';
+
 export interface AccessEnv {
   USAGE?: KVNamespace;
   /** "true" turns the allowlist on. Anything else (incl. unset) leaves the gate OFF — allow all,
    *  so an un-configured build behaves like before this feature existed. */
   REQUIRE_ALLOWLIST?: string;
+  /** D1 backing accounts. When present, an active subscription on the account is itself an
+   *  entitlement — this is the "subscription tied to the account" path the README describes. */
+  DB?: D1Database;
 }
 
 /** KV key marking a device/account as approved. Presence = allowed; value is unused. */
@@ -30,10 +35,19 @@ export async function isEntitled(env: AccessEnv, userId: string): Promise<boolea
   // Gate off unless explicitly required.
   if ((env.REQUIRE_ALLOWLIST ?? '').toLowerCase() !== 'true') return true;
 
-  // Required but no store to check against — fail CLOSED. Unlike the budget check (which fails
-  // open on a missing binding, since its job is only to cap spend), an access gate that can't
-  // read its list must deny, or "require allowlist" would silently mean "allow everyone" the
-  // moment KV is misconfigured.
+  // An active subscription on the account grants access outright — the primary paid path. Only
+  // matters when `userId` is a real account id (an authenticated request); a device UUID won't
+  // match a users row, so this quietly falls through to the allowlist below. When billing lands,
+  // writing `sub_status = 'active'` on the user row is all it takes to entitle them here.
+  if (env.DB) {
+    const user = await findUserById(env.DB, userId);
+    if (user && user.sub_status === 'active') return true;
+  }
+
+  // Otherwise fall back to the invite allowlist. Required but no store to check against — fail
+  // CLOSED. Unlike the budget check (which fails open on a missing binding, since its job is only
+  // to cap spend), an access gate that can't read its list must deny, or "require allowlist"
+  // would silently mean "allow everyone" the moment KV is misconfigured.
   const kv = env.USAGE;
   if (!kv) return false;
 

@@ -1554,3 +1554,84 @@ Unit-economics sanity check for later: at $5/month against the current $1.50/dev
 (phase 35), margin is ~$3.50 before Stripe/app-store fees, and a subscriber can send ~75–150 messages
 before the cap — raise `MONTHLY_LIMIT_MICRO_USD` if that headroom is too tight for a paid tier, keeping
 it under $5.
+
+(38) **user accounts + full cloud sync** — the "Phase 2 / Real user identity" the worker README had
+long described as the missing piece. Everything is now tied to a signed-in account: the whole AppState
+blob syncs to the server and follows the user across devices, and the coach's entitlement/budget key on
+the **account** instead of the throwaway device UUID. Chosen stack: **Cloudflare-native** (reuse the
+existing coach Worker + KV, add **D1** + a Worker-signed session), so there's still one deploy story and
+no new vendor. Email + password auth; sign-up is **open** (flip to invite-only by rejecting unknown
+emails in `handleSignup` — one line). Built and verified end-to-end in one session across six phases;
+all live-tested against a local `wrangler dev` + `npm run dev` with browser automation.
+
+Backend (`worker/`):
+- `schema.sql` — D1 tables `users` (id, email, password_hash, created_at, + subscription fields
+  `plan`/`sub_status`/`current_period_end`) and `user_state` (user_id, `state_json`, `version`,
+  `updated_at`). Re-runnable (`IF NOT EXISTS`). New bindings in `wrangler.toml`: `[[d1_databases]]`
+  `DB` + a `SESSION_SECRET` secret. Both optional — the account routes 503 `accounts_not_configured`
+  when absent, so the coach still runs on a build that hasn't set up D1 yet.
+- `src/auth.ts` — all WebCrypto, no deps: PBKDF2-SHA256 password hashing (self-describing
+  `pbkdf2$iter$salt$hash` string so params travel with the hash) + HS256 JWT sessions (30-day, signed
+  with `SESSION_SECRET`; rotating the secret is the break-glass revoke). `authenticate(request)` pulls
+  the bearer token and verifies it — **identity is always derived from the signed token, never trusted
+  from the body.**
+- `src/db.ts` — all D1 queries. `src/handlers.ts` — `/auth/signup`, `/auth/login`, `/auth/me`,
+  `GET/PUT /state`. `src/http.ts` — shared CORS (now allows `Authorization`) + `json()`, factored out
+  of `index.ts`. `index.ts` gained a small path router in `fetch` and the coach became `handleCoach()`;
+  its identity line now prefers `session.sub` over `body.userId`. Login verifies against a dummy hash on
+  the user-not-found path so timing doesn't leak which emails are registered.
+- `src/access.ts` `isEntitled` extended: an **active subscription** on the account (`sub_status ==
+  'active'` in D1) grants coach access outright, else it falls back to the existing KV invite allowlist.
+  A device UUID never matches a `users` row, so this quietly no-ops for anonymous callers. When billing
+  lands, writing `sub_status='active'` is all it takes to entitle a user. (`REQUIRE_ALLOWLIST` is still
+  `"true"`, so a brand-new free account correctly sees the locked coach until subscribed/allowlisted —
+  that's the intended paid-product behaviour, and the allowlist keys on **account id** now, not device.)
+
+Client (`src/`):
+- `state/auth.ts` — token/account persistence (own localStorage keys, **not** in the synced blob, same
+  reasoning as `deviceId`), `signup`/`login`/`fetchMe`, friendly error mapping. `AUTH_CONFIGURED ===
+  COACH_CONFIGURED` (same Worker URL, `VITE_COACH_API_URL`) — **no new env var.** When unconfigured the
+  whole account layer is inert and the app runs anonymous/local-only exactly as before, which is what
+  keeps a no-backend build (and the current deployment pre-URL) working as a plain PWA.
+- `state/AuthContext.ts` + `components/AuthGate.tsx` (wraps `<App>` in `main.tsx`) + `components/
+  LoginScreen.tsx`. Gate logic: not configured → app directly; stored token → show app on cached account
+  immediately and revalidate via `/auth/me` in the background (only a definitive `unauthorized` signs
+  out; a network failure keeps the user in — offline PWA); no token → login screen. **The `/auth/me`
+  revalidate deliberately has NO cancel-on-cleanup flag** — with the `validated` ref already deduping the
+  fetch, a cancel flag would let StrictMode's post-first-invoke cleanup discard the only fetch's result
+  and drop the account refresh (this was a real bug caught in verification: Settings showed "Free plan"
+  for a pro account until the flag was removed).
+- Sync (`state/sync.ts` + `components/SyncBoundary.tsx` + `state/useCloudSync.ts`): the whole app is one
+  localStorage blob, so sync mirrors that blob. `<SyncBoundary>` runs `reconcileOnSignIn` (pull + decide)
+  **before** `<App>` mounts, so `useApp`'s `loadInitial` reads an already-reconciled blob — no flash of
+  stale data. `useCloudSync(state)` (called in `App.tsx`) debounced-pushes (1.5s) on change and retries a
+  pending push on the `online` event. Model is **last-write-wins, single-user-across-devices** (the
+  actual use case) via a `alpha-lifts-sync-meta` record tagging the local blob with its `accountId` +
+  `dirtyAt`. That account tag is what makes cross-account privacy work: a second account signing in on the
+  same device can't see the first's data — reconcile sees the tag mismatch and adopts the new account's
+  (empty) server state instead. First sign-in with real anonymous local data carries it up as the
+  account's starting state (the migration path).
+- `components/modals/SettingsModal.tsx` — an ACCOUNT section (email, subscription status via
+  `subscriptionLabel()`, Sign out) at the top, consuming `useAuth()` directly. Sign out clears the
+  session (returns to login) but **not** the local blob — reconcile handles identity, and keeping it lets
+  the same user log back in offline.
+
+Verified live end-to-end (browser automation against local `wrangler dev` + `npm run dev`, per this
+project's usual approach): Worker routes exercised directly first (signup/login/me, state pull/push with
+version bump, plus every reject path — 409 dup, 400 short password, 401 unauthorized/bad creds, 403 bad
+origin, and case-insensitive email). Then in-browser: signup → onboarding (fresh account) → complete
+onboarding → **push** confirmed on the server (version 1, 7 days); wipe local + reload → **pull** restored
+the program (no onboarding); logout → login on a wiped device → pulled the program; account entitlement
+flips `entitled:false`→`true` when the account's `sub_status` is set to `active` (device-id path stays
+false); Settings shows the account + subscage; sign out returns to login; and a second account on the same
+device gets a clean onboarding with **zero leak** of the first account's program. `npx tsc -b`, worker
+`tsc --noEmit`, and `npm run build` all clean.
+
+**Still not built (deliberately deferred, same as the coach's payment phases):** self-service password
+reset (needs an email provider — Resend/Postmark; signup/login/sync all work without it) and actual
+billing (Stripe on web / StoreKit 2 / Play Billing) that would *write* `sub_status`. The subscription
+column + entitlement seam are in place; a billing phase only needs to flip the flag. **Deploy setup the
+owner must run once** (needs their Cloudflare account — Claude can't): `wrangler d1 create alpha-lifts-db`
+→ paste the id into `wrangler.toml` → `wrangler d1 execute alpha-lifts-db --remote --file=schema.sql` →
+`wrangler secret put SESSION_SECRET` → `wrangler deploy`. Local dev mirrors this with `--local` + a
+`SESSION_SECRET` line in `worker/.dev.vars`.

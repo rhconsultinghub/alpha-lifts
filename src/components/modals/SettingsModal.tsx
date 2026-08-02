@@ -1,8 +1,20 @@
 import { useRef, useState } from 'react';
 import type { ViewModel } from '../../state/viewModel';
+import { useAuth } from '../../state/AuthContext';
+
+/** Friendly one-liner for the account's subscription. Kept trivial on purpose — real billing
+ *  (and a Manage/Upgrade button) is a later phase; today accounts are 'free'/'none' by default,
+ *  and 'active' is set on the user row when a subscription exists. */
+function subscriptionLabel(plan: string, subStatus: string): string {
+  if (subStatus === 'active') return plan === 'pro' ? 'Pro — subscription active' : 'Subscription active';
+  if (subStatus === 'past_due') return 'Subscription past due';
+  if (subStatus === 'canceled') return 'Subscription canceled';
+  return 'Free plan';
+}
 
 export function SettingsModal({ vm }: { vm: ViewModel }) {
   const st = vm.settings;
+  const auth = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState('');
   // result of the manual "Test buzz" tap: null = untested, 'accepted' = the browser handed the
@@ -32,6 +44,32 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
           <button onClick={st.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
         <div style={{ padding: '16px 20px 24px' }}>
+          {auth.configured && auth.account && (
+            <>
+              <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>ACCOUNT</div>
+              <div style={{ background: 'rgba(255,255,255,.04)', borderRadius: 14, padding: '14px', marginBottom: 24 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ font: "600 13px 'Inter'", color: '#f5f0ea', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {auth.account.email}
+                    </div>
+                    <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.45)', marginTop: 3 }}>
+                      {subscriptionLabel(auth.account.plan, auth.account.subStatus)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={auth.logout}
+                    style={{ flexShrink: 0, font: "600 12px 'Inter'", padding: '9px 16px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.75)' }}
+                  >
+                    Sign out
+                  </button>
+                </div>
+                <div style={{ font: "400 10.5px 'Inter'", color: 'rgba(245,240,234,.35)', marginTop: 10, lineHeight: 1.5 }}>
+                  Your training is synced to this account across devices.
+                </div>
+              </div>
+            </>
+          )}
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>UNITS</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
             <button onClick={st.setKg} style={{ flex: 1, font: "700 13px 'Inter'", padding: 12, borderRadius: 12, border: 'none', background: st.unitsKgBg, color: st.unitsKgColor }}>Kilograms (kg)</button>

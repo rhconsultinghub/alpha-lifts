@@ -26,6 +26,23 @@ REQUIRE_ALLOWLIST = "true"
 # Set it as an encrypted secret instead:
 #   npx wrangler secret put ANTHROPIC_API_KEY
 # For local dev, put it in worker/.dev.vars (gitignored).
+#
+# SESSION_SECRET signs the account session tokens (src/auth.ts). Same rule — it's a secret, not
+# committed here:
+#   npx wrangler secret put SESSION_SECRET      # paste a long random string
+# For local dev, add a line to worker/.dev.vars:  SESSION_SECRET=some-long-random-dev-string
+# Rotating it invalidates every outstanding login at once (the break-glass revoke).
+
+# D1 database backing user accounts + synced state (src/db.ts, src/handlers.ts). Create it once:
+#   npx wrangler d1 create alpha-lifts-db        # prints a database_id
+# paste that id below (replacing REPLACE_WITH_D1_DATABASE_ID), then apply the schema:
+#   npx wrangler d1 execute alpha-lifts-db --remote --file=schema.sql
+# The account routes 503 ("accounts_not_configured") until DB + SESSION_SECRET are both present,
+# so the coach keeps working even before this is set up.
+[[d1_databases]]
+binding = "DB"
+database_name = "alpha-lifts-db"
+database_id = "6ad3186c-a28a-4385-98f3-4a2853aef3ac"
 
 # Per-device monthly spend cap ($1.50, see src/usage.ts). Create the namespace once with
 #   npx wrangler kv namespace create USAGE

@@ -18,7 +18,9 @@ import { vibrateRestEnd, playRestEndSound, notifyRestEnd, updateRestProgressNoti
 import type { RestContext } from './alerts';
 import { shouldFireReminder, fireReminder } from './reminders';
 
-const STORAGE_KEY = 'fitness-app-state-v1';
+// Exported so the cloud-sync layer (sync.ts) reads/writes the exact same key — the whole app
+// state is this one blob, and sync just mirrors it to the server.
+export const STORAGE_KEY = 'fitness-app-state-v1';
 
 function loadInitial(): AppState {
   const defaults = createInitialState();
