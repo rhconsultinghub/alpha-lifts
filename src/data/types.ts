@@ -260,6 +260,19 @@ export type WarmupStyle = 'Minimal' | 'Standard' | 'Cautious';
 
 export interface AppState {
   onboarded: boolean;
+  // Personalized welcome message produced by AI onboarding (or a templated fallback), kept so it
+  // can be shown again after first run (e.g. re-read from a "Your welcome" entry). Optional —
+  // absent for accounts onboarded before this existed, and cleared is fine.
+  onboardingWelcome?: string;
+  // The answers the user gave during onboarding, kept so the app "remembers" them (and a future
+  // coach context can use them). Optional/back-compat via loadInitial's shallow-merge.
+  onboardingProfile?: {
+    experience: string;
+    goal: string;
+    days: number;
+    equipment: string;
+    diet: string;
+  };
   screen: Screen;
   trainingType: TrainingType;
   dayOrder: string[];

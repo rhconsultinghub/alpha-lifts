@@ -903,6 +903,13 @@ export function buildViewModel(state: AppState, actions: Actions) {
 
   return {
     needsOnboarding: !s.onboarded,
+    // Guided onboarding needs just these three: the resolved-choice completion action, plus the
+    // current units and their setter (units is picked as one of the first onboarding steps).
+    onboarding: {
+      finish: actions.finishOnboarding,
+      units: s.units,
+      setUnits: actions.setUnits
+    },
     isProgram: s.screen === 'program',
     isDayView: s.screen === 'dayView',
     isDayBuilder: s.screen === 'dayBuilder',

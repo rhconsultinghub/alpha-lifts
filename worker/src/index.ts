@@ -14,6 +14,7 @@ import { isEntitled } from './access';
 import { checkBudget, costMicroUsd, recordSpend } from './usage';
 import { corsHeaders, json } from './http';
 import { authenticate } from './auth';
+import { handleOnboard } from './onboard';
 import {
   handleGetState,
   handleLogin,
@@ -89,6 +90,7 @@ export default {
     if (path === '/auth/me' && method === 'GET') return handleMe(request, env, cors);
     if (path === '/state' && method === 'GET') return handleGetState(request, env, cors);
     if (path === '/state' && method === 'PUT') return handlePutState(request, env, cors);
+    if (path === '/onboard' && method === 'POST') return handleOnboard(request, env, cors);
 
     // The coach lives at POST / (unchanged contract).
     if (path !== '/') return json({ error: 'Not found' }, 404, cors);

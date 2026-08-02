@@ -417,6 +417,37 @@ export function useApp() {
     });
   }, []);
 
+  // AI/guided onboarding completion. Unlike completeOnboarding (which reads the newProgramWizard
+  // state), this takes the resolved choice directly from the guided flow — the split/style the AI
+  // (or the deterministic fallback) picked — builds the program the same way, and stashes the
+  // welcome + answers so the app remembers who this plan was built for.
+  const finishOnboarding = useCallback(
+    (choice: { name: string; trainingType: TrainingType; splitId: string; welcome: string; profile: AppState['onboardingProfile'] }) => {
+      setState(s => {
+        const preset = SPLIT_PRESETS.find(p => p.id === choice.splitId) || SPLIT_PRESETS[0];
+        const built = buildProgramFromPreset(preset, choice.trainingType, 'recommended');
+        const newId = 'prog_' + Date.now();
+        return {
+          ...s,
+          onboarded: true,
+          onboardingWelcome: choice.welcome,
+          onboardingProfile: choice.profile,
+          activeProgramId: newId,
+          programName: choice.name.trim() || 'My Program',
+          trainingType: choice.trainingType,
+          program: built.days,
+          dayOrder: built.dayOrder,
+          startedAt: new Date().toISOString(),
+          weekNumber: 1,
+          weekStartedAt: new Date().toISOString(),
+          newProgramWizard: null,
+          screen: 'program' as Screen
+        };
+      });
+    },
+    []
+  );
+
   const toggleSkipDay = useCallback((dayKey: string) => {
     setState(s => {
       const program = JSON.parse(JSON.stringify(s.program));
@@ -1589,7 +1620,7 @@ export function useApp() {
       switchProgram, newProgram, requestRemoveProgram, renameSavedProgram,
       openNewProgramWizard, closeNewProgramWizard, setWizardField, setWizardPrefill, selectWizardSplit,
       addWizardCustomDay, removeWizardCustomDay, setWizardCustomDayField, createProgramFromWizard,
-      completeOnboarding,
+      completeOnboarding, finishOnboarding,
       setBodyView, openBodyModal, closeBodyModal, openDetail, closeDetail, openQuickEdit, closeQuickEdit,
       openMuscleDrill, closeMuscleDrill, openWarmupDetail, closeWarmupDetail,
       openLibraryDetail, closeLibraryDetail, setExerciseSearchQuery, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,

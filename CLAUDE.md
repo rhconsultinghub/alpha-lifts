@@ -1678,3 +1678,54 @@ sees the locked coach until subscribed/allowlisted.
   still present (installability intact), and the workbox-window update/reload logic is now in the app
   bundle. `npx tsc -b` + `npm run build` clean. Not device-tested (that's the owner's phone), but the
   mechanism is the standard vite-plugin-pwa autoUpdate path.
+
+(40) **AI-personalized onboarding.** Replaced the single dense first-run config form with a guided,
+one-question-at-a-time flow that ends in an AI-built plan + a personal welcome, so a new user feels the
+app was made for them. Chosen (via AskUserQuestion) over cheaper options: a real one-time coach call
+builds the plan; the questions asked are experience, primary goal, days/week, equipment/location, and a
+light "how are you eating" (nutrition is welcome-only guidance, NOT a tracking feature — the user was
+explicit it's not a nutrition app "yet").
+
+Backend — `worker/src/onboard.ts`, routed as `POST /onboard`:
+- Its OWN endpoint, not the coach route, because it must run **free and before the paywall** (a
+  brand-new account has no subscription). Abuse-bounded by requiring a valid session (a real signed-up
+  account — identity from the token, never the body) AND a one-per-account KV flag `onboarded:<userId>`
+  set only after a valid plan (so a failed attempt doesn't burn the one shot). The client also skips the
+  route entirely once the account's synced state says onboarded, so it's hit only for genuinely new
+  accounts.
+- One Anthropic call, output **forced through a single tool** (`create_onboarding_plan`, `tool_choice`
+  pinned to it) whose fields are enum-constrained to the same `SPLIT_IDS`/`TRAINING_TYPES` the coach's
+  `propose_build_program` uses — so the AI only *chooses* a split + style (never invents exercises) and
+  the welcome rides in the tool input (a forced tool call suppresses free text). Dedicated onboarding
+  system prompt with the same nutrition guardrails as `prompt.ts` (everyday guidance yes; no
+  very-low-calorie / ED-adjacent / supplement-dose advice). Malformed output → 502 so the client falls
+  back rather than shipping junk.
+
+Client:
+- `state/onboarding.ts` — `generateOnboardingPlan(answers)` POSTs to `/onboard` with the bearer token
+  and, on ANY failure (not configured, offline, 5xx, already-onboarded), returns a **deterministic
+  fallback**: maps answers → split/style locally (mirroring the AI's instructions — beginners stay on
+  recoverable full-body/upper-lower even if they picked lots of days) plus a warm templated welcome with
+  a goal-appropriate nutrition tip. So onboarding ALWAYS completes and always ends personal, even with no
+  backend. Result carries `source: 'ai' | 'fallback'`.
+- `components/OnboardingScreen.tsx` — fully rewritten as a step machine (intro → basics(name+units) →
+  experience → goal → days → equipment → diet → generating → reveal) with a progress bar, back button,
+  emoji option cards that auto-advance on tap, an animated "building your plan" step, and a reveal with a
+  plan-summary chip row + the welcome message. No longer touches `newProgramWizard`; it manages its own
+  answers and calls `vm.onboarding.finish(choice)`.
+- `finishOnboarding(choice)` in `useApp.ts` (exposed via `vm.onboarding.finish`) — builds the program
+  from the chosen split via the SAME `buildProgramFromPreset` the wizard uses, sets `onboarded: true`, and
+  persists two new optional `AppState` fields: `onboardingWelcome` (string) and `onboardingProfile`
+  (the answers), so the app remembers who the plan was built for (and a future coach context can use them).
+  Both optional → `loadInitial`'s shallow-merge carries old accounts through with no migration.
+
+Verified live (local `wrangler dev` + `npm run dev`): `/onboard` returns 401 without a token and a clean
+502 with one (local `.dev.vars` has a placeholder Anthropic key, so the real call fails and the client
+falls back — exercising the fallback path exactly). Full in-browser flow as a fresh signup: every step
+advanced, the reveal showed the correct fallback plan for the answers (4 days + intermediate → Upper/Lower;
+goal muscle → Progressive Overload; lb units; "eating to build" nutrition tip; "Ryan's Program"), and
+Enter built a real 7-slot program with `onboarded: true` and the welcome + profile persisted, landing on
+the program screen. `npx tsc -b`, worker `tsc --noEmit`, `npm run build` all clean. The actual AI
+generation wasn't exercised locally (no real key in dev) — it mirrors the proven coach call structure and
+runs in production where `ANTHROPIC_API_KEY` is set; there it produces the tailored plan + AI-written
+welcome, with the deterministic fallback as the safety net.
