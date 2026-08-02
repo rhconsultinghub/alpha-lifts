@@ -72,6 +72,13 @@ export function LoginScreen({ onSuccess }: { onSuccess: (token: string, account:
       >
         <div style={{ width: '100%', maxWidth: 380, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 34 }}>
+            <img
+              src={`${import.meta.env.BASE_URL}icon-192.png`}
+              alt="Alpha Lifts"
+              width={84}
+              height={84}
+              style={{ display: 'block', margin: '0 auto 16px', borderRadius: 20, boxShadow: '0 8px 24px rgba(0,0,0,.35)' }}
+            />
             <div className="num" style={{ fontSize: 34, fontWeight: 800, color: TEXT, letterSpacing: '-.02em' }}>
               Alpha Lifts
             </div>
