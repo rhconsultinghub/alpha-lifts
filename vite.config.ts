@@ -16,6 +16,12 @@ export default defineConfig(({ command }) => ({
       srcDir: 'src',
       filename: 'sw.ts',
       registerType: 'autoUpdate',
+      // Register the SW ourselves in main.tsx (via virtual:pwa-register) instead of the plugin's
+      // auto-injected script. The injected one only *registered* the worker and never reloaded the
+      // page when a new version activated, so an installed PWA kept serving the old cached bundle
+      // until it was reinstalled. The manual registerSW() (autoUpdate) reloads on new-SW takeover
+      // and lets us add a foreground update check. See main.tsx.
+      injectRegister: false,
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Alpha Lifts',

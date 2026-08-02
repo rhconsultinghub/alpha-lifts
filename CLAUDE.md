@@ -218,7 +218,10 @@ Static PWA on GitHub Pages, project site (not a custom domain), auto-deployed vi
   meaningful sense (it ends up in the JS bundle); the Worker's origin allowlist is the real
   control. Unset is supported and ships a "not configured" coach tab. See phase 33 for the
   scope trap that makes a wrong placement here almost invisible.
-- `vite-plugin-pwa` generates the manifest + service worker (`registerType: 'autoUpdate'`).
+- `vite-plugin-pwa` generates the manifest + service worker (`registerType: 'autoUpdate'`, custom
+  `src/sw.ts` via `injectManifest`). SW registration is **manual** (`injectRegister: false` +
+  `registerSW()` in `main.tsx`), not the plugin's injected script — see phase 39 for why (the injected
+  one never reloaded on update, so installed PWAs needed a reinstall to update).
 - Icons in `public/`: `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`,
   `apple-touch-icon.png`, `favicon.svg` — all a flexed-arm-holding-a-dumbbell glyph, single
   accent orange (`#f0752f`) on a dark rounded-square gradient background (`#241d15` → `#120f0a`).
@@ -1635,3 +1638,43 @@ owner must run once** (needs their Cloudflare account — Claude can't): `wrangl
 → paste the id into `wrangler.toml` → `wrangler d1 execute alpha-lifts-db --remote --file=schema.sql` →
 `wrangler secret put SESSION_SECRET` → `wrangler deploy`. Local dev mirrors this with `--local` + a
 `SESSION_SECRET` line in `worker/.dev.vars`.
+
+**Deploy setup was completed** the same session (D1 `alpha-lifts-db` created — id
+`6ad3186c-a28a-4385-98f3-4a2853aef3ac` committed in `wrangler.toml`, remote schema applied, and the
+owner set `SESSION_SECRET` + ran `wrangler deploy`). To grant a specific account coach access,
+recognize them by email and flip the flag directly (no id needed from the app):
+`wrangler d1 execute alpha-lifts-db --remote --command "UPDATE users SET sub_status='active', plan='pro'
+WHERE email='...';"` — or add `allow:<account-id>` to the `USAGE` KV namespace (get the id via a
+`SELECT id, email FROM users`). `REQUIRE_ALLOWLIST` is left `"true"`, so a new free account correctly
+sees the locked coach until subscribed/allowlisted.
+
+(39) two same-session follow-ups to phase 38:
+
+- **Removed the in-app Coach/account id display.** The Coach tab and the locked screen used to show a
+  "Coach ID: …" with a Copy button (for sharing to be allowlisted). After phase 5 that footer was showing
+  the wrong id anyway — the *device* UUID, while the gate now checks the *account* id from the login
+  token — and the owner grants access by email on the backend, so surfacing any id in the app is
+  pointless. Dropped `CoachIdFooter` and the "share your Coach ID" copy from both places, removed the
+  now-unused `coach.deviceId` viewModel field (`deviceId()` the function stays — it's still the
+  anonymous-fallback `userId` sent in coach requests). The locked screen now just says access is enabled
+  per account. If access-granting ever needs to be self-serve again, surface `auth.account.id` (the real
+  gated id), not `deviceId()`.
+
+- **Fixed PWA auto-update so a new deploy no longer needs an uninstall/reinstall.** Root cause: with
+  `strategies: 'injectManifest'` the plugin's auto-injected `registerSW.js` was the bare
+  `navigator.serviceWorker.register(...)` — it registered the worker but had **no reload-on-new-SW**
+  handler, so even though `sw.ts` calls `self.skipWaiting()`/`clientsClaim()`, the already-open page kept
+  running the *old* precached bundle; combined with Android not re-checking for a new SW on
+  background-resume, only a reinstall reliably updated. Fix: `injectRegister: false` in `vite.config.ts`
+  and register manually in `main.tsx` via `registerSW()` from `virtual:pwa-register` (types added in
+  `src/vite-env.d.ts` — `vite/client` + `vite-plugin-pwa/client`). With `registerType: 'autoUpdate'`,
+  `registerSW()` reloads the page as soon as a new SW takes control (workbox-window's
+  `updatefound`/`controllerchange` lifecycle, now bundled), and `onRegisteredSW` calls
+  `registration.update()` on every `visibilitychange`→visible so a resumed PWA re-checks the moment it's
+  foregrounded — an unobtrusive point to reload (the user is arriving, not mid-set), and app state
+  survives a reload anyway (persisted + synced). **Bootstrap caveat:** the device still running the old
+  bare registration needs this version installed once (a final reinstall); every update after that applies
+  automatically. Verified `injectRegister: false` dropped `dist/registerSW.js`, the manifest link is
+  still present (installability intact), and the workbox-window update/reload logic is now in the app
+  bundle. `npx tsc -b` + `npm run build` clean. Not device-tested (that's the owner's phone), but the
+  mechanism is the standard vite-plugin-pwa autoUpdate path.
