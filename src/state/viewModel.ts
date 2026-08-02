@@ -4,7 +4,7 @@ import { WARMUP_LIBRARY } from '../data/warmups';
 import { ACHIEVEMENT_FAMILIES, CATEGORY_LABELS, TOTAL_POSSIBLE_POINTS, TOTAL_TIERS, type AchievementCategory } from '../data/achievements';
 import type { AppState, HistoryEntry, Muscle, TrainingType } from '../data/types';
 import { testVibration } from './alerts';
-import { COACH_CONFIGURED, deviceId } from './coach';
+import { COACH_CONFIGURED } from './coach';
 import { deloadPlan, activeDeloadPct, backstopFor, DELOAD_BACKSTOP_WEEKS } from './deload';
 import type { Actions } from './useApp';
 import {
@@ -862,10 +862,6 @@ export function buildViewModel(state: AppState, actions: Actions) {
     // renders as the chat, since the real send is gated server-side anyway.
     locked: s.coachEntitlement === 'locked',
     refreshEntitlement: actions.refreshCoachEntitlement,
-    // Stable per-device id, shown at the bottom of the Coach tab so a user can share it to be
-    // added to the access allowlist (worker/src/access.ts). Not secret — it's the same id the
-    // client already sends as `userId`.
-    deviceId: deviceId(),
     messages: s.coachMessages.map(m => ({
       id: m.id,
       text: m.content,

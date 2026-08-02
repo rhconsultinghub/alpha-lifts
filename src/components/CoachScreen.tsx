@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { ViewModel } from '../state/viewModel';
 
 const ACCENT = 'oklch(0.65 0.19 35)';
@@ -36,7 +36,7 @@ export function CoachScreen({ vm }: { vm: ViewModel }) {
   }
 
   if (c.locked) {
-    return <CoachLockedScreen id={c.deviceId} />;
+    return <CoachLockedScreen />;
   }
 
   return (
@@ -130,33 +130,6 @@ export function CoachScreen({ vm }: { vm: ViewModel }) {
           Send
         </button>
       </div>
-
-      <CoachIdFooter id={c.deviceId} />
-    </div>
-  );
-}
-
-// Shows the device's Coach ID so it can be shared to be added to the access allowlist. Purely
-// informational (and only useful once the allowlist is enforced) — kept small and muted.
-function CoachIdFooter({ id }: { id: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard?.writeText(id).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }).catch(() => {});
-  };
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, font: "400 11px 'Inter'", color: 'rgba(245,240,234,.35)' }}>
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        Coach ID: {id}
-      </span>
-      <button
-        onClick={copy}
-        style={{ flexShrink: 0, background: 'none', border: '1px solid rgba(255,255,255,.12)', color: 'rgba(245,240,234,.55)', font: "500 10px 'Inter'", padding: '3px 9px', borderRadius: 100 }}
-      >
-        {copied ? 'Copied' : 'Copy'}
-      </button>
     </div>
   );
 }
@@ -166,12 +139,13 @@ function CoachIdFooter({ id }: { id: string }) {
 const PREMIUM_PRICE = '$5';
 const PREMIUM_PERIOD = 'month';
 
-// Shown when the Worker reports this device isn't entitled to the coach. This is the premium
+// Shown when the Worker reports this account isn't entitled to the coach. This is the premium
 // upsell / "you need to subscribe" screen. The Subscribe button shows the price but is inert for
-// now — there's no checkout yet, so the actionable path in this private phase is sharing the Coach
-// ID to be approved on the allowlist. When payments land, wire the button's onClick to checkout
-// and drop the "Getting access" block. The rest of the app stays fully usable — only this is gated.
-function CoachLockedScreen({ id }: { id: string }) {
+// now — there's no checkout yet; access in this private phase is granted per account on the
+// backend (an active subscription or the KV allowlist, keyed on the account id from the login
+// token). When payments land, wire the button's onClick to checkout. The rest of the app stays
+// fully usable — only this is gated.
+function CoachLockedScreen() {
   const FEATURES = [
     'Ask about your lifts, form, and recovery',
     'Get your stats and progress explained',
@@ -218,12 +192,10 @@ function CoachLockedScreen({ id }: { id: string }) {
         </div>
 
         <div style={{ marginTop: 20, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 18 }}>
-          <div style={{ font: "600 13px 'Inter'", color: '#f5f0ea', marginBottom: 6 }}>Get access now</div>
-          <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.5)', lineHeight: 1.5, marginBottom: 12 }}>
-            Subscriptions aren’t open yet — the coach is in private testing. Share the Coach ID below
-            to be added to the access list.
+          <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.5)', lineHeight: 1.5 }}>
+            Subscriptions aren’t open yet — the coach is in private testing. Access is enabled per
+            account; you’ll be notified when yours is turned on.
           </div>
-          <CoachIdFooter id={id} />
         </div>
       </div>
     </div>
