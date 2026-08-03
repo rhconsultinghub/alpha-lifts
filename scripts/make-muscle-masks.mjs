@@ -76,16 +76,31 @@ const VIEWS = {
       { from: [220, 197], to: [262, 197] },   // sternal notch: seal neck V off the chest/sternum strip
       { from: [54, 356], to: [102, 356] },    // L outer elbow: biceps compartment leaks down the brachioradialis strip
       { from: [380, 356], to: [428, 356] },   // R mirror
-      { from: [25, 447], to: [82, 447] },     // L wrist: forearm compartments run into the hand
-      { from: [400, 447], to: [457, 447] },   // R mirror
+      { from: [22, 470], to: [84, 444] },     // L wrist: forearm compartments run into the hand; diagonal follows the drawn wrist band
+      { from: [398, 444], to: [460, 470] },   // R mirror
       { from: [128, 694], to: [218, 694] },   // L knee: central thigh mass runs through the knee into the shin
       { from: [264, 694], to: [354, 694] },   // R mirror
       { from: [148, 808], to: [218, 808] },   // L ankle: shin muscle mass runs down into the ankle/tendon area
       { from: [264, 808], to: [334, 808] },   // R mirror
     ],
     seeds: [
-      { muscle: 'Calves', points: [[192, 691], [288, 690], [189, 801], [291, 800], [170, 750], [311, 750]] }, // tibialis/peroneal strips + shin mass
-      { muscle: 'Forearms', points: [[94, 396], [385, 394], [78, 343], [403, 343]] },  // upper forearm strips + brachioradialis origin above the elbow
+      // tibialis/peroneal strips + shin mass, plus the taper compartments above/below the knee
+      // and ankle cuts so the shading ends on drawn contours rather than the flat cut lines,
+      // plus the outer-shin sliver
+      { muscle: 'Calves', points: [
+        [192, 691], [288, 690], [189, 801], [291, 800], [170, 750], [311, 750],
+        [148, 754], [332, 754], [194, 684], [286, 684], [156, 675], [324, 675],
+        [188, 702], [294, 702], [170, 843], [310, 842], [191, 818], [288, 819], [188, 837], [292, 836],
+      ] },
+      // upper forearm strips + brachioradialis origin above the elbow + medial pronator/flexor
+      // origin block + small edge slivers + strip tips near the wrist
+      { muscle: 'Forearms', points: [
+        [94, 396], [385, 394], [78, 343], [403, 343],
+        // NOTE: no right-side twin for [93,362] — the art is asymmetric there and the mirror
+        // point lands inside the biceps compartment (a seed would steal the whole biceps)
+        [55, 423], [426, 425], [93, 362],
+        [86, 436], [395, 438], [81, 433], [401, 433],
+      ] },
       { muscle: 'Quads', points: [[206, 489], [275, 488]] },    // vastus medialis inner strips, 32-36%
     ],
     defs: FRONT_DEFS,
@@ -100,17 +115,18 @@ const VIEWS = {
       { from: [0, 148], to: [469, 148] },
       { from: [152, 398], to: [178, 418] },   // L iliac crest: low-back band wraps around the glute onto the hip
       { from: [292, 418], to: [318, 398] },   // R mirror
-      { from: [20, 452], to: [80, 452] },     // L wrist: forearm compartments run into the hand
-      { from: [390, 452], to: [450, 452] },   // R mirror
+      { from: [18, 474], to: [82, 448] },     // L wrist: forearm compartments run into the hand; diagonal follows the drawn wrist band
+      { from: [388, 448], to: [452, 474] },   // R mirror
       { from: [58, 362], to: [98, 362] },     // L outer elbow: outer arm strip spans triceps → forearm across the joint
       { from: [372, 362], to: [412, 362] },   // R mirror
       { from: [296, 558], to: [338, 558] },   // R gluteal fold: glute-edge band is fused to the hamstring (left side is naturally separate)
     ],
     seeds: [
       { muscle: 'Hamstrings', points: [[290, 590]] },                    // R lateral hamstring, 48% vs the 50% bar
-      { muscle: 'Forearms', points: [[66, 348], [404, 346]] },           // brachioradialis origin slivers above the elbow
+      // brachioradialis origin slivers above the elbow + the olecranon/anconeus notch below it
+      { muscle: 'Forearms', points: [[66, 348], [404, 346], [99, 380], [371, 380], [99, 399], [371, 399]] },
       // scapula pockets (infraspinatus/teres/supraspinatus) + lat bottom tips — Back in this app's taxonomy
-      { muscle: 'Back', points: [[168, 229], [292, 221], [319, 220], [316, 245], [216, 383], [168, 387], [303, 387], [176, 183], [180, 190], [296, 183], [292, 190]] },
+      { muscle: 'Back', points: [[168, 229], [292, 221], [319, 220], [316, 245], [216, 383], [168, 387], [303, 387], [176, 183], [296, 183], [292, 190]] },
       { muscle: 'Rear Delts', points: [[119, 259], [352, 259]] },        // armpit pocket below the delt cap (symmetric w/ auto-assigned R side)
     ],
     defs: BACK_DEFS,
