@@ -46,6 +46,7 @@ export function createInitialState(): AppState {
     newProgramWizard: { name: '', trainingType: 'progressive_overload', splitId: 'ppl6', customDays: [], prefill: 'recommended' },
     selectedProgressEx: undefined,
     progressPickerOpen: false,
+    muscleBalanceCollapsed: true,
     compareLiftIds: [],
     compareLiftPickerOpen: false,
     compareLiftLimitHit: false,
@@ -78,6 +79,7 @@ export function createInitialState(): AppState {
     lastReminderFiredDate: null,
 
     pendingBackupImport: null,
+    pendingPlanImport: null,
 
     confirmResetApp: false,
 

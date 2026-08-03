@@ -90,6 +90,17 @@ export interface SavedProgram {
   weekStartedAt?: string;
 }
 
+// A workout plan parsed from an import (JSON file or AI paste), staged in AppState.pendingPlanImport
+// until the user confirms. Carries the program's days + any custom exercises they reference, but no
+// history/settings (that's the full backup's job). See src/data/planIO.ts.
+export interface ParsedPlan {
+  name: string;
+  trainingType: TrainingType;
+  dayOrder: string[];
+  days: ProgramDays;
+  customExercises: Record<string, ExerciseDef>;
+}
+
 export interface WorkoutSetRow {
   weight: number;
   reps: number;
@@ -349,6 +360,10 @@ export interface AppState {
   // ---------- Progress tab: weight vs. estimated-1RM chart metric ----------
   progressMetric: 'weight' | 'e1rm';
 
+  // Program screen: whether the Muscle Balance bars are collapsed (default true — collapsed —
+  // so the training-days list sits near the top; undefined is treated as collapsed too).
+  muscleBalanceCollapsed?: boolean;
+
   // ---------- body-weight tracking ----------
   bodyWeightLog: { date: string; weightKg: number }[];
   bodyWeightInput: string;
@@ -389,6 +404,11 @@ export interface AppState {
 
   // ---------- backup export/import ----------
   pendingBackupImport: Partial<AppState> | null;
+
+  // ---------- workout-plan (program) import/export ----------
+  // A parsed plan staged behind a confirm before it swaps in as the active program (the current
+  // program is stashed into savedPrograms, not wiped). Optional/back-compat via shallow-merge.
+  pendingPlanImport?: ParsedPlan | null;
 
   // ---------- reset ----------
   confirmResetApp: boolean;

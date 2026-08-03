@@ -15,6 +15,7 @@ import { checkBudget, costMicroUsd, recordSpend } from './usage';
 import { corsHeaders, json } from './http';
 import { authenticate } from './auth';
 import { handleOnboard } from './onboard';
+import { handleParsePlan } from './parsePlan';
 import {
   handleGetState,
   handleLogin,
@@ -106,6 +107,7 @@ export default {
     if (path === '/state' && method === 'GET') return handleGetState(request, env, cors);
     if (path === '/state' && method === 'PUT') return handlePutState(request, env, cors);
     if (path === '/onboard' && method === 'POST') return handleOnboard(request, env, cors);
+    if (path === '/parse-plan' && method === 'POST') return handleParsePlan(request, env, cors);
 
     // The coach lives at POST / (unchanged contract).
     if (path !== '/') return json({ error: 'Not found' }, 404, cors);

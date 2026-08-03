@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { ViewModel } from '../../state/viewModel';
 import { useAuth } from '../../state/AuthContext';
+import { parsePlanFile } from '../../data/planIO';
 
 /** Friendly one-liner for the account's subscription. Kept trivial on purpose — real billing
  *  (and a Manage/Upgrade button) is a later phase; today accounts are 'free'/'none' by default,
@@ -16,7 +17,11 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
   const st = vm.settings;
   const auth = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const planFileRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState('');
+  const [planError, setPlanError] = useState('');
+  const [aiText, setAiText] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
   // result of the manual "Test buzz" tap: null = untested, 'accepted' = the browser handed the
   // request to the OS, 'blocked' = the browser refused it outright. See alerts.ts#testVibration.
   const [vibeTest, setVibeTest] = useState<null | 'accepted' | 'blocked'>(null);
@@ -33,6 +38,35 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
       st.stageBackupImport(parsed);
     } catch {
       setImportError('Could not read that file — make sure it’s an Alpha Lifts backup JSON file.');
+    }
+  };
+
+  const handlePlanFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const plan = parsePlanFile(JSON.parse(await file.text()));
+      setPlanError('');
+      st.stagePlanImport(plan);
+    } catch (err) {
+      setPlanError(err instanceof Error ? err.message : 'Could not read that plan file.');
+    }
+  };
+
+  const handleAiParse = async () => {
+    const text = aiText.trim();
+    if (!text || aiBusy) return;
+    setAiBusy(true);
+    setPlanError('');
+    try {
+      const plan = await st.parsePlanText(text);
+      st.stagePlanImport(plan);
+      setAiText('');
+    } catch (err) {
+      setPlanError(err instanceof Error ? err.message : 'Could not read that plan.');
+    } finally {
+      setAiBusy(false);
     }
   };
 
@@ -260,6 +294,44 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
                 <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                   <button onClick={st.confirmBackupImport} style={{ flex: 1, font: "700 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: 'oklch(0.65 0.19 35)', color: '#0d0c0b' }}>Replace My Data</button>
                   <button onClick={st.cancelBackupImport} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.7)' }}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '24px 0 10px' }}>WORKOUT PLAN</div>
+          <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginBottom: 10 }}>Export your current plan to share it or move it to another account, or import one. Importing switches to the new plan and saves your current one.</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+            <button onClick={st.exportPlan} style={{ flex: 1, font: "700 12px 'Inter'", padding: 12, borderRadius: 12, border: 'none', background: 'rgba(255,255,255,.08)', color: '#f5f0ea' }}>⬇ Export Plan</button>
+            <button onClick={() => planFileRef.current?.click()} style={{ flex: 1, font: "700 12px 'Inter'", padding: 12, borderRadius: 12, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.85)' }}>⬆ Import Plan</button>
+            <input ref={planFileRef} type="file" accept="application/json" onChange={handlePlanFileChosen} style={{ display: 'none' }} />
+          </div>
+
+          {st.aiParseAvailable && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ font: "600 11px 'Inter'", color: 'oklch(0.72 0.17 35)', marginBottom: 6 }}>✨ Paste a plan (Pro)</div>
+              <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginBottom: 8 }}>Paste a plan from anywhere — notes, a spreadsheet, a coach — and AI turns it into a plan you can import.</div>
+              <textarea
+                value={aiText}
+                onChange={e => setAiText(e.target.value)}
+                placeholder={'e.g.\nMonday – Push: Bench 4x8, Overhead Press 3x10...\nWednesday – Pull: Deadlift 3x5, Rows 4x10...'}
+                rows={4}
+                style={{ width: '100%', resize: 'vertical', font: "400 12px/1.5 'Inter'", color: '#f5f0ea', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.12)', borderRadius: 10, padding: 10, marginBottom: 8 }}
+              />
+              <button onClick={handleAiParse} disabled={aiBusy || !aiText.trim()} style={{ width: '100%', font: "700 12px 'Inter'", padding: 12, borderRadius: 12, border: 'none', background: aiBusy || !aiText.trim() ? 'rgba(255,255,255,.08)' : 'oklch(0.65 0.19 35)', color: aiBusy || !aiText.trim() ? 'rgba(245,240,234,.4)' : '#0d0c0b' }}>{aiBusy ? 'Reading your plan…' : 'Turn into a plan'}</button>
+            </div>
+          )}
+          {planError && (
+            <div style={{ font: "500 11px 'Inter'", color: 'oklch(0.72 0.17 35)', marginTop: 8 }}>{planError}</div>
+          )}
+          {st.pendingPlanImport && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: 14, borderRadius: 14, background: 'oklch(0.65 0.19 35 / 0.12)', border: '1px solid oklch(0.65 0.19 35 / 0.4)', marginTop: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ font: "600 12px 'Inter'", color: 'oklch(0.8 0.15 35)' }}>Import “{st.planImportName}”?</div>
+                <div style={{ font: "400 12px/1.4 'Inter'", color: 'rgba(245,240,234,.75)', marginTop: 2 }}>This adds it as a new plan and switches to it. Your current plan is saved and stays available.</div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  <button onClick={st.confirmPlanImport} style={{ flex: 1, font: "700 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: 'oklch(0.65 0.19 35)', color: '#0d0c0b' }}>Import Plan</button>
+                  <button onClick={st.cancelPlanImport} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.7)' }}>Cancel</button>
                 </div>
               </div>
             </div>

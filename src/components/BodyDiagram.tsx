@@ -17,7 +17,7 @@
 //      paths would double-darken where they cross; subpaths of a single path fill uniformly.
 // If the reference images ever change, redo the same composite-and-check loop (throwaway scripts
 // in a `.verify/` dir, viewed with the Read tool) rather than eyeballing coordinates.
-const ACCENT_BASE = 'oklch(0.65 0.19 35';
+import { accentAlpha } from '../theme';
 
 const FRONT_W = 482, FRONT_H = 973;
 const BACK_W = 470, BACK_H = 966;
@@ -88,7 +88,7 @@ const BACK_PATHS = buildMusclePaths(BACK_DEFS, BACK_W);
 export function fillForMuscle(muscle: string | null, ranks: Record<string, number>): string {
   if (!muscle || !(muscle in ranks)) return 'transparent';
   const opacity = 0.28 + 0.6 * (ranks[muscle] || 0);
-  return ACCENT_BASE + ' / ' + opacity.toFixed(2) + ')';
+  return accentAlpha(opacity);
 }
 
 export function BodyDiagram({ view, ranks, width = 34, height = 63 }: {

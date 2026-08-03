@@ -1,5 +1,6 @@
-import type { AppState, CoachProposal, CoachEntitlement, TrainingType, Screen } from '../data/types';
-import { EXLIB } from '../data/exercises';
+import type { AppState, CoachProposal, CoachEntitlement, TrainingType, Screen, ExerciseDef, ProgramDays, ProgramExercise, Muscle, ParsedPlan } from '../data/types';
+import { EXLIB, EQUIP_CATALOG, MUSCLE_TARGETS } from '../data/exercises';
+import { mkEx, slugify } from '../data/program';
 import {
   muscleBarsList, fmtWeight, completedWorkoutCount, bestEverStreak, totalPRCount,
   lifetimeVolumeKg, bestSessionVolumeKg, estimatedOneRepMax
@@ -528,4 +529,117 @@ export async function askCoach(messages: CoachMessage[], context: CoachContext):
   if (!reply) return { ok: false, error: 'The coach came back empty. Try asking again.' };
 
   return { ok: true, reply: data.truncated ? `${reply}…` : reply, rawProposals: proposals };
+}
+
+// ---------- AI plan parsing (Pro-gated /parse-plan route) ----------
+
+const TRAINING_TYPES: TrainingType[] = ['progressive_overload', 'strength', 'hit', 'endurance', 'general'];
+const PARSE_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+interface RawPlanExercise { name?: string; muscle?: string; equipment?: string; sets?: number; reps?: number }
+interface RawPlanDay { label?: string; exercises?: RawPlanExercise[] }
+interface RawPlan { program_name?: string; training_type?: string; days?: RawPlanDay[]; error?: string }
+
+function clampInt(v: unknown, lo: number, hi: number, fallback: number): number {
+  const n = typeof v === 'number' ? Math.round(v) : parseInt(String(v), 10);
+  return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : fallback;
+}
+
+/**
+ * Send pasted free-text to the Pro-gated `/parse-plan` Worker route and turn the structured result
+ * into a ParsedPlan the import flow can stage. Exercises are resolved to real library ids where a
+ * name matches; anything unmatched becomes a lightweight custom ExerciseDef (built from the model's
+ * muscle/equipment guess). Throws a friendly Error on any failure so the caller can surface it.
+ */
+export async function parsePlanText(text: string, fallbackType: TrainingType): Promise<ParsedPlan> {
+  if (!COACH_CONFIGURED) throw new Error('AI plan reading isn’t available in this build.');
+
+  let res: Response;
+  try {
+    res = await fetch(`${COACH_API_URL}/parse-plan`, {
+      method: 'POST',
+      headers: coachHeaders(),
+      body: JSON.stringify({ text, catalog: buildCatalog(), userId: deviceId() })
+    });
+  } catch {
+    throw new Error('Can’t reach the server. Check your connection and try again.');
+  }
+
+  let data: RawPlan;
+  try {
+    data = (await res.json()) as RawPlan;
+  } catch {
+    throw new Error('Got an unreadable response from the server.');
+  }
+
+  if (!res.ok || data.error) {
+    if (res.status === 401 || data.error === 'unauthorized') throw new Error('Sign in to use AI plan reading.');
+    if (data.error === 'not_entitled') throw new Error('AI plan reading is a Pro feature — subscribe to use it.');
+    if (data.error === 'budget_exhausted') throw new Error('You’ve used up this month’s AI usage.');
+    if (data.error === 'bad_plan') throw new Error('Couldn’t make sense of that. Try including day names and exercises with sets and reps.');
+    throw new Error('The plan reader hit an error. Try again in a moment.');
+  }
+
+  return buildPlanFromParse(data, fallbackType);
+}
+
+function buildPlanFromParse(raw: RawPlan, fallbackType: TrainingType): ParsedPlan {
+  const MUSCLES = Object.keys(MUSCLE_TARGETS) as Muscle[];
+  const days: ProgramDays = {};
+  const dayOrder: string[] = [];
+  const customExercises: Record<string, ExerciseDef> = {};
+  const usedIds = new Set(Object.keys(EXLIB));
+  const createdByName: Record<string, string> = {}; // dedupe same custom name across days
+  const usedKeys = new Set<string>();
+
+  const uniqueId = (base: string): string => {
+    const root = base || 'exercise';
+    let id = root, n = 2;
+    while (usedIds.has(id)) id = `${root}_${n++}`;
+    usedIds.add(id);
+    return id;
+  };
+
+  (raw.days || []).forEach((rd, di) => {
+    const label = (rd.label || `Day ${di + 1}`).trim().slice(0, 40) || `Day ${di + 1}`;
+    let key = slugify(label), n = 2;
+    while (usedKeys.has(key)) key = `${slugify(label) || 'day'}_${n++}`;
+
+    const exercises: ProgramExercise[] = [];
+    for (const re of rd.exercises || []) {
+      const name = (re.name || '').trim();
+      if (!name) continue;
+      let id = resolveExerciseId(name);
+      if (!id) {
+        const norm = name.toLowerCase();
+        id = createdByName[norm];
+        if (!id) {
+          const muscle = (MUSCLES.includes(re.muscle as Muscle) ? (re.muscle as Muscle) : 'Chest');
+          const equip = EQUIP_CATALOG.find(e => e.v === re.equipment) || EQUIP_CATALOG[0];
+          const reps = clampInt(re.reps, 1, 30, 10);
+          id = uniqueId(slugify(name));
+          customExercises[id] = {
+            name: name.slice(0, 60), muscle, compound: false, restBase: 90, pattern: id,
+            equip: [equip], repLo: reps, repHi: reps, cue: 'Imported exercise — edit its details anytime.', secondary: []
+          };
+          createdByName[norm] = id;
+        }
+      }
+      exercises.push(mkEx(id, clampInt(re.sets, 1, 8, 3), 0, { weight: 0, reps: clampInt(re.reps, 1, 300, 10), hitTop: true }));
+    }
+    if (!exercises.length) return; // drop empty days
+    usedKeys.add(key);
+    days[key] = { key, label, dow: PARSE_WEEKDAYS[di % 7], skipped: false, exercises };
+    dayOrder.push(key);
+  });
+
+  if (!dayOrder.length) throw new Error('That didn’t contain any exercises we could read.');
+
+  return {
+    name: (raw.program_name || 'Imported Plan').trim().slice(0, 60) || 'Imported Plan',
+    trainingType: TRAINING_TYPES.includes(raw.training_type as TrainingType) ? (raw.training_type as TrainingType) : fallbackType,
+    dayOrder,
+    days,
+    customExercises
+  };
 }

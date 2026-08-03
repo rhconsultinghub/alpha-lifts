@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ViewModel } from '../state/viewModel';
+import { ACCENT } from '../theme';
 
 /**
  * First-run app tour — a brief, skippable sequence of cards explaining the main areas of the app,
@@ -9,7 +10,6 @@ import type { ViewModel } from '../state/viewModel';
  * user can skip at any step; finishing or skipping marks it seen so it never forces itself again.
  */
 
-const ACCENT = '#f0752f';
 const TEXT = '#f5f0ea';
 
 interface TourStep {

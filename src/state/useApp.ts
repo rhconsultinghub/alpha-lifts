@@ -3,12 +3,13 @@ import { EXLIB, EQUIP_CATALOG, MUSCLE_TARGETS, planRepDefault } from '../data/ex
 import { mkEx, slugify } from '../data/program';
 import { createInitialState } from '../data/initialState';
 import { exportBackup as exportBackupFile, mergeBackupIntoDefaults } from '../data/backup';
+import { exportPlan as exportPlanFile } from '../data/planIO';
 import { SPLIT_PRESETS, buildProgramFromPreset, buildCustomProgram } from '../data/wizard';
 import type {
-  AppState, CoachChatMessage, CoachProposalPayload, CoachVoice, ExerciseFormState, Muscle, ProgramExercise, RestPacing, Screen,
+  AppState, CoachChatMessage, CoachProposal, CoachProposalPayload, CoachVoice, ExerciseDef, ExerciseFormState, Muscle, ParsedPlan, ProgramExercise, RestPacing, Screen,
   TrainingType, Units, WarmupStyle, WorkoutSetRow, WizardCustomDay
 } from '../data/types';
-import { askCoach, buildCoachContext, parseProposals, fetchCoachStatus, COACH_CONFIGURED, COACH_HISTORY_CAP } from './coach';
+import { askCoach, buildCoachContext, parseProposals, fetchCoachStatus, parsePlanText as parsePlanTextApi, COACH_CONFIGURED, COACH_HISTORY_CAP } from './coach';
 import { applyExerciseSwaps, type ExerciseSwap } from './onboarding';
 import {
   recommendation, restForExercise, dayMuscleRanks, isWeekComplete, fmtWeight,
@@ -22,6 +23,16 @@ import { shouldFireReminder, fireReminder } from './reminders';
 // Exported so the cloud-sync layer (sync.ts) reads/writes the exact same key — the whole app
 // state is this one blob, and sync just mirrors it to the server.
 export const STORAGE_KEY = 'fitness-app-state-v1';
+
+// Short assistant-voice acknowledgement posted in the coach chat right after a proposal is
+// applied, so an applied change reads as the coach confirming it rather than the card silently
+// flipping to "✓ Applied". Reuses the proposal's own human summary; build_program gets a
+// friendlier line since its summary is a long "this replaces your current program" sentence.
+function coachAckText(prop: CoachProposal): string {
+  if (prop.kind === 'build_program') return "Done — I've built your new plan. Take a look on the Program tab.";
+  const s = prop.summary.replace(/\.$/, '');
+  return `Done — ${s.charAt(0).toLowerCase()}${s.slice(1)}.`;
+}
 
 function loadInitial(): AppState {
   const defaults = createInitialState();
@@ -142,6 +153,7 @@ export function useApp() {
   const closeArchiveDetail = useCallback(() => setState(s => ({ ...s, archiveDetailId: null })), []);
   const selectExerciseProgress = useCallback((id: string) => setState(s => ({ ...s, selectedProgressEx: id, progressPickerOpen: false })), []);
   const toggleProgressPicker = useCallback(() => setState(s => ({ ...s, progressPickerOpen: !s.progressPickerOpen })), []);
+  const toggleMuscleBalance = useCallback(() => setState(s => ({ ...s, muscleBalanceCollapsed: s.muscleBalanceCollapsed === false })), []);
   const toggleCompareLift = useCallback((id: string) => {
     setState(s => {
       const cur = s.compareLiftIds && s.compareLiftIds.length ? s.compareLiftIds : defaultCompareLiftIds(s);
@@ -257,6 +269,52 @@ export function useApp() {
       return { ...restored, pendingBackupImport: null };
     });
   }, []);
+
+  // ---------- workout-plan (program) import/export ----------
+  const exportPlan = useCallback(() => { exportPlanFile(state); }, [state]);
+  const stagePlanImport = useCallback((plan: ParsedPlan) => setState(s => ({ ...s, pendingPlanImport: plan })), []);
+  const cancelPlanImport = useCallback(() => setState(s => ({ ...s, pendingPlanImport: null })), []);
+  const confirmPlanImport = useCallback(() => {
+    const plan = stateRef.current.pendingPlanImport;
+    if (!plan) return;
+    // Re-create any bundled custom exercises that don't already exist (built-ins and already-present
+    // customs are left untouched, so re-importing your own plan doesn't duplicate them). This
+    // mutates the module-level EXLIB singleton — a side effect — so it must run OUTSIDE the setState
+    // updater and exactly once: React (StrictMode) double-invokes the updater, and doing the
+    // `if (!EXLIB[id])` add inside it means the discarded first pass mutates EXLIB and the kept
+    // second pass then skips persisting the custom into customExercises (it'd render this session
+    // but vanish on reload, since EXLIB customs are rehydrated from customExercises on load).
+    const addedCustoms: Record<string, ExerciseDef> = {};
+    Object.entries(plan.customExercises || {}).forEach(([id, def]) => {
+      if (!EXLIB[id]) { EXLIB[id] = def; addedCustoms[id] = def; }
+    });
+    setState(s => {
+      if (!s.pendingPlanImport) return s;
+      const customExercises = { ...s.customExercises, ...addedCustoms };
+      // Deep-copy the days and drop any exercise whose id still doesn't resolve (a dangling
+      // reference from a hand-edited/foreign file — a self-contained export never dangles).
+      const days: AppState['program'] = JSON.parse(JSON.stringify(s.pendingPlanImport.days));
+      Object.values(days).forEach(d => { d.exercises = d.exercises.filter(e => !!EXLIB[e.id]); });
+      const dayOrder = s.pendingPlanImport.dayOrder.filter(k => k in days);
+      const now = new Date().toISOString();
+      // Stash the current program (same as build_program / createProgramFromWizard) rather than
+      // wiping it, then swap the imported one in as active.
+      const savedPrograms = { ...s.savedPrograms };
+      savedPrograms[s.activeProgramId] = { name: s.programName, trainingType: s.trainingType, dayOrder: s.dayOrder, startedAt: s.startedAt, days: s.program, weekNumber: s.weekNumber, weekStartedAt: s.weekStartedAt };
+      return {
+        ...s,
+        pendingPlanImport: null,
+        customExercises,
+        activeProgramId: 'prog_' + Date.now(), programName: s.pendingPlanImport.name, trainingType: s.pendingPlanImport.trainingType,
+        program: days, dayOrder, startedAt: now, weekNumber: 1, weekStartedAt: now,
+        savedPrograms, activeDayKey: null, showSettings: false, screen: 'program' as Screen
+      };
+    });
+  }, []);
+  // AI paste-to-parse: calls the Pro-gated Worker route, using the current program's training type
+  // as the fallback style. Resolves to a ParsedPlan (staged by the caller) or throws a friendly
+  // Error. Does not mutate state itself.
+  const parsePlanText = useCallback((text: string) => parsePlanTextApi(text, stateRef.current.trainingType), []);
 
   // ---------- rest-timer alerts ----------
   const requestNotifyPermissionIfNeeded = () => {
@@ -690,19 +748,28 @@ export function useApp() {
   };
 
   const applyCoachProposal = useCallback((messageId: string, index: number) => {
+    // Pre-generate the acknowledgement id outside the updater (nextCoachId increments a ref, a
+    // side effect the setState updater must not carry — it can be double-invoked). An id that
+    // goes unused (no-op proposal, see below) is harmless; ids only need to be unique.
+    const ackId = nextCoachId();
     setState(s => {
       const msg = s.coachMessages.find(m => m.id === messageId);
       const prop = msg?.proposals?.[index];
       if (!msg || !prop || prop.status !== 'pending' || !prop.payload) return s;
       const next = applyProposalToState(s, prop.payload);
-      return {
-        ...next,
-        coachMessages: next.coachMessages.map(m =>
-          m.id === messageId
-            ? { ...m, proposals: m.proposals?.map((pr, i) => (i === index ? { ...pr, status: 'applied' as const } : pr)) }
-            : m
-        )
-      };
+      // applyProposalToState returns the SAME reference on a no-op (missing day/exercise/lib),
+      // so only post an acknowledgement when the change actually landed — otherwise the coach
+      // would claim "Done" on a silent no-op.
+      const applied = next !== s;
+      const withStatus = next.coachMessages.map(m =>
+        m.id === messageId
+          ? { ...m, proposals: m.proposals?.map((pr, i) => (i === index ? { ...pr, status: 'applied' as const } : pr)) }
+          : m
+      );
+      const coachMessages = applied
+        ? [...withStatus, { id: ackId, role: 'assistant' as const, content: coachAckText(prop) }].slice(-COACH_HISTORY_CAP)
+        : withStatus;
+      return { ...next, coachMessages };
     });
   }, []);
 
@@ -1627,13 +1694,14 @@ export function useApp() {
       goProgram, goProgress, goExercises, goAchievements, goCoach, markAchievementsSeen, openDay, openDayBuilder, closeDayBuilder,
       setCoachInput, sendCoachMessage, clearCoachChat, applyCoachProposal, dismissCoachProposal, refreshCoachEntitlement,
       openExerciseHistory, closeExerciseHistory, openArchiveDetail, closeArchiveDetail,
-      selectExerciseProgress, toggleProgressPicker, toggleCompareLift, toggleCompareLiftPicker, setProgressMetric,
+      selectExerciseProgress, toggleProgressPicker, toggleMuscleBalance, toggleCompareLift, toggleCompareLiftPicker, setProgressMetric,
       openWeekReview, closeWeekReview, selectReviewWeek, backToWeekList,
       setTrainingType, openSettings, closeSettings, setUnits, setRestPacing, setCoachVoice, setWarmupStyle,
       renameProgram, toggleSkipDay, dismissDeloadSuggestion,
       setDeloadEnabled, setDeloadIntensity, setDeloadCadence, startDeloadNow, endDeloadNow,
       deferDeload, skipDeload,
       exportBackup, stageBackupImport, cancelBackupImport, confirmBackupImport,
+      exportPlan, stagePlanImport, cancelPlanImport, confirmPlanImport, parsePlanText,
       requestResetApp, cancelResetApp, resetApp,
       setRestAlertSound, setRestAlertVibrate, setRestAlertNotify, setRemindersEnabled, setReminderTime,
       setBodyWeightInput, logBodyWeight,

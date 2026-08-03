@@ -4,7 +4,10 @@ export function ProgramScreen({ vm }: { vm: ViewModel }) {
   return (
     <div style={{ padding: '24px 20px 100px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <div style={{ font: "500 13px 'Inter'", color: 'rgba(245,240,234,.5)' }}>YOUR PROGRAM</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" width={22} height={22} style={{ borderRadius: 6, display: 'block' }} />
+          <span className="num" style={{ font: "700 13px 'Space Grotesk'", letterSpacing: '.12em', color: 'rgba(245,240,234,.85)' }}>ALPHA LIFTS</span>
+        </div>
         <button onClick={vm.openSettings} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 15 }}>⚙</button>
       </div>
       <input
@@ -20,18 +23,29 @@ export function ProgramScreen({ vm }: { vm: ViewModel }) {
         <button onClick={vm.openWeekReview} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: 'none', background: 'rgba(255,255,255,.04)', color: 'rgba(245,240,234,.5)' }}>Week {vm.weekNumber} ▾</button>
       </div>
 
-      <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>MUSCLE BALANCE</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 26, background: 'rgba(255,255,255,.03)', borderRadius: 14, padding: '10px 8px' }}>
-        {vm.muscleBars.map(m => (
-          <button key={m.name} onClick={m.drill} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', padding: '5px 6px', borderRadius: 8, width: '100%' }}>
-            <div style={{ width: 70, font: "500 11px 'Inter'", color: 'rgba(245,240,234,.65)', textAlign: 'left' }}>{m.name}</div>
-            <div style={{ flex: 1, height: 4, borderRadius: 3, background: 'rgba(255,255,255,.1)', overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${m.pctClamped}%`, background: m.color }} />
-            </div>
-            <div className="num" style={{ width: 38, textAlign: 'right', fontSize: 11, fontWeight: 700, color: m.color }}>{m.pctText}</div>
-          </button>
-        ))}
-      </div>
+      <button onClick={vm.toggleMuscleBalance} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em' }}>MUSCLE BALANCE</span>
+          {vm.muscleBalanceCollapsed && (
+            <span style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.35)' }}>· {vm.muscleBalanceSummary}</span>
+          )}
+        </div>
+        <span style={{ fontSize: 12, color: 'rgba(245,240,234,.4)', transform: vm.muscleBalanceCollapsed ? 'none' : 'rotate(180deg)', transition: 'transform .15s' }}>▾</span>
+      </button>
+      {!vm.muscleBalanceCollapsed && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 26, background: 'rgba(255,255,255,.03)', borderRadius: 14, padding: '10px 8px' }}>
+          {vm.muscleBars.map(m => (
+            <button key={m.name} onClick={m.drill} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', padding: '5px 6px', borderRadius: 8, width: '100%' }}>
+              <div style={{ width: 70, font: "500 11px 'Inter'", color: 'rgba(245,240,234,.65)', textAlign: 'left' }}>{m.name}</div>
+              <div style={{ flex: 1, height: 4, borderRadius: 3, background: 'rgba(255,255,255,.1)', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${m.pctClamped}%`, background: m.color }} />
+              </div>
+              <div className="num" style={{ width: 38, textAlign: 'right', fontSize: 11, fontWeight: 700, color: m.color }}>{m.pctText}</div>
+            </button>
+          ))}
+        </div>
+      )}
+      {vm.muscleBalanceCollapsed && <div style={{ marginBottom: 26 }} />}
 
       {vm.deload.show && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '12px 14px', borderRadius: 14, background: 'oklch(0.7 0.13 230 / 0.1)', border: '1px solid oklch(0.7 0.13 230 / 0.35)', marginBottom: 20 }}>

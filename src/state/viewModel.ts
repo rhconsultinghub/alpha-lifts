@@ -7,6 +7,7 @@ import { testVibration } from './alerts';
 import { COACH_CONFIGURED } from './coach';
 import { deloadPlan, activeDeloadPct, backstopFor, DELOAD_BACKSTOP_WEEKS } from './deload';
 import type { Actions } from './useApp';
+import { ACCENT, ACCENT_TEXT } from '../theme';
 import {
   muscleBarsList, dayWarning, recommendation, estimateDayTime, formatDuration,
   warmupInfo, dayMuscleRanks, formatElapsed, fmtWeight, weightStep, formatSetTime,
@@ -21,9 +22,6 @@ function joinReasons(xs: string[]): string {
   if (xs.length <= 1) return xs[0] || '';
   return xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
 }
-
-const ACCENT = 'oklch(0.65 0.19 35)';
-const ACCENT_TEXT = 'oklch(0.72 0.17 35)';
 
 export interface ExerciseRowVM {
   id: string;
@@ -251,6 +249,16 @@ export function buildViewModel(state: AppState, actions: Actions) {
     confirmBackupImport: actions.confirmBackupImport,
     cancelBackupImport: actions.cancelBackupImport,
     stageBackupImport: actions.stageBackupImport,
+    // Workout-plan (program) import/export
+    exportPlan: actions.exportPlan,
+    pendingPlanImport: !!s.pendingPlanImport,
+    planImportName: s.pendingPlanImport?.name || '',
+    confirmPlanImport: actions.confirmPlanImport,
+    cancelPlanImport: actions.cancelPlanImport,
+    stagePlanImport: actions.stagePlanImport,
+    parsePlanText: actions.parsePlanText,
+    // AI paste-to-parse is a Pro feature and needs the coach Worker configured.
+    aiParseAvailable: COACH_CONFIGURED && s.coachEntitlement === 'entitled',
     confirmResetApp: s.confirmResetApp,
     requestResetApp: actions.requestResetApp,
     cancelResetApp: actions.cancelResetApp,
@@ -936,6 +944,15 @@ export function buildViewModel(state: AppState, actions: Actions) {
     goProgram: actions.goProgram, goProgress: actions.goProgress, goExercises: actions.goExercises, goAchievements: actions.goAchievements, goCoach: actions.goCoach,
     trainingTypes,
     muscleBars: bars.map(m => ({ ...m, drill: () => actions.openMuscleDrill(m.name) })),
+    muscleBalanceCollapsed: s.muscleBalanceCollapsed !== false,
+    toggleMuscleBalance: actions.toggleMuscleBalance,
+    muscleBalanceSummary: (() => {
+      const under = bars.filter(m => m.status === 'under').length;
+      const over = bars.filter(m => m.status === 'over').length;
+      if (under) return `${under} muscle${under === 1 ? '' : 's'} under target`;
+      if (over) return `${over} muscle${over === 1 ? '' : 's'} over target`;
+      return 'All muscles on target';
+    })(),
     programDays, newProgramWizard,
     deload: (() => {
       const raw = deloadSuggestion(s);
