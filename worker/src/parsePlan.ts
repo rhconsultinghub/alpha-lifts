@@ -143,8 +143,12 @@ export async function handleParsePlan(request: Request, env: ParsePlanEnv, cors:
   let response: Anthropic.Message;
   try {
     response = await client.messages.create({
+      // A full week of ~40 exercises, each an object with name/muscle/equipment/sets/reps, is a
+      // lot of structured output — 1500 truncated the tool JSON mid-array on real plans, which
+      // arrives as invalid/partial input and reads to the user as "couldn't parse it". Only the
+      // tokens actually emitted are billed, so a high ceiling costs nothing on small plans.
+      max_tokens: 8000,
       model: MODEL,
-      max_tokens: 1500,
       system: SYSTEM,
       tools: [EXTRACT_TOOL],
       tool_choice: { type: 'tool', name: 'extract_plan' },
@@ -169,6 +173,9 @@ export async function handleParsePlan(request: Request, env: ParsePlanEnv, cors:
     | undefined;
 
   if (!input || !Array.isArray(input.days) || input.days.length === 0) {
+    // A hit token ceiling means the JSON was cut off, which parses to partial/empty input — tell
+    // the client that specifically so it can suggest splitting the plan rather than "try again".
+    if (response.stop_reason === 'max_tokens') return json({ error: 'too_long' }, 502, cors);
     return json({ error: 'bad_plan' }, 502, cors);
   }
 

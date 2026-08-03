@@ -576,6 +576,7 @@ export async function parsePlanText(text: string, fallbackType: TrainingType): P
     if (res.status === 401 || data.error === 'unauthorized') throw new Error('Sign in to use AI plan reading.');
     if (data.error === 'not_entitled') throw new Error('AI plan reading is a Pro feature — subscribe to use it.');
     if (data.error === 'budget_exhausted') throw new Error('You’ve used up this month’s AI usage.');
+    if (data.error === 'too_long') throw new Error('That plan is too long to read in one go — try importing a few days at a time.');
     if (data.error === 'bad_plan') throw new Error('Couldn’t make sense of that. Try including day names and exercises with sets and reps.');
     throw new Error('The plan reader hit an error. Try again in a moment.');
   }
