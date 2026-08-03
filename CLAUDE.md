@@ -1748,3 +1748,61 @@ the program screen. `npx tsc -b`, worker `tsc --noEmit`, `npm run build` all cle
 generation wasn't exercised locally (no real key in dev) — it mirrors the proven coach call structure and
 runs in production where `ANTHROPIC_API_KEY` is set; there it produces the tailored plan + AI-written
 welcome, with the deterministic fallback as the safety net.
+
+(41) three onboarding/account additions in one round: gym-tailored exercises, an opt-out path with a
+first-run app tour, and email verification.
+
+- **Gym franchise → full exercise tailoring.** Onboarding gained an optional "Where do you train?" step.
+  When a gym is named, the client sends the exercise catalog (`buildCatalog()`, now exported from
+  `coach.ts`) to `/onboard`, and the AI tool `create_onboarding_plan` gained an optional
+  `exercise_swaps: [{from,to}]` output; the prompt tells it to adapt the default plan to that
+  franchise's typical equipment (e.g. Planet Fitness → route around barbells to machines/dumbbells).
+  Client applies swaps via `applyExerciseSwaps()` (`onboarding.ts`): resolves both names to library ids
+  (`resolveExerciseId`, also newly exported from `coach.ts`), and rebuilds matched entries with `mkEx`
+  (equipIdx reset to 0 — a stale equipIdx would be invalid for the new exercise). Anything that doesn't
+  resolve or isn't in the built plan is a no-op, so a bad/hallucinated swap can't corrupt the program.
+  The deterministic fallback ships no swaps. **AI swap generation is prod-only** (needs the real key);
+  the apply logic is typechecked + wired and was exercised structurally.
+
+- **Opt-out + app tutorial.** The intro now offers "Build my plan for me" vs "I'll set it up myself".
+  Opt-out (`finishManual` → `finishOnboarding` with `prefill: 'scratch'`, `startTutorial: true`) builds
+  an empty starter program, marks onboarded, drops the user on the home screen, and launches
+  `AppTutorial` — a brief, skippable 6-card tour (Program/creating-plans, Progress, Exercises,
+  Achievements, Coach) rendered in `App.tsx`, re-openable from a "Replay app tutorial" button in
+  Settings. New `AppState` fields `showTutorial`/`tutorialSeen` (both optional/back-compat). Deliberately
+  a card tour, not DOM-anchored coach-marks — robust to layout changes. Verified live end-to-end
+  (fallback path): gym step captures input and reaches the reveal; opt-out lands on an empty home with
+  the tour; tour next/back/skip + Settings replay all work.
+
+- **Email verification via Resend** (`worker/src/email.ts`). GATED on the `RESEND_API_KEY` secret: absent
+  = the whole flow is inert and signup verifies instantly (exactly the old behaviour), so a deploy
+  without Resend still works. When present: signup creates the account UNVERIFIED, fires the email via
+  `ctx.waitUntil` (fire-and-forget so the response never waits on the send; the send itself has an 8s
+  AbortController timeout), and returns `{ verification_required: true }` with NO session. Login on an
+  unverified account returns 403 `email_not_verified`. `GET /auth/verify?token=…` is a browser
+  navigation from the email link — it **bypasses the CORS-origin gate** in `index.ts` (no Origin header)
+  and returns a small HTML success/failure page linking back to `APP_URL`. `POST /auth/resend-verification`
+  re-sends (always 200, never leaks whether an email exists). Client (`auth.ts`) signup/login now return
+  an `AuthOutcome` discriminated union (`session` | `verify` | `unverified` | `error`); `LoginScreen`
+  shows a "Check your email" panel with a resend button for the verify/unverified cases. New `users`
+  columns `email_verified`/`verify_token`/`verify_expires` — in `schema.sql`'s CREATE for fresh DBs, and
+  a one-time `migrate-add-email-verify.sql` (ALTERs + grandfather existing rows to verified) for an
+  existing DB. **The remote migration was already applied** (existing account grandfathered), so the DB
+  is ready; the columns are harmless to the currently-deployed old Worker (it ignores them).
+  **Owner setup to actually turn verification on:** create a Resend account, verify a sending domain (or
+  use `onboarding@resend.dev` to your own address for testing), `npx wrangler secret put RESEND_API_KEY`,
+  set `RESEND_FROM` in wrangler.toml to a verified sender, then deploy. Full flow verified live with a
+  local key: signup→verification_required (fast), login blocked (403), verify link flips the DB + shows
+  the success page, login then succeeds; the "Check your email" UI renders with resend.
+
+  Local-dev gotcha found this round: `wrangler dev` (v4) drops `.dev.vars` secrets on its startup
+  hot-reload, so a `.dev.vars`-only `RESEND_API_KEY` intermittently reads empty and verification silently
+  stays off. To test verification locally, either restart clean and test immediately, or (what worked)
+  put the key in `wrangler.toml [vars]` temporarily — plain vars survive reloads — and REMOVE it before
+  committing. Also: miniflare can't abort a fetch stuck on unreachable DNS, so before the `ctx.waitUntil`
+  refactor a dummy Resend key made signup hang; fire-and-forget fixed that and is the right prod design
+  regardless.
+
+  **Deploy order matters:** the remote `migrate-add-email-verify.sql` must be applied BEFORE deploying a
+  Worker whose code reads the new columns (already done this round). Run migrations from
+  `L:\…\alpha-lifts\worker`.

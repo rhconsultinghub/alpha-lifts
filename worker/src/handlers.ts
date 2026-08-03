@@ -6,13 +6,32 @@
  */
 
 import { authenticate, hashPassword, signSession, verifyPassword } from './auth';
-import { createUser, findUserByEmail, findUserById, getState, putState, toAccountView } from './db';
+import {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  findUserByVerifyToken,
+  getState,
+  markEmailVerified,
+  putState,
+  setVerifyToken,
+  toAccountView
+} from './db';
+import { newVerifyToken, sendVerificationEmail, verificationEnabled } from './email';
 import { json } from './http';
 
 export interface RouteEnv {
   DB?: D1Database;
   SESSION_SECRET?: string;
+  // Email verification (email.ts). When RESEND_API_KEY is set, signup requires email confirmation
+  // before login; when it's absent the whole flow is inert (signup verifies instantly).
+  RESEND_API_KEY?: string;
+  RESEND_FROM?: string;
+  // Where the /auth/verify page sends the user back to after confirming. Defaults to the live app.
+  APP_URL?: string;
 }
+
+const DEFAULT_APP_URL = 'https://rhconsultinghub.github.io/alpha-lifts/';
 
 type Cors = Record<string, string>;
 
@@ -50,7 +69,7 @@ async function readJson<T>(request: Request): Promise<T | null> {
 
 // --- POST /auth/signup ----------------------------------------------------------------------
 
-export async function handleSignup(request: Request, env: RouteEnv, cors: Cors): Promise<Response> {
+export async function handleSignup(request: Request, env: RouteEnv, cors: Cors, ctx?: ExecutionContext): Promise<Response> {
   const cfg = requireConfig(env, cors);
   if (cfg instanceof Response) return cfg;
 
@@ -66,7 +85,27 @@ export async function handleSignup(request: Request, env: RouteEnv, cors: Cors):
   const existing = await findUserByEmail(cfg.db, email);
   if (existing) return json({ error: 'email_taken' }, 409, cors);
 
-  const user = await createUser(cfg.db, email, await hashPassword(password));
+  const passwordHash = await hashPassword(password);
+
+  // Verification on: create the account UNVERIFIED, email a confirmation link, and return NO
+  // session — the user must confirm before they can sign in. This is what stops bogus/throwaway
+  // signups from getting a working account. Even if the email send fails, the account exists
+  // unverified so they can trigger a resend rather than being stuck mid-signup.
+  if (verificationEnabled(env)) {
+    const { token, expires } = newVerifyToken();
+    await createUser(cfg.db, email, passwordHash, { verified: false, token, expires });
+    const verifyUrl = `${new URL(request.url).origin}/auth/verify?token=${encodeURIComponent(token)}`;
+    // Fire-and-forget so the response doesn't wait on the email round-trip. waitUntil keeps the
+    // send alive past the response; without a ctx (shouldn't happen in the Workers runtime) fall
+    // back to a detached promise.
+    const send = sendVerificationEmail(env, email, verifyUrl);
+    if (ctx) ctx.waitUntil(send);
+    else void send;
+    return json({ verification_required: true, email }, 201, cors);
+  }
+
+  // Verification off (no Resend configured): behave as before — create verified, sign straight in.
+  const user = await createUser(cfg.db, email, passwordHash);
   const token = await signSession(user.id, cfg.secret);
   return json({ token, account: toAccountView(user) }, 201, cors);
 }
@@ -90,6 +129,12 @@ export async function handleLogin(request: Request, env: RouteEnv, cors: Cors): 
     : (await verifyPassword(password, DUMMY_HASH), false);
   if (!user || !ok) return json({ error: 'invalid_credentials' }, 401, cors);
 
+  // Correct password but email not confirmed (only enforced when verification is on). Surface it
+  // distinctly so the client can offer a "resend link" instead of a generic failure.
+  if (verificationEnabled(env) && user.email_verified !== 1) {
+    return json({ error: 'email_not_verified', email: user.email }, 403, cors);
+  }
+
   const token = await signSession(user.id, cfg.secret);
   return json({ token, account: toAccountView(user) }, 200, cors);
 }
@@ -98,6 +143,68 @@ export async function handleLogin(request: Request, env: RouteEnv, cors: Cors): 
 // user-not-found path (see handleLogin). Value is irrelevant; it never matches a real password.
 const DUMMY_HASH =
   'pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+// --- GET /auth/verify (browser navigation from the email link) ------------------------------
+
+/** A small dark-themed HTML page for the email-link landing. No CORS/JSON — it's a top-level
+ *  navigation, so it returns a human page with a button back into the app. */
+function verifyPage(success: boolean, appUrl: string, reason?: string): Response {
+  const title = success ? 'Email verified' : 'Couldn’t verify';
+  const emoji = success ? '✅' : '⚠️';
+  const msg = success
+    ? 'Your email is confirmed. You can sign in to Alpha Lifts now.'
+    : reason === 'expired'
+      ? 'That verification link has expired. Sign in and request a new one.'
+      : 'That verification link is invalid or has already been used.';
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} — Alpha Lifts</title></head>
+  <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f0e0d;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#f5f0ea">
+    <div style="max-width:360px;padding:32px 24px;text-align:center">
+      <div style="font-size:44px;margin-bottom:14px">${emoji}</div>
+      <div style="font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:10px">${title}</div>
+      <div style="font-size:14px;line-height:1.6;color:#c9c3ba;margin-bottom:26px">${msg}</div>
+      <a href="${appUrl}" style="display:inline-block;background:#f0752f;color:#1a1206;text-decoration:none;font-weight:700;font-size:15px;padding:13px 26px;border-radius:12px">Open Alpha Lifts</a>
+    </div>
+  </body></html>`;
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+}
+
+export async function handleVerify(request: Request, env: RouteEnv): Promise<Response> {
+  const appUrl = env.APP_URL || DEFAULT_APP_URL;
+  const token = new URL(request.url).searchParams.get('token') || '';
+  if (!env.DB || !token) return verifyPage(false, appUrl);
+
+  const user = await findUserByVerifyToken(env.DB, token);
+  if (!user) return verifyPage(false, appUrl); // token not found (already used / invalid)
+  if (user.verify_expires != null && user.verify_expires < Date.now()) return verifyPage(false, appUrl, 'expired');
+
+  await markEmailVerified(env.DB, user.id);
+  return verifyPage(true, appUrl);
+}
+
+// --- POST /auth/resend-verification ---------------------------------------------------------
+
+export async function handleResendVerification(request: Request, env: RouteEnv, cors: Cors, ctx?: ExecutionContext): Promise<Response> {
+  const cfg = requireConfig(env, cors);
+  if (cfg instanceof Response) return cfg;
+
+  const body = await readJson<{ email?: unknown }>(request);
+  const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+
+  // Always 200 regardless — never reveal whether an email is registered. Only actually re-send for
+  // a real, still-unverified account while verification is enabled.
+  if (verificationEnabled(env) && email) {
+    const user = await findUserByEmail(cfg.db, email);
+    if (user && user.email_verified !== 1) {
+      const { token, expires } = newVerifyToken();
+      await setVerifyToken(cfg.db, user.id, token, expires);
+      const verifyUrl = `${new URL(request.url).origin}/auth/verify?token=${encodeURIComponent(token)}`;
+      const send = sendVerificationEmail(env, email, verifyUrl);
+      if (ctx) ctx.waitUntil(send);
+      else void send;
+    }
+  }
+  return json({ ok: true }, 200, cors);
+}
 
 // --- GET /auth/me ---------------------------------------------------------------------------
 

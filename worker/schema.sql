@@ -20,7 +20,14 @@ CREATE TABLE IF NOT EXISTS users (
   -- integration wired up yet — Phase 5 reads these; a later billing phase writes them.
   plan                TEXT NOT NULL DEFAULT 'free',    -- 'free' | 'pro'
   sub_status          TEXT NOT NULL DEFAULT 'none',    -- 'none' | 'active' | 'past_due' | 'canceled'
-  current_period_end  INTEGER                          -- epoch ms; NULL when not subscribed
+  current_period_end  INTEGER,                         -- epoch ms; NULL when not subscribed
+
+  -- Email verification (see email.ts / handlers.ts). Only ENFORCED when RESEND_API_KEY is set;
+  -- otherwise signup verifies immediately and these are inert. Adding to an existing DB: run the
+  -- ALTER statements at the bottom of this file instead (D1 has no IF NOT EXISTS on ALTER).
+  email_verified  INTEGER NOT NULL DEFAULT 0,          -- 0 = unverified, 1 = verified
+  verify_token    TEXT,                                -- single-use token emailed at signup; NULL once used
+  verify_expires  INTEGER                              -- epoch ms the token expires
 );
 
 -- One row per user: their entire AppState as a JSON blob. The app already persists its whole

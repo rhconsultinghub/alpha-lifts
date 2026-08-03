@@ -15,6 +15,14 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 ALLOWED_ORIGINS = "https://rhconsultinghub.github.io,http://localhost:5173"
 
+# Email verification (src/email.ts). It only switches ON when the RESEND_API_KEY secret is set:
+#   npx wrangler secret put RESEND_API_KEY        # from resend.com dashboard
+# RESEND_FROM must be a sender verified in Resend once you've added a domain; until then Resend only
+# delivers to your own address from "onboarding@resend.dev" (fine for testing).
+RESEND_FROM = "Alpha Lifts <onboarding@resend.dev>"
+# Where the /auth/verify email-link landing page sends the user back to.
+APP_URL = "https://rhconsultinghub.github.io/alpha-lifts/"
+
 # Set to "true" to require the coach access allowlist (see src/access.ts + README "Access
 # allowlist"). While off, anyone whose Origin is allowed can use the coach. Approved ids are KV
 # keys `allow:<id>` in the USAGE namespace:

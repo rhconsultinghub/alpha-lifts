@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { login, signup, type Account } from '../state/auth';
+import { login, resendVerification, signup, type Account } from '../state/auth';
 
 /**
  * Sign-in / sign-up screen, shown by <AuthGate> when accounts are configured and no one is signed
@@ -35,6 +35,8 @@ export function LoginScreen({ onSuccess }: { onSuccess: (token: string, account:
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // When set, the account exists but its email needs confirming — show the check-your-email panel.
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
   const isSignup = mode === 'signup';
 
@@ -45,8 +47,10 @@ export function LoginScreen({ onSuccess }: { onSuccess: (token: string, account:
     setBusy(true);
     const res = isSignup ? await signup(email, password) : await login(email, password);
     setBusy(false);
-    if (res.ok) {
+    if (res.kind === 'session') {
       onSuccess(res.token, res.account);
+    } else if (res.kind === 'verify' || res.kind === 'unverified') {
+      setPendingEmail(res.email);
     } else {
       setError(res.error);
     }
@@ -55,6 +59,10 @@ export function LoginScreen({ onSuccess }: { onSuccess: (token: string, account:
   function toggleMode() {
     setMode(isSignup ? 'login' : 'signup');
     setError(null);
+  }
+
+  if (pendingEmail) {
+    return <CheckEmail email={pendingEmail} onBack={() => { setPendingEmail(null); setMode('login'); }} />;
   }
 
   return (
@@ -156,6 +164,68 @@ export function LoginScreen({ onSuccess }: { onSuccess: (token: string, account:
               {isSignup ? 'Sign in' : 'Create an account'}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Shown after a signup (or a login attempt on an unconfirmed account) when email verification is
+ *  on. Explains the next step and offers a resend. */
+function CheckEmail({ email, onBack }: { email: string; onBack: () => void }) {
+  const [resent, setResent] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function resend() {
+    if (busy) return;
+    setBusy(true);
+    await resendVerification(email);
+    setBusy(false);
+    setResent(true);
+  }
+
+  return (
+    <div className="app-shell">
+      <div
+        className="scr"
+        style={{ background: '#0f0e0d', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 24px', minHeight: '100%' }}
+      >
+        <div style={{ width: '100%', maxWidth: 380, margin: '0 auto', textAlign: 'center' }}>
+          <div style={{ fontSize: 46, marginBottom: 16 }}>📧</div>
+          <div className="num" style={{ fontSize: 26, fontWeight: 800, color: TEXT, letterSpacing: '-.02em', marginBottom: 12 }}>
+            Check your email
+          </div>
+          <div style={{ font: "400 14px 'Inter'", color: 'rgba(245,240,234,.6)', lineHeight: 1.6, marginBottom: 8 }}>
+            We sent a verification link to <span style={{ color: TEXT, fontWeight: 600 }}>{email}</span>. Click it to
+            confirm your account, then come back and sign in.
+          </div>
+          <div style={{ font: "400 12.5px 'Inter'", color: 'rgba(245,240,234,.4)', lineHeight: 1.5, marginBottom: 28 }}>
+            Can’t find it? Check your spam folder.
+          </div>
+
+          <button
+            onClick={resend}
+            disabled={busy || resent}
+            style={{
+              width: '100%',
+              background: resent ? 'rgba(255,255,255,.06)' : ACCENT,
+              border: 'none',
+              color: resent ? 'rgba(245,240,234,.6)' : '#1a1206',
+              font: "700 15px 'Inter'",
+              padding: 14,
+              borderRadius: 12,
+              cursor: busy || resent ? 'default' : 'pointer'
+            }}
+          >
+            {resent ? 'Email sent ✓' : busy ? 'Sending…' : 'Resend verification email'}
+          </button>
+
+          <button
+            onClick={onBack}
+            style={{ background: 'none', border: 'none', color: ACCENT, font: "600 13px 'Inter'", cursor: 'pointer', padding: 8, marginTop: 18 }}
+          >
+            Back to sign in
+          </button>
         </div>
       </div>
     </div>

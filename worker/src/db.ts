@@ -13,6 +13,9 @@ export interface UserRow {
   plan: string;
   sub_status: string;
   current_period_end: number | null;
+  email_verified: number; // 0 | 1
+  verify_token: string | null;
+  verify_expires: number | null;
 }
 
 /** The subscription slice we expose to the client — never the password hash. */
@@ -42,12 +45,29 @@ export async function findUserById(db: D1Database, id: string): Promise<UserRow 
   return db.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<UserRow>();
 }
 
-export async function createUser(db: D1Database, email: string, passwordHash: string): Promise<UserRow> {
+export interface NewUserVerification {
+  /** false = start unverified with a pending token (email-verification flow on). */
+  verified: boolean;
+  token?: string | null;
+  expires?: number | null;
+}
+
+export async function createUser(
+  db: D1Database,
+  email: string,
+  passwordHash: string,
+  verification: NewUserVerification = { verified: true }
+): Promise<UserRow> {
   const id = crypto.randomUUID();
   const now = Date.now();
+  const emailVerified = verification.verified ? 1 : 0;
+  const token = verification.token ?? null;
+  const expires = verification.expires ?? null;
   await db
-    .prepare('INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)')
-    .bind(id, email, passwordHash, now)
+    .prepare(
+      'INSERT INTO users (id, email, password_hash, created_at, email_verified, verify_token, verify_expires) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    )
+    .bind(id, email, passwordHash, now, emailVerified, token, expires)
     .run();
   return {
     id,
@@ -56,8 +76,31 @@ export async function createUser(db: D1Database, email: string, passwordHash: st
     created_at: now,
     plan: 'free',
     sub_status: 'none',
-    current_period_end: null
+    current_period_end: null,
+    email_verified: emailVerified,
+    verify_token: token,
+    verify_expires: expires
   };
+}
+
+export async function findUserByVerifyToken(db: D1Database, token: string): Promise<UserRow | null> {
+  return db.prepare('SELECT * FROM users WHERE verify_token = ?').bind(token).first<UserRow>();
+}
+
+/** Mark an account verified and clear its (now spent) token. */
+export async function markEmailVerified(db: D1Database, userId: string): Promise<void> {
+  await db
+    .prepare('UPDATE users SET email_verified = 1, verify_token = NULL, verify_expires = NULL WHERE id = ?')
+    .bind(userId)
+    .run();
+}
+
+/** Issue a fresh token for an existing unverified account (resend flow). */
+export async function setVerifyToken(db: D1Database, userId: string, token: string, expires: number): Promise<void> {
+  await db
+    .prepare('UPDATE users SET verify_token = ?, verify_expires = ? WHERE id = ?')
+    .bind(token, expires, userId)
+    .run();
 }
 
 export interface StateRow {

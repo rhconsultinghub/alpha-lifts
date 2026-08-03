@@ -75,9 +75,18 @@ export function clearSession(): void {
 
 // --- API calls ------------------------------------------------------------------------------
 
-export type AuthResult =
-  | { ok: true; token: string; account: Account }
-  | { ok: false; error: string };
+/**
+ * Outcome of a signup/login attempt.
+ * - 'session'    → logged in (token persisted).
+ * - 'verify'     → signup succeeded but the account needs email confirmation before use.
+ * - 'unverified' → login was correct but the email isn't confirmed yet.
+ * - 'error'      → show `error`.
+ */
+export type AuthOutcome =
+  | { kind: 'session'; token: string; account: Account }
+  | { kind: 'verify'; email: string }
+  | { kind: 'unverified'; email: string }
+  | { kind: 'error'; error: string };
 
 /** Map the Worker's machine error codes to human copy. Anything unrecognised falls through to a
  *  generic message rather than showing a raw code. */
@@ -98,39 +107,71 @@ function authErrorMessage(code: string): string {
   }
 }
 
-async function postAuth(path: string, body: unknown): Promise<AuthResult> {
-  if (!AUTH_CONFIGURED) return { ok: false, error: authErrorMessage('accounts_not_configured') };
-  let res: Response;
+interface AuthBody {
+  token?: string;
+  account?: Account;
+  error?: string;
+  verification_required?: boolean;
+  email?: string;
+}
+
+async function postAuth(path: string, body: unknown): Promise<{ res: Response; data: AuthBody } | null> {
   try {
-    res = await fetch(`${COACH_API_URL}${path}`, {
+    const res = await fetch(`${COACH_API_URL}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
+    const data = (await res.json().catch(() => ({}))) as AuthBody;
+    return { res, data };
   } catch {
-    return { ok: false, error: 'Can’t reach the server. Check your connection and try again.' };
+    return null;
   }
+}
 
-  let data: { token?: string; account?: Account; error?: string };
+export async function signup(email: string, password: string): Promise<AuthOutcome> {
+  if (!AUTH_CONFIGURED) return { kind: 'error', error: authErrorMessage('accounts_not_configured') };
+  const r = await postAuth('/auth/signup', { email, password });
+  if (!r) return { kind: 'error', error: 'Can’t reach the server. Check your connection and try again.' };
+  const { res, data } = r;
+  // Verification on: no session yet — the user must confirm their email first.
+  if (res.ok && data.verification_required) return { kind: 'verify', email: data.email ?? email };
+  if (res.ok && data.token && data.account) {
+    persistSession(data.token, data.account);
+    return { kind: 'session', token: data.token, account: data.account };
+  }
+  return { kind: 'error', error: authErrorMessage(data.error ?? '') };
+}
+
+export async function login(email: string, password: string): Promise<AuthOutcome> {
+  if (!AUTH_CONFIGURED) return { kind: 'error', error: authErrorMessage('accounts_not_configured') };
+  const r = await postAuth('/auth/login', { email, password });
+  if (!r) return { kind: 'error', error: 'Can’t reach the server. Check your connection and try again.' };
+  const { res, data } = r;
+  if (res.status === 403 && data.error === 'email_not_verified') {
+    return { kind: 'unverified', email: data.email ?? email };
+  }
+  if (res.ok && data.token && data.account) {
+    persistSession(data.token, data.account);
+    return { kind: 'session', token: data.token, account: data.account };
+  }
+  return { kind: 'error', error: authErrorMessage(data.error ?? '') };
+}
+
+/** Ask the server to re-send a verification email. Fire-and-forget: the server always answers 200
+ *  and never reveals whether the address exists, so there's nothing meaningful to surface but a
+ *  neutral "sent" confirmation. */
+export async function resendVerification(email: string): Promise<void> {
+  if (!AUTH_CONFIGURED) return;
   try {
-    data = await res.json();
+    await fetch(`${COACH_API_URL}/auth/resend-verification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
   } catch {
-    return { ok: false, error: 'Unexpected response from the server.' };
+    /* best-effort */
   }
-
-  if (!res.ok || !data.token || !data.account) {
-    return { ok: false, error: authErrorMessage(data.error ?? '') };
-  }
-  persistSession(data.token, data.account);
-  return { ok: true, token: data.token, account: data.account };
-}
-
-export function signup(email: string, password: string): Promise<AuthResult> {
-  return postAuth('/auth/signup', { email, password });
-}
-
-export function login(email: string, password: string): Promise<AuthResult> {
-  return postAuth('/auth/login', { email, password });
 }
 
 export type MeResult =

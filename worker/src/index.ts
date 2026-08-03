@@ -20,7 +20,9 @@ import {
   handleLogin,
   handleMe,
   handlePutState,
-  handleSignup
+  handleResendVerification,
+  handleSignup,
+  handleVerify
 } from './handlers';
 
 export interface Env {
@@ -38,6 +40,12 @@ export interface Env {
   // HMAC secret that signs session tokens (auth.ts). Set via `wrangler secret put SESSION_SECRET`.
   // Absent = account routes 503, same as a missing DB.
   SESSION_SECRET?: string;
+  // Email verification via Resend (email.ts). RESEND_API_KEY is a secret; when present, signup
+  // requires email confirmation before login. Absent = verification off (signup verifies instantly).
+  RESEND_API_KEY?: string;
+  RESEND_FROM?: string;
+  // Where the /auth/verify landing page links back to. Set in wrangler.toml; defaults to the app.
+  APP_URL?: string;
 }
 
 const MODEL = 'claude-opus-4-8';
@@ -66,28 +74,35 @@ interface ChatRequest {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const origin = request.headers.get('Origin');
     const cors = corsHeaders(origin, env);
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: cors });
     }
+
+    const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
+    const method = request.method;
+
+    // /auth/verify is a top-level browser navigation from an email link — it carries no Origin
+    // header, so it must bypass the CORS-origin gate below and returns an HTML page, not JSON.
+    if (path === '/auth/verify' && method === 'GET') return handleVerify(request, env);
+
     // An empty `cors` map means the Origin wasn't on the allowlist. Reject outright rather
     // than serving the request with no CORS header — the browser would block the *response*,
-    // but only after we'd already done the work. Applies to every route.
+    // but only after we'd already done the work. Applies to every route below.
     if (Object.keys(cors).length === 0) {
       return json({ error: 'Origin not allowed' }, 403, {});
     }
 
     // Route by path. `/` (POST) is the coach — the original behaviour — and everything under
     // /auth and /state is accounts + cloud sync (handlers.ts). Method-mismatched routes 405.
-    const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
-    const method = request.method;
 
-    if (path === '/auth/signup' && method === 'POST') return handleSignup(request, env, cors);
+    if (path === '/auth/signup' && method === 'POST') return handleSignup(request, env, cors, ctx);
     if (path === '/auth/login' && method === 'POST') return handleLogin(request, env, cors);
     if (path === '/auth/me' && method === 'GET') return handleMe(request, env, cors);
+    if (path === '/auth/resend-verification' && method === 'POST') return handleResendVerification(request, env, cors, ctx);
     if (path === '/state' && method === 'GET') return handleGetState(request, env, cors);
     if (path === '/state' && method === 'PUT') return handlePutState(request, env, cors);
     if (path === '/onboard' && method === 'POST') return handleOnboard(request, env, cors);
