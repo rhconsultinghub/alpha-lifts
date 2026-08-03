@@ -35,7 +35,7 @@ export const COACH_TOOLS: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         day: { type: 'string', description: 'The exact day name from the weekly split, e.g. "Monday — Push Day".' },
-        exercise: { type: 'string', description: 'The exact exercise name from the catalog, e.g. "Incline DB Press".' },
+        exercise: { type: 'string', description: 'The exact exercise name from the catalog, e.g. "Incline Press".' },
         sets: { type: 'integer', description: 'Working sets (1-8). Optional; defaults to 3.', minimum: 1, maximum: 8 },
         reps: { type: 'integer', description: 'Target reps. Optional; defaults to the exercise\'s programmed range.' }
       },
