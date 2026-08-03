@@ -910,6 +910,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
       units: s.units,
       setUnits: actions.setUnits
     },
+    // First-run app tutorial overlay (shown after the opt-out path, re-openable from Settings).
+    showTutorial: !!s.showTutorial,
+    dismissTutorial: actions.dismissTutorial,
+    openTutorial: actions.openTutorial,
     isProgram: s.screen === 'program',
     isDayView: s.screen === 'dayView',
     isDayBuilder: s.screen === 'dayBuilder',

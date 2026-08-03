@@ -43,6 +43,9 @@ interface OnboardAnswers {
   equipment?: string; // full_gym | home_basic | minimal
   diet?: string; // build | lean | maintain | unsure
   units?: string; // kg | lb
+  gym?: string; // free-text gym/franchise name, e.g. "Planet Fitness" (optional)
+  // Exercise catalog (names grouped by muscle) so the model can name real exercises for gym swaps.
+  catalog?: { muscle: string; names: string[] }[];
 }
 
 const ONBOARD_TOOL: Anthropic.Tool = {
@@ -76,6 +79,24 @@ const ONBOARD_TOOL: Anthropic.Tool = {
         type: 'string',
         description: 'A short, motivating program name personalised to them (e.g. "Alex — Upper/Lower Strength").'
       },
+      exercise_swaps: {
+        type: 'array',
+        description:
+          'Optional. ONLY when the user named a specific gym: a list of exercise substitutions that adapt the ' +
+          "default plan to that gym's typical equipment. Each entry replaces a commonly-programmed movement with a " +
+          'better-available alternative there (e.g. at a Planet-Fitness-style gym with no barbells/racks, swap ' +
+          '"Barbell Bench Press" → "Machine Chest Press" and "Barbell Back Squat" → "Leg Press"). Use EXACT names ' +
+          'from the exercise catalog for BOTH from and to. Omit or leave empty if no gym was given or no swaps are ' +
+          'warranted (a well-equipped gym needs none).',
+        items: {
+          type: 'object',
+          properties: {
+            from: { type: 'string', description: 'Exact catalog name of the exercise to replace.' },
+            to: { type: 'string', description: 'Exact catalog name of the gym-appropriate replacement.' }
+          },
+          required: ['from', 'to']
+        }
+      },
       welcome: {
         type: 'string',
         description:
@@ -98,6 +119,15 @@ Choose the split and training style with real judgement about THIS person's answ
 picked 6 days is better served by a 3-4 day full-body or upper/lower plan they can recover from than a
 6-day bro split; match the day count to what they can actually train; factor in their equipment.
 
+If they named a specific gym, use what that franchise TYPICALLY stocks to adapt the plan via
+exercise_swaps: the default plans lean on common barbell, dumbbell, machine, and cable movements, so
+propose swaps only where the gym's usual equipment differs (e.g. a Planet-Fitness-style gym has no
+barbells, squat racks, or deadlift platforms — route around them with Smith machine, dumbbell, and
+plate-loaded/selectorized machine alternatives; a well-stocked commercial or hardcore gym needs few or
+no swaps). Only swap when you're reasonably confident about that gym's equipment; when unsure, leave it
+alone rather than guess. Use EXACT names from the exercise catalog for both sides of every swap, and
+mention the gym naturally in the welcome.
+
 Write the welcome like a knowledgeable coach who just read their answers: warm, specific, and concise.
 Reference what they told you. Explain your choices in plain language, not jargon.
 
@@ -115,9 +145,16 @@ function describeAnswers(a: OnboardAnswers): string {
   if (a.goal) parts.push(`Primary goal: ${a.goal}`);
   if (a.days) parts.push(`Days per week they can train: ${a.days}`);
   if (a.equipment) parts.push(`Equipment / location: ${a.equipment}`);
+  if (a.gym) parts.push(`Gym / franchise they train at: ${a.gym}`);
   if (a.diet) parts.push(`Eating goal: ${a.diet}`);
   if (a.units) parts.push(`Units: ${a.units}`);
-  return `Here are the new user's onboarding answers:\n\n${parts.join('\n')}\n\nBuild their starting plan and welcome them.`;
+
+  let catalog = '';
+  if (a.catalog?.length) {
+    const lines = a.catalog.map(g => `- ${g.muscle}: ${g.names.join(', ')}`).join('\n');
+    catalog = `\n\nExercise catalog (use these EXACT names for any exercise_swaps):\n${lines}`;
+  }
+  return `Here are the new user's onboarding answers:\n\n${parts.join('\n')}${catalog}\n\nBuild their starting plan and welcome them.`;
 }
 
 export async function handleOnboard(request: Request, env: OnboardEnv, cors: Record<string, string>): Promise<Response> {
@@ -169,7 +206,9 @@ export async function handleOnboard(request: Request, env: OnboardEnv, cors: Rec
   const toolUse = response.content.find(
     (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'create_onboarding_plan'
   );
-  const input = toolUse?.input as { split?: string; training_type?: string; program_name?: string; welcome?: string } | undefined;
+  const input = toolUse?.input as
+    | { split?: string; training_type?: string; program_name?: string; welcome?: string; exercise_swaps?: unknown }
+    | undefined;
 
   if (
     !input ||
@@ -181,6 +220,19 @@ export async function handleOnboard(request: Request, env: OnboardEnv, cors: Rec
     return json({ error: 'bad_plan' }, 502, cors);
   }
 
+  // Sanitize swaps: keep only well-formed {from,to} string pairs, cap the count. The client
+  // resolves these names against its real library and ignores any that don't match, so a bad
+  // swap degrades to a no-op rather than a broken program.
+  const swaps = Array.isArray(input.exercise_swaps)
+    ? input.exercise_swaps
+        .filter(
+          (s): s is { from: string; to: string } =>
+            !!s && typeof (s as { from?: unknown }).from === 'string' && typeof (s as { to?: unknown }).to === 'string'
+        )
+        .slice(0, 20)
+        .map(s => ({ from: s.from.slice(0, 80), to: s.to.slice(0, 80) }))
+    : [];
+
   // Mark done only after a valid plan, so a failed attempt doesn't burn the account's one shot.
   if (kv) await kv.put(onboardedKey, '1');
 
@@ -189,7 +241,8 @@ export async function handleOnboard(request: Request, env: OnboardEnv, cors: Rec
       split: input.split,
       trainingType: input.training_type,
       name: typeof input.program_name === 'string' ? input.program_name.slice(0, 80) : null,
-      welcome: input.welcome.slice(0, 4000)
+      welcome: input.welcome.slice(0, 4000),
+      swaps
     },
     200,
     cors

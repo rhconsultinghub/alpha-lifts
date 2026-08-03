@@ -9,6 +9,7 @@ import type {
   TrainingType, Units, WarmupStyle, WorkoutSetRow, WizardCustomDay
 } from '../data/types';
 import { askCoach, buildCoachContext, parseProposals, fetchCoachStatus, COACH_CONFIGURED, COACH_HISTORY_CAP } from './coach';
+import { applyExerciseSwaps, type ExerciseSwap } from './onboarding';
 import {
   recommendation, restForExercise, dayMuscleRanks, isWeekComplete, fmtWeight,
   nextIncompleteIndex, defaultCompareLiftIds, bestSetScore, effectiveLast
@@ -422,16 +423,30 @@ export function useApp() {
   // (or the deterministic fallback) picked — builds the program the same way, and stashes the
   // welcome + answers so the app remembers who this plan was built for.
   const finishOnboarding = useCallback(
-    (choice: { name: string; trainingType: TrainingType; splitId: string; welcome: string; profile: AppState['onboardingProfile'] }) => {
+    (choice: {
+      name: string;
+      trainingType: TrainingType;
+      splitId: string;
+      welcome: string;
+      profile?: AppState['onboardingProfile'];
+      swaps?: ExerciseSwap[];
+      // 'scratch' builds empty days (the opt-out / build-your-own path); defaults to 'recommended'.
+      prefill?: 'recommended' | 'scratch';
+      // Launch the first-run app tutorial after landing (used by the opt-out path).
+      startTutorial?: boolean;
+    }) => {
       setState(s => {
         const preset = SPLIT_PRESETS.find(p => p.id === choice.splitId) || SPLIT_PRESETS[0];
-        const built = buildProgramFromPreset(preset, choice.trainingType, 'recommended');
+        const built = buildProgramFromPreset(preset, choice.trainingType, choice.prefill ?? 'recommended');
+        // Adapt the default exercises to the user's gym (AI-proposed swaps; no-op if none / none match).
+        if (choice.swaps && choice.swaps.length) applyExerciseSwaps(built.days, choice.swaps);
         const newId = 'prog_' + Date.now();
         return {
           ...s,
           onboarded: true,
           onboardingWelcome: choice.welcome,
           onboardingProfile: choice.profile,
+          showTutorial: !!choice.startTutorial,
           activeProgramId: newId,
           programName: choice.name.trim() || 'My Program',
           trainingType: choice.trainingType,
@@ -447,6 +462,11 @@ export function useApp() {
     },
     []
   );
+
+  // First-run app tutorial controls. dismiss marks it seen (so it never auto-shows again); open
+  // re-launches it on demand from Settings.
+  const dismissTutorial = useCallback(() => setState(s => ({ ...s, showTutorial: false, tutorialSeen: true })), []);
+  const openTutorial = useCallback(() => setState(s => ({ ...s, showTutorial: true })), []);
 
   const toggleSkipDay = useCallback((dayKey: string) => {
     setState(s => {
@@ -1620,7 +1640,7 @@ export function useApp() {
       switchProgram, newProgram, requestRemoveProgram, renameSavedProgram,
       openNewProgramWizard, closeNewProgramWizard, setWizardField, setWizardPrefill, selectWizardSplit,
       addWizardCustomDay, removeWizardCustomDay, setWizardCustomDayField, createProgramFromWizard,
-      completeOnboarding, finishOnboarding,
+      completeOnboarding, finishOnboarding, dismissTutorial, openTutorial,
       setBodyView, openBodyModal, closeBodyModal, openDetail, closeDetail, openQuickEdit, closeQuickEdit,
       openMuscleDrill, closeMuscleDrill, openWarmupDetail, closeWarmupDetail,
       openLibraryDetail, closeLibraryDetail, setExerciseSearchQuery, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,

@@ -25,10 +25,10 @@ const ACCENT = '#f0752f';
 const TEXT = '#f5f0ea';
 const BG = '#0f0e0d';
 
-type Step = 'intro' | 'basics' | 'experience' | 'goal' | 'days' | 'equipment' | 'diet' | 'generating' | 'reveal';
+type Step = 'intro' | 'basics' | 'experience' | 'goal' | 'days' | 'equipment' | 'gym' | 'diet' | 'generating' | 'reveal';
 
-// The six answered steps, in order, for the progress bar.
-const QUESTION_STEPS: Step[] = ['basics', 'experience', 'goal', 'days', 'equipment', 'diet'];
+// The answered steps, in order, for the progress bar.
+const QUESTION_STEPS: Step[] = ['basics', 'experience', 'goal', 'days', 'equipment', 'gym', 'diet'];
 
 interface Option<T> {
   value: T;
@@ -81,8 +81,22 @@ const TRAINING_LABEL: Record<TrainingType, string> = {
 export function OnboardingScreen({ vm }: { vm: ViewModel }) {
   const ob = vm.onboarding;
   const [step, setStep] = useState<Step>('intro');
+  // 'ai' = let us build a tailored plan; 'manual' = opt out, set it up themselves + app tour.
+  const [mode, setMode] = useState<'ai' | 'manual'>('ai');
   const [answers, setAnswers] = useState<Partial<OnboardingAnswers>>({ units: ob.units });
   const [plan, setPlan] = useState<OnboardingPlan | null>(null);
+
+  // Opt-out completion: build an empty starter program (they'll fill it in), then launch the tour.
+  function finishManual() {
+    ob.finish({
+      name: answers.name ?? '',
+      trainingType: 'general',
+      splitId: 'full_body',
+      welcome: '',
+      prefill: 'scratch',
+      startTutorial: true
+    });
+  }
 
   // Kick off generation exactly once when we enter the generating step.
   const generatingRef = useRef(false);
@@ -133,15 +147,21 @@ export function OnboardingScreen({ vm }: { vm: ViewModel }) {
       )}
 
       <div key={step} style={{ flex: 1, padding: '24px 20px 20px', display: 'flex', flexDirection: 'column', animation: 'obFade .28s ease' }}>
-        {step === 'intro' && <Intro onStart={() => setStep('basics')} />}
+        {step === 'intro' && (
+          <Intro
+            onStart={() => { setMode('ai'); setStep('basics'); }}
+            onSkip={() => { setMode('manual'); setStep('basics'); }}
+          />
+        )}
 
         {step === 'basics' && (
           <BasicsStep
+            manual={mode === 'manual'}
             name={answers.name ?? ''}
             units={answers.units ?? ob.units}
             onName={n => set('name', n)}
             onUnits={u => { set('units', u); ob.setUnits(u); }}
-            onContinue={() => setStep('experience')}
+            onContinue={() => (mode === 'manual' ? finishManual() : setStep('experience'))}
           />
         )}
 
@@ -181,7 +201,15 @@ export function OnboardingScreen({ vm }: { vm: ViewModel }) {
             subtitle="So your plan fits where you actually train."
             options={EQUIPMENT_OPTS}
             selected={answers.equipment}
-            onPick={v => pickAndAdvance('equipment', v, 'diet')}
+            onPick={v => pickAndAdvance('equipment', v, 'gym')}
+          />
+        )}
+
+        {step === 'gym' && (
+          <GymStep
+            gym={answers.gym ?? ''}
+            onGym={g => set('gym', g)}
+            onContinue={() => setStep('diet')}
           />
         )}
 
@@ -208,6 +236,7 @@ export function OnboardingScreen({ vm }: { vm: ViewModel }) {
                 trainingType: plan.trainingType,
                 splitId: plan.splitId,
                 welcome: plan.welcome,
+                swaps: plan.swaps,
                 profile: {
                   experience: answers.experience ?? 'intermediate',
                   goal: answers.goal ?? 'general',
@@ -225,14 +254,14 @@ export function OnboardingScreen({ vm }: { vm: ViewModel }) {
 }
 
 function stepBack(step: Step): Step {
-  const order: Step[] = ['intro', 'basics', 'experience', 'goal', 'days', 'equipment', 'diet'];
+  const order: Step[] = ['intro', 'basics', 'experience', 'goal', 'days', 'equipment', 'gym', 'diet'];
   const i = order.indexOf(step);
   return i > 0 ? order[i - 1] : 'intro';
 }
 
 // --- steps ----------------------------------------------------------------------------------
 
-function Intro({ onStart }: { onStart: () => void }) {
+function Intro({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', textAlign: 'center' }}>
       <div style={{ fontSize: 52, marginBottom: 18 }}>🏋️</div>
@@ -240,24 +269,32 @@ function Intro({ onStart }: { onStart: () => void }) {
         Welcome to Alpha Lifts
       </div>
       <div style={{ font: "400 15px 'Inter'", color: 'rgba(245,240,234,.6)', lineHeight: 1.55, maxWidth: 320, margin: '0 auto 8px' }}>
-        Answer a few quick questions and we’ll build a training plan made just for you — your goals,
-        your schedule, your setup.
+        Answer a few quick questions and we’ll build a training plan made just for you — free, and
+        tailored to your goals, schedule, and gym.
       </div>
       <div style={{ font: "400 13px 'Inter'", color: 'rgba(245,240,234,.35)', marginBottom: 34 }}>
         Takes about a minute.
       </div>
-      <PrimaryButton onClick={onStart}>Let’s build your plan →</PrimaryButton>
+      <PrimaryButton onClick={onStart}>Build my plan for me →</PrimaryButton>
+      <button
+        onClick={onSkip}
+        style={{ background: 'none', border: 'none', color: 'rgba(245,240,234,.5)', font: "600 13px 'Inter'", marginTop: 16, cursor: 'pointer', padding: 8 }}
+      >
+        I’ll set it up myself
+      </button>
     </div>
   );
 }
 
 function BasicsStep({
+  manual,
   name,
   units,
   onName,
   onUnits,
   onContinue
 }: {
+  manual: boolean;
   name: string;
   units: 'kg' | 'lb';
   onName: (n: string) => void;
@@ -266,7 +303,10 @@ function BasicsStep({
 }) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-      <StepHeading title="First, the basics" subtitle="So your plan feels like yours." />
+      <StepHeading
+        title="First, the basics"
+        subtitle={manual ? 'Then we’ll drop you in and show you around.' : 'So your plan feels like yours.'}
+      />
 
       <label style={labelStyle} htmlFor="ob-name">WHAT SHOULD WE CALL YOU?</label>
       <input
@@ -285,7 +325,29 @@ function BasicsStep({
       </div>
 
       <div style={{ flex: 1 }} />
-      <PrimaryButton onClick={onContinue}>Continue →</PrimaryButton>
+      <PrimaryButton onClick={onContinue}>{manual ? 'Enter Alpha Lifts →' : 'Continue →'}</PrimaryButton>
+    </div>
+  );
+}
+
+function GymStep({ gym, onGym, onContinue }: { gym: string; onGym: (g: string) => void; onContinue: () => void }) {
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <StepHeading
+        title="Where do you train?"
+        subtitle="Name your gym and we’ll tailor your exercises to what’s usually available there — machines, free weights, whatever they’ve got. Totally optional."
+      />
+      <label style={labelStyle} htmlFor="ob-gym">GYM OR FRANCHISE</label>
+      <input
+        id="ob-gym"
+        value={gym}
+        onChange={e => onGym(e.target.value)}
+        placeholder="e.g. Planet Fitness, Gold’s Gym…"
+        autoCapitalize="words"
+        style={{ width: '100%', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.12)', color: TEXT, font: "600 16px 'Inter'", padding: '13px 14px', borderRadius: 12, boxSizing: 'border-box' }}
+      />
+      <div style={{ flex: 1 }} />
+      <PrimaryButton onClick={onContinue}>{gym.trim() ? 'Continue →' : 'Skip for now'}</PrimaryButton>
     </div>
   );
 }

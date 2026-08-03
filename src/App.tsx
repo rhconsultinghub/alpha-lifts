@@ -13,6 +13,7 @@ import { ExercisesScreen } from './components/ExercisesScreen';
 import { AchievementsScreen } from './components/AchievementsScreen';
 import { CoachScreen } from './components/CoachScreen';
 import { TabBar } from './components/TabBar';
+import { AppTutorial } from './components/AppTutorial';
 import { ResumePill } from './components/ResumePill';
 import { RestToast } from './components/RestToast';
 import { IdleWorkoutToast } from './components/IdleWorkoutToast';
@@ -84,6 +85,7 @@ export default function App() {
         <RestToast vm={vm} />
         <ConfirmRemoveExerciseModal vm={vm} />
         <IdleWorkoutToast vm={vm} />
+        <AppTutorial vm={vm} />
       </div>
     </div>
   );

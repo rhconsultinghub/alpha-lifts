@@ -10,13 +10,20 @@
  * plan is a real, valid program.
  */
 
-import { COACH_API_URL, COACH_CONFIGURED } from './coach';
-import type { TrainingType } from '../data/types';
+import { COACH_API_URL, COACH_CONFIGURED, buildCatalog, resolveExerciseId } from './coach';
+import { mkEx } from '../data/program';
+import type { ProgramDays, TrainingType } from '../data/types';
 
 export type Experience = 'beginner' | 'intermediate' | 'advanced';
 export type Goal = 'muscle' | 'strength' | 'general' | 'endurance';
 export type Equipment = 'full_gym' | 'home_basic' | 'minimal';
 export type Diet = 'build' | 'lean' | 'maintain' | 'unsure';
+
+/** A gym-tailored exercise substitution, by exercise name (resolved to ids when applied). */
+export interface ExerciseSwap {
+  from: string;
+  to: string;
+}
 
 export interface OnboardingAnswers {
   name: string;
@@ -26,6 +33,8 @@ export interface OnboardingAnswers {
   equipment: Equipment;
   diet: Diet;
   units: 'kg' | 'lb';
+  /** Optional free-text gym/franchise name for equipment-aware tailoring. */
+  gym?: string;
 }
 
 export interface OnboardingPlan {
@@ -35,6 +44,8 @@ export interface OnboardingPlan {
   name: string;
   /** The personal welcome message shown on the reveal screen. */
   welcome: string;
+  /** Gym-tailored exercise swaps to apply to the built program (empty for the fallback). */
+  swaps: ExerciseSwap[];
   /** 'ai' when the Worker generated it, 'fallback' when built locally. */
   source: 'ai' | 'fallback';
 }
@@ -58,16 +69,24 @@ export async function generateOnboardingPlan(answers: OnboardingAnswers): Promis
       const res = await fetch(`${COACH_API_URL}/onboard`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(answers)
+        // The catalog lets the AI name real exercises for gym-appropriate swaps.
+        body: JSON.stringify({ ...answers, catalog: answers.gym ? buildCatalog() : undefined })
       });
       if (res.ok) {
-        const data = (await res.json()) as { split?: string; trainingType?: string; name?: string | null; welcome?: string };
+        const data = (await res.json()) as {
+          split?: string;
+          trainingType?: string;
+          name?: string | null;
+          welcome?: string;
+          swaps?: ExerciseSwap[];
+        };
         if (data.split && data.trainingType && data.welcome) {
           return {
             splitId: data.split,
             trainingType: data.trainingType as TrainingType,
             name: (data.name && data.name.trim()) || defaultProgramName(answers),
             welcome: data.welcome,
+            swaps: Array.isArray(data.swaps) ? data.swaps : [],
             source: 'ai'
           };
         }
@@ -151,6 +170,27 @@ function fallbackWelcome(answers: OnboardingAnswers, splitId: string): string {
   return `${p1}\n\n${p2}\n\n${p3}`;
 }
 
+/**
+ * Apply gym-tailored swaps to a freshly built program (mutates `days`). Each swap's `from`/`to`
+ * names are resolved against the real exercise library; a swap is applied wherever its resolved
+ * `from` id appears across the week. Anything that doesn't resolve, or whose `from` isn't in the
+ * program, is skipped — so a hallucinated or irrelevant swap degrades to a no-op rather than
+ * corrupting the plan. Swapped entries are rebuilt with `mkEx` (equipIdx reset to 0, valid for any
+ * exercise) preserving the original set count.
+ */
+export function applyExerciseSwaps(days: ProgramDays, swaps: ExerciseSwap[]): void {
+  for (const swap of swaps) {
+    const fromId = resolveExerciseId(swap.from);
+    const toId = resolveExerciseId(swap.to);
+    if (!fromId || !toId || fromId === toId) continue;
+    for (const key of Object.keys(days)) {
+      const day = days[key];
+      if (!day.exercises) continue;
+      day.exercises = day.exercises.map(ex => (ex.id === fromId ? mkEx(toId, ex.sets, 0, ex.last) : ex));
+    }
+  }
+}
+
 function fallbackPlan(answers: OnboardingAnswers): OnboardingPlan {
   const splitId = fallbackSplit(answers);
   return {
@@ -158,6 +198,8 @@ function fallbackPlan(answers: OnboardingAnswers): OnboardingPlan {
     trainingType: fallbackTrainingType(answers.goal),
     name: defaultProgramName(answers),
     welcome: fallbackWelcome(answers, splitId),
+    // No AI = no gym-tailored swaps; the deterministic preset stands as-is.
+    swaps: [],
     source: 'fallback'
   };
 }

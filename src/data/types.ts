@@ -273,6 +273,10 @@ export interface AppState {
     equipment: string;
     diet: string;
   };
+  // First-run app tutorial (guided tour). `showTutorial` drives the overlay; `tutorialSeen` records
+  // that it's been through once (so it isn't forced again). Both optional/back-compat.
+  showTutorial?: boolean;
+  tutorialSeen?: boolean;
   screen: Screen;
   trainingType: TrainingType;
   dayOrder: string[];

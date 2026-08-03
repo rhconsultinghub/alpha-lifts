@@ -70,6 +70,15 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
               </div>
             </>
           )}
+          <button
+            onClick={() => { st.close(); vm.openTutorial(); }}
+            style={{ width: '100%', textAlign: 'left', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 14, padding: '13px 14px', color: '#f5f0ea', font: "600 13px 'Inter'", marginBottom: 24, display: 'flex', alignItems: 'center', gap: 10 }}
+          >
+            <span style={{ fontSize: 17 }}>🧭</span>
+            <span style={{ flex: 1 }}>Replay app tutorial</span>
+            <span style={{ color: 'rgba(245,240,234,.4)', fontSize: 16 }}>›</span>
+          </button>
+
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>UNITS</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
             <button onClick={st.setKg} style={{ flex: 1, font: "700 13px 'Inter'", padding: 12, borderRadius: 12, border: 'none', background: st.unitsKgBg, color: st.unitsKgColor }}>Kilograms (kg)</button>

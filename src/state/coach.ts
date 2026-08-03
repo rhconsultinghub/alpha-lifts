@@ -157,7 +157,7 @@ function buildStats(s: AppState): CoachContext['stats'] {
 /** Every catalogued exercise (built-ins + this session's custom ones, already merged into EXLIB),
  *  grouped by muscle, name only. The coach must use these exact names in tool args so the client
  *  can resolve them back to ids by exact match. */
-function buildCatalog(): CoachContext['catalog'] {
+export function buildCatalog(): CoachContext['catalog'] {
   const byMuscle: Record<string, string[]> = {};
   for (const def of Object.values(EXLIB)) {
     (byMuscle[def.muscle] ||= []).push(def.name);
@@ -225,7 +225,7 @@ function nameToIdMap(): Record<string, string> {
   return exactNameToId;
 }
 
-function resolveExerciseId(rawName: string): string | null {
+export function resolveExerciseId(rawName: string): string | null {
   const q = normalizeName(rawName);
   if (!q) return null;
   const map = nameToIdMap();
