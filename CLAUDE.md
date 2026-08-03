@@ -53,34 +53,25 @@ buildViewModel(state, actions) (src/state/viewModel.ts)
 - **`src/icons/ExerciseIcon.tsx`** — hand-drawn SVG pictograms per exercise "pattern" (movement
   type, e.g. `bench_press`, `row`, `squat`), used as the fallback for any exercise without a
   bundled photo (see below). Single accent color, duotone body-line strokes for visual weight.
-- **`src/components/BodyDiagram.tsx`** — anatomical body map (front/back). This renders a real
-  reference image (`public/body-front.png` / `body-back.png`, 482x973 / 470x966px — cropped and
-  auto-trimmed from a user-supplied front+back anatomy chart) with a semi-transparent SVG shading
-  overlay on top; it does **not** hand-draw the body. Opacity per region = how much that muscle is
-  worked, same as before. The source images are **color-inverted** (`sharp().negate()`, then
-  palette-compressed) so they render as light line art on a near-black `#0a0908` background
-  instead of dark lines on a white card — the white card was previously called out by the user as
-  looking like "a white square that sticks out" against this app's otherwise all-dark UI; inverting
-  the art itself (rather than just recoloring the wrapper behind it) was the fix, since the
-  original source art's background *was* the white square. Overlay `<path>`/ellipse coordinates
-  were calibrated directly against these exact images — a coordinate grid was composited over each
-  cropped image with `sharp`, read back visually, and each region's shape hand-placed to align
-  with that specific artwork — not derived from generic anatomy proportions. This calibration has
-  gone through two passes: the first pass got the coordinate *space* right but left several
-  regions genuinely mispositioned (front shoulders overlapping the neck, front/back arm regions
-  bleeding past the elbow into the forearm, back rear-delts/traps/triceps overlapping each other
-  heavily); the second pass tightened all of those per user feedback that highlights weren't
-  staying inside the muscle outlines. If the reference image ever changes, the overlay coordinates
-  need to be recalibrated the same way (composite a labeled grid over the new image, read it,
-  redraw the regions, then composite the *exact* region paths back over the image and visually
-  confirm containment before trusting it — a coordinate grid read by eye alone was not precise
-  enough on its own in either pass). The component sizes the image via `objectFit: contain` +
-  matching SVG `viewBox`/`preserveAspectRatio` so the overlay and image always scale identically
-  regardless of the two images' slightly different aspect ratios. There's no live-app screenshot
-  tool reliably available in every sandbox — verifying a change here by extracting the rendered
-  SVG's live DOM markup and compositing it back onto the source PNG with `sharp` in a scratch
-  script, then reading the resulting PNG, has worked when the harness's own screenshot action
-  hangs.
+- **`src/components/BodyDiagram.tsx`** — anatomical body map (front/back). Renders the real
+  reference images (`public/body-front.png` / `body-back.png`, 482x973 / 470x966px, color-inverted
+  light line art on near-black — see phase 11 for why) with **per-muscle CSS `mask-image` tint
+  layers** whose alpha masks (`public/muscle-masks/{view}-{slug}.png`, 14 files, ~38KB total) are
+  generated from the artwork's own pixels by `scripts/make-muscle-masks.mjs` (kept in the repo;
+  run `npm install --no-save sharp` then `node scripts/make-muscle-masks.mjs` if the reference
+  images ever change). Opacity per muscle = how much that muscle is worked (`fillForMuscle`). The
+  generator thresholds the line art, connected-component labels the closed drawn compartments,
+  auto-assigns each compartment to a muscle by majority overlap with the old hand-traced hint
+  polygons (which live on in the script as assignment hints), and takes manual `seeds`/`patchLines`
+  overrides for compartments the art doesn't close (see the script's config comments — e.g. the
+  art has no closed skull-base line, no wrist lines, and the thigh runs open through the knee into
+  the shin). Containment is exact by construction — a fill cannot cross a drawn line — which is
+  what replaced the previous hand-traced SVG polygon overlay after six calibration passes
+  (phases 9-32) never fully stopped the bleeding. Masks are emitted at native image dimensions so
+  `mask-size: contain` + `mask-position: center` letterbox identically to the `<img>`'s
+  `objectFit: contain` at any render size; a `CSS.supports` guard keeps unsupported browsers at
+  no-highlight instead of painting an unmasked accent rectangle (masks are alpha-type — CSS
+  `mask-mode` defaults to alpha for raster images, so they must be emitted as grey+alpha PNGs).
 - **`src/data/exercisePhotos.ts`** + **`public/exercise-photos/*.jpg`** — real reference photos.
   `EXERCISE_PHOTO_IDS` is the allowlist of exercise ids that have a bundled photo — as of this
   writing that's all 151 exercises (137 from free-exercise-db, github.com/yuhonas/free-exercise-db,
@@ -1806,3 +1797,45 @@ first-run app tour, and email verification.
   **Deploy order matters:** the remote `migrate-add-email-verify.sql` must be applied BEFORE deploying a
   Worker whose code reads the new columns (already done this round). Run migrations from
   `L:\…\alpha-lifts\worker`.
+
+(42) **muscle diagram made pixel-exact — seventh and final containment fix, structural this time.**
+User: the diagram "still colors outside the lines"; they offered a self-designed muscle model as a
+fallback but explicitly not "a human resembling object made of squares and circles" (phase 20's
+rejected approach). Root cause called correctly this round: six hand-recalibration passes (phases
+9-32) all failed the same way because nothing *clips* an overlay polygon to the artwork — a
+hand-traced bezier can only approximate a hand-drawn anti-aliased contour. Fix: derive the shading
+masks **from the artwork's own pixels** so containment is exact by construction (see the
+`BodyDiagram.tsx` architecture bullet above for the mechanism). `BodyDiagram.tsx` dropped from 113
+to ~60 lines, the region-path data moved into `scripts/make-muscle-masks.mjs` as assignment hints,
+and the component now renders per-muscle CSS-masked tint divs instead of an SVG.
+
+Things learned doing it, for whoever touches the generator next:
+- **The art's compartments are not all closed.** Real gaps found and sealed with `patchLines`: no
+  skull-base line at all on the back view (head+ears+neck+traps are ONE compartment — and diagonal
+  cuts through the skull interior don't work, the sides flow around them; only a full-width
+  horizontal cut at y=148 seals it), no wrist lines (forearms run into the hands on both views),
+  front thigh runs open through the knee into the shin, front biceps leaks down the
+  brachioradialis strip past the elbow crease, and the back-right glute-edge band is fused to the
+  hamstring under the gluteal fold (the left side happens to be drawn closed — asymmetries like
+  this are real, don't assume mirror symmetry when diagnosing).
+- **Debug by rendering the component map, not by staring at the art.** A colorized
+  connected-component crop (each compartment a distinct color) shows *exactly* which regions
+  merged and where the corridor is; grid crops of the raw art were repeatedly misread. The
+  bbox/row-extent trace of a single component (min/max x per row) is what finally located the
+  skull-base flow-around.
+- **Patch-line seams inside one muscle self-heal**: the emitted masks dilate 1px clipped to
+  (own region ∪ line pixels), and a patch line is 2px thick, so a cut between two same-muscle
+  components disappears in the final mask. Full-width cuts are therefore safe.
+- The report's area-ratio flags (`assigned vs hint`) can false-positive when the *hint* was
+  under-traced — front Biceps sits at x1.39 because the drawn biceps+brachialis compartment is
+  genuinely bigger than the phase-32 trace; confirmed contained via the component bbox before
+  accepting it.
+- Verified: offline debug + production-tint composites at full res and 34×63 (the containment
+  gate), then live DOM against `npm run dev` — mask layer count/URLs/opacities per view correct on
+  the Day View thumbnail and both modal views, all 14 masks 200, zero console errors. Seeded a
+  temporary mixed day for that (backed up + restored the dev `localStorage` blob; note a seeded
+  `ProgramExercise` needs `baseline` AND `last` or the app crashes on render). Workbox precache
+  picked the masks up via the existing `png` glob (184 entries, +14). A root-level
+  `.claude/launch.json` was added because the browser tool resolves it from the workspace root
+  (`L:\Personal Projects\Alpha Lifts`), not the app subfolder — it runs
+  `npm run dev --prefix alpha-lifts`.
