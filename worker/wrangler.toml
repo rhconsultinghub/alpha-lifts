@@ -19,7 +19,7 @@ ALLOWED_ORIGINS = "https://rhconsultinghub.github.io,http://localhost:5173"
 #   npx wrangler secret put RESEND_API_KEY        # from resend.com dashboard
 # RESEND_FROM must be a sender verified in Resend once you've added a domain; until then Resend only
 # delivers to your own address from "onboarding@resend.dev" (fine for testing).
-RESEND_FROM = "Alpha Lifts <onboarding@resend.dev>"
+RESEND_FROM = "Alpha Lifts <noreply@alpha-lifts.com>"
 # Where the /auth/verify email-link landing page sends the user back to.
 APP_URL = "https://rhconsultinghub.github.io/alpha-lifts/"
 
