@@ -13,7 +13,7 @@ export function AchievementsScreen({ vm }: { vm: ViewModel }) {
   }, []);
 
   return (
-    <div style={{ padding: '24px 20px 100px' }}>
+    <div style={{ padding: '24px 20px calc(var(--tabbar-h) + var(--safe-b) + 28px)' }}>
       <div className="num" style={{ fontSize: 30, fontWeight: 700, marginBottom: 4 }}>Achievements</div>
       <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.45)', marginBottom: 22 }}>Every badge tiers up — there's always a next level to chase.</div>
 

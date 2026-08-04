@@ -1,5 +1,5 @@
 import { EXLIB, DAY_THEMES, MUSCLE_TARGETS, TRAINING_LABELS, TRAINING_TYPE_DESCS, EQUIP_CATALOG } from '../data/exercises';
-import { SPLIT_PRESETS, DAY_TYPE_LABELS } from '../data/wizard';
+import { SPLIT_PRESETS, DAY_TYPE_LABELS, WEEKDAYS } from '../data/wizard';
 import { WARMUP_LIBRARY } from '../data/warmups';
 import { ACHIEVEMENT_FAMILIES, CATEGORY_LABELS, TOTAL_POSSIBLE_POINTS, TOTAL_TIERS, type AchievementCategory } from '../data/achievements';
 import type { AppState, HistoryEntry, Muscle, TrainingType } from '../data/types';
@@ -364,6 +364,62 @@ export function buildViewModel(state: AppState, actions: Actions) {
     };
   });
 
+  // ---------- edit week (permanent day-structure editing) ----------
+  // Same row shape the New Program wizard's custom-day editor uses (see wizardVM below) — the two
+  // are deliberately the same control, one building a program and one editing the live plan.
+  const editWeek = (() => {
+    const rows = s.dayOrder.map((key, i) => {
+      const day = s.program[key];
+      const isRest = (day.kind || 'training') === 'rest';
+      const exCount = (day.exercises || []).length;
+      return {
+        key,
+        label: day.label,
+        dow: day.dow,
+        isRest,
+        // Shown on a rest day that still has exercises parked on it, so it's clear they're kept
+        // rather than lost and that flipping back restores the day.
+        keptNote: isRest && exCount ? `${exCount} exercise${exCount === 1 ? '' : 's'} kept` : '',
+        subtitle: isRest ? 'Rest day' : `${exCount} exercise${exCount === 1 ? '' : 's'}`,
+        trainingBg: !isRest ? ACCENT : 'rgba(255,255,255,.06)',
+        trainingColor: !isRest ? '#0d0c0b' : 'rgba(245,240,234,.6)',
+        restBg: isRest ? ACCENT : 'rgba(255,255,255,.06)',
+        restColor: isRest ? '#0d0c0b' : 'rgba(245,240,234,.6)',
+        setTraining: () => actions.setDayKind(key, 'training'),
+        setRest: () => actions.setDayKind(key, 'rest'),
+        setLabel: (v: string) => actions.renameDay(key, v),
+        canMoveUp: i > 0,
+        canMoveDown: i < s.dayOrder.length - 1,
+        moveUp: () => actions.moveProgramDay(key, 'up'),
+        moveDown: () => actions.moveProgramDay(key, 'down'),
+        // The last remaining day can't go, and neither can the one a workout is live on.
+        canRemove: s.dayOrder.length > 1 && !(s.workout && s.workout.dayKey === key),
+        remove: () => actions.requestRemoveProgramDay(key)
+      };
+    });
+    const pending = s.confirmRemoveDayKey ? s.program[s.confirmRemoveDayKey] : null;
+    return {
+      open: !!s.editWeekOpen,
+      close: actions.closeEditWeek,
+      rows,
+      addDay: actions.addProgramDay,
+      // One row per weekday and no more — see addProgramDay for why an 8th day can't be given a
+      // sane `dow`.
+      canAddDay: s.dayOrder.length < WEEKDAYS.length,
+      note: 'Weekdays follow the order below — reorder a day and its weekday moves with it.',
+      fullNote: 'A plan covers one week, so seven days is the maximum. Make a day a rest day instead of adding another.',
+      confirmRemove: pending
+        ? {
+            show: true,
+            label: pending.label,
+            exCount: (pending.exercises || []).length,
+            confirm: actions.confirmRemoveProgramDay,
+            cancel: actions.cancelRemoveProgramDay
+          }
+        : { show: false }
+    };
+  })();
+
   // ---------- day view ----------
   let currentDay: any = null;
   if (s.activeDayKey) {
@@ -401,7 +457,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       exercises: day.exercises.map((ex, i) => {
         const lib = EXLIB[ex.id];
         const equip = lib.equip[ex.equipIdx];
-        const r = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id], s.exerciseHistory, deloadPct);
+        const r = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id], s.exerciseHistory, deloadPct, s.trainingType);
         const isTime = lib.trackingMode === 'time';
         return {
           id: ex.id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label,
@@ -469,7 +525,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     const lib = EXLIB[ex.id];
     const equip = lib.equip[ex.equipIdx];
     const exHistory = s.exerciseHistory[ex.id];
-    const rec = recommendation(ex, s.units, s.coachVoice, exHistory, s.exerciseHistory, deloadPct);
+    const rec = recommendation(ex, s.units, s.coachVoice, exHistory, s.exerciseHistory, deloadPct, s.trainingType);
     const currentSets = s.workout.exSets[exIndex] || [];
     // Warm-ups ramp to the heaviest set the user is actually about to do this session (their edited
     // working weight if they've changed it, otherwise today's recommendation) — not last session's.
@@ -915,7 +971,11 @@ export function buildViewModel(state: AppState, actions: Actions) {
         applicable: !p.error && !!p.payload,
         apply: () => actions.applyCoachProposal(m.id, i),
         dismiss: () => actions.dismissCoachProposal(m.id, i)
-      }))
+      })),
+      // Drives the "Apply all (N)" shortcut on a turn that proposed several changes. Counts only
+      // what's still actionable, so it disappears as cards are resolved individually.
+      pendingApplicableCount: (m.proposals || []).filter(p => p.status === 'pending' && !p.error && !!p.payload).length,
+      applyAll: () => actions.applyAllCoachProposals(m.id)
     })),
     isEmpty: s.coachMessages.length === 0,
     input: s.coachInput,
@@ -1031,6 +1091,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     warmupDetail,
     planPrompt,
     completeSubtitle,
+    editWeek, openEditWeek: actions.openEditWeek,
     firstName, homeGreeting, startWorkoutHint,
     showResume, resumeText, resumeElapsedText, resumeWorkout: actions.resumeWorkout,
     currentUnitsLabel, currentPlanLabel: TRAINING_LABELS[s.trainingType], programName: s.programName,

@@ -128,12 +128,19 @@ export function fatigueRead(state: AppState): FatigueRead {
       (e.sets || []).forEach(r => { if (typeof r.rir === 'number') recentRirs.push(r.rir); });
     });
   });
+  //
+  //    Downgraded to a corroborator on the low-volume/high-effort plan ('hit'): finishing at or
+  //    near failure is that style's entire prescription, not evidence that load has outrun
+  //    recovery. At the full 0.6 this signal alone cleared TRIGGER_THRESHOLD, so anyone on that
+  //    plan who logged RIR honestly got a deload proposed every eligible week and the other two
+  //    signals never got a say.
+  const failureIsThePlan = state.trainingType === 'hit';
   if (recentRirs.length >= 6) {
     const avg = recentRirs.reduce((a, b) => a + b, 0) / recentRirs.length;
     if (avg <= 1) {
-      score += 0.6;
+      score += failureIsThePlan ? 0.25 : 0.6;
       reasons.push('most recent sets are ending at or near failure');
-    } else if (avg <= 1.5) {
+    } else if (avg <= 1.5 && !failureIsThePlan) {
       score += 0.35;
       reasons.push('your sets are leaving very little in reserve');
     }

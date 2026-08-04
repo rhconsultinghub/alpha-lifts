@@ -66,7 +66,7 @@ export function MuscleSwapModal({ vm }: { vm: ViewModel }) {
           )}
         </div>
 
-        <div style={{ padding: '12px 20px 20px', borderTop: '1px solid rgba(255,255,255,.08)' }}>
+        <div style={{ padding: '12px 20px calc(20px + var(--safe-b))', borderTop: '1px solid rgba(255,255,255,.08)' }}>
           <button onClick={ms.confirm} disabled={ms.confirmDisabled} style={{ width: '100%', background: ms.confirmBg, color: '#0d0c0b', font: "700 14px 'Inter'", padding: 15, borderRadius: 14, border: 'none' }}>{ms.confirmLabel}</button>
         </div>
       </div>

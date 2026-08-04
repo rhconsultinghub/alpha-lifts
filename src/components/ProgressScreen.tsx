@@ -249,7 +249,7 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
         </div>
       </div>
 
-      <div style={{ padding: '0 20px 100px' }}>
+      <div style={{ padding: '0 20px calc(var(--tabbar-h) + var(--safe-b) + 28px)' }}>
         <div style={SECTION_LABEL}>SESSION ARCHIVE</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
           {vm.sessionArchive.map(r => (

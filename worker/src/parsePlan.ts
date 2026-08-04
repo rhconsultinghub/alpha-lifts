@@ -60,7 +60,8 @@ const EXTRACT_TOOL: Anthropic.Tool = {
         enum: TRAINING_TYPES as unknown as string[],
         description:
           'The overall rep/volume style: progressive_overload = standard hypertrophy; strength = low reps near max; ' +
-          'hit = to failure, low volume; endurance = higher reps; general = balanced. Infer from the text; default progressive_overload.'
+          'hit = "Low Volume / High Effort", fewer sets taken at or near failure; endurance = higher reps; general = balanced. ' +
+          'Infer from the text; default progressive_overload.'
       },
       days: {
         type: 'array',

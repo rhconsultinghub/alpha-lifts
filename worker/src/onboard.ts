@@ -72,7 +72,8 @@ const ONBOARD_TOOL: Anthropic.Tool = {
         description:
           'The rep/volume style, chosen from their goal and experience: ' +
           'progressive_overload = standard hypertrophy volume (best default for building muscle); ' +
-          'strength = low reps near max; hit = every set to failure, low volume (advanced only); ' +
+          'strength = low reps near max; hit = "Low Volume / High Effort", fewer sets taken at or near failure ' +
+          '(for someone short on time or who prefers hard, brief sessions — not for a beginner); ' +
           'endurance = higher reps, more volume; general = balanced maintenance.'
       },
       program_name: {

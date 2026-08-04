@@ -70,7 +70,7 @@ export function SwapModal({ vm }: { vm: ViewModel }) {
           )}
         </div>
 
-        <div style={{ padding: '12px 20px 20px', borderTop: '1px solid rgba(255,255,255,.08)' }}>
+        <div style={{ padding: '12px 20px calc(20px + var(--safe-b))', borderTop: '1px solid rgba(255,255,255,.08)' }}>
           <button onClick={sw.confirm} disabled={sw.confirmDisabled} style={{ width: '100%', background: sw.confirmBg, color: '#0d0c0b', font: "700 14px 'Inter'", padding: 15, borderRadius: 14, border: 'none' }}>{sw.confirmLabel}</button>
         </div>
       </div>

@@ -109,6 +109,37 @@ export const COACH_TOOLS: Anthropic.Tool[] = [
     }
   },
   {
+    name: 'propose_set_day_kind',
+    description:
+      "Propose turning one of the user's program days into a rest day, or turning a rest day back " +
+      'into a training day. This is a PERMANENT change to the plan\'s weekly structure. Do NOT use it ' +
+      'to mean "skip this day just for this week" — the app has its own Skip button for that, and ' +
+      'converting the day would change every future week too. Exercises already on a day are kept ' +
+      'when it becomes a rest day, so the change is reversible.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        day: { type: 'string', description: 'The exact day name from the weekly split, e.g. "Monday — Push Day". Always include the weekday prefix: day labels repeat across a week (a PPL split has two "Push Day"s) and the weekday is the only thing telling them apart.' },
+        kind: { type: 'string', enum: ['training', 'rest'], description: 'What the day should become.' }
+      },
+      required: ['day', 'kind']
+    }
+  },
+  {
+    name: 'propose_rename_day',
+    description:
+      "Propose renaming one of the user's program days (e.g. \"Push Day\" to \"Chest & Shoulders\"). " +
+      'Changes the label only — the day keeps its exercises and its place in the week.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        day: { type: 'string', description: 'The exact current day name from the weekly split, including the weekday prefix, e.g. "Monday — Push Day".' },
+        name: { type: 'string', description: 'The new label for that day, without a weekday prefix, e.g. "Chest & Shoulders".' }
+      },
+      required: ['day', 'name']
+    }
+  },
+  {
     name: 'propose_build_program',
     description:
       'Propose building a brand-new training program from scratch using the app\'s program wizard. ' +
@@ -128,7 +159,8 @@ export const COACH_TOOLS: Anthropic.Tool[] = [
           type: 'string',
           enum: TRAINING_TYPES as unknown as string[],
           description:
-            'progressive_overload = standard hypertrophy volume; strength = low reps near max; hit = every set to failure, low volume; ' +
+            'progressive_overload = standard hypertrophy volume; strength = low reps near max; ' +
+            'hit = "Low Volume / High Effort" — fewer sets, each taken at or near failure; ' +
             'endurance = higher reps, more volume; general = maintenance.'
         },
         name: { type: 'string', description: 'A short program name. Optional; defaults to a name based on the split.' }

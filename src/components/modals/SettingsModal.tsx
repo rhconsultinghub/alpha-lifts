@@ -74,7 +74,7 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
           <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>Settings</div>
           <button onClick={st.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
-        <div style={{ padding: '16px 20px 24px' }}>
+        <div style={{ padding: '16px 20px calc(24px + var(--safe-b))' }}>
           {auth.configured && auth.account && (
             <>
               <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>ACCOUNT</div>

@@ -321,7 +321,7 @@ const SPLIT_LABELS: Record<string, string> = {
   bro_split: 'Body-Part Split', ppl_rest: 'PPL with Rest Between', ppl_ul_hybrid: 'PPL + Upper/Lower'
 };
 const TRAINING_LABELS_SHORT: Record<string, string> = {
-  progressive_overload: 'Progressive Overload', strength: 'Strength', hit: 'High Intensity',
+  progressive_overload: 'Progressive Overload', strength: 'Strength', hit: 'Low Volume / High Effort',
   endurance: 'Endurance', general: 'General Fitness'
 };
 const SCREEN_LABELS: Record<string, string> = {
@@ -430,6 +430,35 @@ export function parseProposals(raw: unknown, s: AppState): CoachProposal[] {
         });
         break;
       }
+      case 'propose_set_day_kind': {
+        const dayName = reqStr(input.day), kind = str(input.kind)?.trim();
+        if (!dayName || !kind) { out.push(err('Change day type', INCOMPLETE)); break; }
+        if (kind !== 'training' && kind !== 'rest') { out.push(err('Change day type', `"${kind}" isn't a day type — it has to be training or rest.`)); break; }
+        const dayKey = resolveDayKey(dayName, s);
+        if (!dayKey) { out.push(err('Change day type', `Couldn't find a day called "${dayName}".`)); break; }
+        const day = s.program[dayKey];
+        if ((day.kind || 'training') === kind) { out.push(err('Change day type', `${day.label} is already a ${kind === 'rest' ? 'rest' : 'training'} day.`)); break; }
+        out.push({
+          kind: 'set_day_kind',
+          summary: kind === 'rest'
+            ? `Make ${day.label} a rest day${day.exercises.length ? ' (its exercises are kept)' : ''}`
+            : `Make ${day.label} a training day`,
+          payload: { kind: 'set_day_kind', dayKey, dayKind: kind }, status: 'pending'
+        });
+        break;
+      }
+      case 'propose_rename_day': {
+        const dayName = reqStr(input.day), label = reqStr(input.name);
+        if (!dayName || !label) { out.push(err('Rename day', INCOMPLETE)); break; }
+        const dayKey = resolveDayKey(dayName, s);
+        if (!dayKey) { out.push(err('Rename day', `Couldn't find a day called "${dayName}".`)); break; }
+        out.push({
+          kind: 'rename_day',
+          summary: `Rename ${s.program[dayKey].label} to "${label}"`,
+          payload: { kind: 'rename_day', dayKey, label }, status: 'pending'
+        });
+        break;
+      }
       case 'propose_build_program': {
         const splitId = str(input.split)?.trim() ?? '', trainingType = str(input.training_type)?.trim() ?? '';
         const name = str(input.name)?.trim() || undefined;
@@ -500,6 +529,8 @@ function kindFor(tool: string): CoachProposal['kind'] {
     case 'propose_swap_exercise': return 'swap_exercise';
     case 'propose_remove_exercise': return 'remove_exercise';
     case 'propose_set_exercise_params': return 'set_params';
+    case 'propose_set_day_kind': return 'set_day_kind';
+    case 'propose_rename_day': return 'rename_day';
     case 'propose_build_program': return 'build_program';
     case 'propose_log_bodyweight': return 'log_bodyweight';
     default: return 'navigate';

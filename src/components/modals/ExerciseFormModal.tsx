@@ -71,7 +71,7 @@ export function ExerciseFormModal({ vm }: { vm: ViewModel }) {
 
           {f.error && <div style={{ font: "600 12px 'Inter'", color: 'oklch(0.72 0.17 35)', marginBottom: 4 }}>{f.error}</div>}
         </div>
-        <div style={{ padding: '12px 20px 20px', borderTop: '1px solid rgba(255,255,255,.08)', display: 'flex', gap: 10 }}>
+        <div style={{ padding: '12px 20px calc(20px + var(--safe-b))', borderTop: '1px solid rgba(255,255,255,.08)', display: 'flex', gap: 10 }}>
           {f.showDelete && (
             <button onClick={f.delete} style={{ font: "600 13px 'Inter'", padding: '15px 16px', borderRadius: 14, border: 'none', background: 'none', color: f.deleteColor }}>{f.deleteLabel}</button>
           )}

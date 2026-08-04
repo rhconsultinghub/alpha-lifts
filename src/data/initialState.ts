@@ -19,6 +19,8 @@ export function createInitialState(): AppState {
     confirmEndEarly: false,
     idleWorkoutPrompt: false,
     confirmRemoveExIndex: null,
+    editWeekOpen: false,
+    confirmRemoveDayKey: null,
     pendingPlanUpdate: null,
     activeProgramId: '',
     programName: '',

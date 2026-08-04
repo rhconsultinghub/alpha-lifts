@@ -4,9 +4,9 @@ import { mkEx, slugify } from '../data/program';
 import { createInitialState } from '../data/initialState';
 import { exportBackup as exportBackupFile, mergeBackupIntoDefaults } from '../data/backup';
 import { exportPlan as exportPlanFile } from '../data/planIO';
-import { SPLIT_PRESETS, buildProgramFromPreset, buildCustomProgram } from '../data/wizard';
+import { SPLIT_PRESETS, WEEKDAYS, buildProgramFromPreset, buildCustomProgram } from '../data/wizard';
 import type {
-  AppState, CoachChatMessage, CoachProposal, CoachProposalPayload, CoachVoice, ExerciseDef, ExerciseFormState, Muscle, ParsedPlan, ProgramExercise, RestPacing, Screen,
+  AppState, CoachChatMessage, CoachProposal, CoachProposalPayload, CoachVoice, ExerciseDef, ExerciseFormState, Muscle, ParsedPlan, ProgramDays, ProgramExercise, RestPacing, Screen,
   TrainingType, Units, WarmupStyle, WorkoutSetRow, WizardCustomDay
 } from '../data/types';
 import { askCoach, buildCoachContext, parseProposals, fetchCoachStatus, parsePlanText as parsePlanTextApi, COACH_CONFIGURED, COACH_HISTORY_CAP } from './coach';
@@ -32,6 +32,15 @@ function coachAckText(prop: CoachProposal): string {
   if (prop.kind === 'build_program') return "Done — I've built your new plan. Take a look on the Program tab.";
   const s = prop.summary.replace(/\.$/, '');
   return `Done — ${s.charAt(0).toLowerCase()}${s.slice(1)}.`;
+}
+
+// Acknowledgement for an "Apply all" — one message covering every change that landed. Lists them
+// rather than just counting, because this text is re-sent to the model as conversation history on
+// the next turn, and "Done — 3 changes" would leave it guessing which three.
+function coachAckAllText(props: CoachProposal[]): string {
+  if (props.length === 1) return coachAckText(props[0]);
+  const lines = props.map(p => `• ${p.summary.replace(/\.$/, '')}`).join('\n');
+  return `Done — applied ${props.length} changes:\n${lines}`;
 }
 
 function loadInitial(): AppState {
@@ -571,6 +580,107 @@ export function useApp() {
     });
   }, []);
 
+  // ---------- weekly day structure (permanent edits to the ACTIVE program) ----------
+  // Distinct from toggleSkipDay above, which is a one-week "not doing this one" marker. These edit
+  // the plan itself: which days exist, what they're called, and whether each is a training or rest
+  // day. Every one of them routes through resyncDows() and the week-complete re-check below.
+  //
+  // dow is positional by construction everywhere else in the app (buildProgramFromPreset and
+  // buildCustomProgram both assign WEEKDAYS[i % 7]), and shouldFireReminder() picks today's day with
+  // a `find(d => d.dow === todayName)` — so a duplicated or skipped weekday silently breaks
+  // reminders. Rewriting the whole week after any structural change is what keeps that invariant.
+  const structuralEdit = useCallback((s: AppState, mutate: (program: ProgramDays, dayOrder: string[]) => string[] | void): AppState => {
+    const program: ProgramDays = JSON.parse(JSON.stringify(s.program));
+    let dayOrder = [...s.dayOrder];
+    const nextOrder = mutate(program, dayOrder);
+    if (nextOrder) dayOrder = nextOrder;
+    dayOrder.forEach((k, i) => { if (program[k]) program[k].dow = WEEKDAYS[i % 7]; });
+    // An edit can complete the week on its own (e.g. the only outstanding day becomes a rest day),
+    // and rollover is otherwise only checked after a workout or a skip — so check it here too.
+    let weekNumber = s.weekNumber, weekStartedAt = s.weekStartedAt;
+    let deloadFields = null as ReturnType<typeof advanceDeloadForWeek> | null;
+    const hasTraining = dayOrder.some(k => program[k] && (program[k].kind || 'training') !== 'rest');
+    if (hasTraining && isWeekComplete(program, dayOrder, weekStartedAt)) {
+      weekNumber += 1; weekStartedAt = new Date().toISOString();
+      deloadFields = advanceDeloadForWeek(s, weekNumber);
+      dayOrder.forEach(k => {
+        const d = program[k];
+        if (d && (d.kind || 'training') !== 'rest') { d.skipped = false; d.lastCompletedAt = null; }
+      });
+    }
+    const activeDayKey = s.activeDayKey && program[s.activeDayKey] ? s.activeDayKey : null;
+    return { ...s, program, dayOrder, activeDayKey, weekNumber, weekStartedAt, ...(deloadFields || {}) };
+  }, []);
+
+  // Exercises are deliberately KEPT when a day becomes a rest day — muscleVolumes() skips rest days
+  // so they stop counting toward weekly volume either way, and keeping them means flipping back
+  // restores the day exactly rather than leaving the user to rebuild it after a mis-tap.
+  const setDayKind = useCallback((dayKey: string, kind: 'training' | 'rest') => {
+    setState(s => structuralEdit(s, program => {
+      const day = program[dayKey];
+      if (!day || (day.kind || 'training') === kind) return;
+      day.kind = kind;
+      if (kind === 'rest') {
+        // the week-rollover resets skip these fields on rest days, so they'd stay stale forever.
+        day.skipped = false;
+        day.lastCompletedAt = null;
+        day.exercisesDoneMask = null;
+      }
+    }));
+  }, [structuralEdit]);
+
+  const renameDay = useCallback((dayKey: string, label: string) => {
+    setState(s => (s.program[dayKey] ? structuralEdit(s, program => { program[dayKey].label = label; }) : s));
+  }, [structuralEdit]);
+
+  // Hard-capped at one week. dow is WEEKDAYS[i % 7] by construction, so an 8th day would be handed
+  // a second "Monday" — and shouldFireReminder() resolves today's session with a find() on dow, so
+  // a duplicate weekday makes the later day unreachable to reminders and ambiguous to the coach's
+  // day-name lookup. A program longer than 7 days isn't a week, it's a rotation, which this app's
+  // week-completion and weekly-volume model doesn't represent.
+  const addProgramDay = useCallback(() => {
+    setState(s => (s.dayOrder.length >= WEEKDAYS.length ? s : structuralEdit(s, (program, dayOrder) => {
+      // Timestamped key, not an index — the preset keys (`ppl6_3`) encode their original position
+      // and reusing that scheme after a reorder would produce a key that lies about where it sits.
+      const key = 'day_' + Date.now();
+      program[key] = {
+        key, label: 'New Day', dow: WEEKDAYS[dayOrder.length % 7], kind: 'training', skipped: false,
+        theme: Object.keys(MUSCLE_TARGETS) as Muscle[], exercises: []
+      };
+      return [...dayOrder, key];
+    })));
+  }, [structuralEdit]);
+
+  const requestRemoveProgramDay = useCallback((dayKey: string) => setState(s => ({ ...s, confirmRemoveDayKey: dayKey })), []);
+  const cancelRemoveProgramDay = useCallback(() => setState(s => ({ ...s, confirmRemoveDayKey: null })), []);
+  const confirmRemoveProgramDay = useCallback(() => {
+    setState(s => {
+      const dayKey = s.confirmRemoveDayKey;
+      if (!dayKey || !s.program[dayKey] || s.dayOrder.length <= 1) return { ...s, confirmRemoveDayKey: null };
+      // A live workout on the day being deleted would be left pointing at nothing.
+      if (s.workout && s.workout.dayKey === dayKey) return { ...s, confirmRemoveDayKey: null };
+      const next = structuralEdit(s, (program, dayOrder) => {
+        delete program[dayKey];
+        return dayOrder.filter(k => k !== dayKey);
+      });
+      return { ...next, confirmRemoveDayKey: null };
+    });
+  }, [structuralEdit]);
+
+  const moveProgramDay = useCallback((dayKey: string, direction: 'up' | 'down') => {
+    setState(s => structuralEdit(s, (_program, dayOrder) => {
+      const i = dayOrder.indexOf(dayKey);
+      const j = direction === 'up' ? i - 1 : i + 1;
+      if (i < 0 || j < 0 || j >= dayOrder.length) return;
+      const next = [...dayOrder];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    }));
+  }, [structuralEdit]);
+
+  const openEditWeek = useCallback(() => setState(s => ({ ...s, editWeekOpen: true })), []);
+  const closeEditWeek = useCallback(() => setState(s => ({ ...s, editWeekOpen: false, confirmRemoveDayKey: null })), []);
+
   const setBodyView = useCallback((v: 'front' | 'back') => setState(s => ({ ...s, bodyView: v })), []);
   const openBodyModal = useCallback(() => setState(s => ({ ...s, showBodyModal: true })), []);
   const closeBodyModal = useCallback(() => setState(s => ({ ...s, showBodyModal: false })), []);
@@ -721,6 +831,23 @@ export function useApp() {
         }
         return { ...s, program };
       }
+      // Both of these reuse structuralEdit, so a coach-applied change gets the same weekday
+      // resync and week-complete re-check the Edit Week sheet does — the invariant lives in one
+      // place rather than being re-implemented per entry point.
+      case 'set_day_kind': {
+        const day = s.program[p.dayKey];
+        if (!day || (day.kind || 'training') === p.dayKind) return s;
+        return structuralEdit(s, program => {
+          const d = program[p.dayKey];
+          d.kind = p.dayKind;
+          if (p.dayKind === 'rest') { d.skipped = false; d.lastCompletedAt = null; d.exercisesDoneMask = null; }
+        });
+      }
+      case 'rename_day': {
+        const label = p.label.trim();
+        if (!s.program[p.dayKey] || !label) return s;
+        return structuralEdit(s, program => { program[p.dayKey].label = label; });
+      }
       case 'build_program': {
         const preset = SPLIT_PRESETS.find(pr => pr.id === p.splitId) || SPLIT_PRESETS[0];
         const built = buildProgramFromPreset(preset, p.trainingType, 'recommended');
@@ -783,6 +910,40 @@ export function useApp() {
       const coachMessages = applied
         ? [...withStatus, { id: ackId, role: 'assistant' as const, content: coachAckText(prop) }].slice(-COACH_HISTORY_CAP)
         : withStatus;
+      return { ...next, coachMessages };
+    });
+  }, []);
+
+  // Bulk version of the above, for a turn that proposed several changes at once. Folds every
+  // pending applicable proposal through the same pure reducer inside ONE setState, so each step
+  // sees the result of the previous one — applying "add X" then "swap Y for Z" one card at a time
+  // would otherwise race the re-render between dispatches.
+  //
+  // Posts a single acknowledgement instead of one per card. That's not just tidier: each ack grows
+  // coachMessages, and a growing message list is what used to yank the chat to the bottom on every
+  // Apply (see CoachScreen's auto-scroll).
+  const applyAllCoachProposals = useCallback((messageId: string) => {
+    const ackId = nextCoachId();
+    setState(s => {
+      const msg = s.coachMessages.find(m => m.id === messageId);
+      if (!msg || !msg.proposals) return s;
+      let next = s;
+      const appliedIdx = new Set<number>();
+      msg.proposals.forEach((pr, i) => {
+        if (pr.status !== 'pending' || !pr.payload) return;
+        const after = applyProposalToState(next, pr.payload);
+        // same reference-identity no-op test as applyCoachProposal: a proposal whose target has
+        // gone away leaves the state untouched and must not be reported as applied.
+        if (after !== next) { next = after; appliedIdx.add(i); }
+      });
+      if (!appliedIdx.size) return s;
+      const applied = msg.proposals.filter((_, i) => appliedIdx.has(i));
+      const withStatus = next.coachMessages.map(m =>
+        m.id === messageId
+          ? { ...m, proposals: m.proposals?.map((pr, i) => (appliedIdx.has(i) ? { ...pr, status: 'applied' as const } : pr)) }
+          : m
+      );
+      const coachMessages = [...withStatus, { id: ackId, role: 'assistant' as const, content: coachAckAllText(applied) }].slice(-COACH_HISTORY_CAP);
       return { ...next, coachMessages };
     });
   }, []);
@@ -978,7 +1139,7 @@ export function useApp() {
           const newEx = mkEx(swap.stagedExId, 3, 0, { weight: 0, reps: lib.repHi, hitTop: true });
           const dayExercises = [...s.workout.dayExercises, newEx];
           const newIdx = dayExercises.length - 1;
-          const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory, activeDeloadPct(s));
+          const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory, activeDeloadPct(s), s.trainingType);
           const sets: WorkoutSetRow[] = [];
           for (let i = 0; i < newEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
           const exSets = { ...s.workout.exSets, [newIdx]: sets };
@@ -1002,7 +1163,7 @@ export function useApp() {
         if (swap.tab === 'replace' && oldEx.supersetGroup) {
           dayExercises = dayExercises.map(e => (e.supersetGroup === oldEx.supersetGroup ? { ...e, supersetGroup: null } : e));
         }
-        const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory, activeDeloadPct(s));
+        const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory, activeDeloadPct(s), s.trainingType);
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < newEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         const exSets = { ...s.workout.exSets, [idx]: sets };
@@ -1054,7 +1215,7 @@ export function useApp() {
       // would otherwise show an empty working-sets list — build its default sets now.
       if (!exSets[exIndex]) {
         const landedEx = dayExercises[exIndex];
-        const rec = recommendation(landedEx, s.units, s.coachVoice, s.exerciseHistory[landedEx.id], s.exerciseHistory, activeDeloadPct(s));
+        const rec = recommendation(landedEx, s.units, s.coachVoice, s.exerciseHistory[landedEx.id], s.exerciseHistory, activeDeloadPct(s), s.trainingType);
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < landedEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         exSets[exIndex] = sets;
@@ -1209,7 +1370,7 @@ export function useApp() {
       let exSets = prevExSets;
       if (!exSets[exIndex]) {
         const ex = s.workout.dayExercises[exIndex];
-        const rec = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id], s.exerciseHistory, activeDeloadPct(s));
+        const rec = recommendation(ex, s.units, s.coachVoice, s.exerciseHistory[ex.id], s.exerciseHistory, activeDeloadPct(s), s.trainingType);
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < ex.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
         exSets = { ...prevExSets, [exIndex]: sets };
@@ -1311,7 +1472,7 @@ export function useApp() {
       program[dayKey].lastCompletedAt = null;
       const dayExercises: ProgramExercise[] = JSON.parse(JSON.stringify(program[dayKey].exercises));
       const ex0 = dayExercises[0];
-      const rec0 = recommendation(ex0, s.units, s.coachVoice, s.exerciseHistory[ex0.id], s.exerciseHistory, activeDeloadPct(s));
+      const rec0 = recommendation(ex0, s.units, s.coachVoice, s.exerciseHistory[ex0.id], s.exerciseHistory, activeDeloadPct(s), s.trainingType);
       const sets0: WorkoutSetRow[] = [];
       for (let i = 0; i < ex0.sets; i++) sets0.push({ weight: rec0.weight, reps: rec0.reps, done: false });
       return {
@@ -1656,18 +1817,21 @@ export function useApp() {
     s.confirmRemoveExIndex != null ||
     s.showSettings || s.swap || s.muscleSwap || s.detail || s.quickEdit || s.muscleDrill || s.warmupDetailId ||
     s.libraryDetailId || s.exerciseForm || s.exerciseHistoryModalId || s.archiveDetailId ||
-    s.newProgramWizard || s.weekReviewOpen || s.showBodyModal
+    s.newProgramWizard || s.weekReviewOpen || s.showBodyModal || s.editWeekOpen
   ), []);
   const closeTopmost = useCallback(() => {
     setState(s => {
       // topmost first — the remove-exercise confirm sits above every other surface
       if (s.confirmRemoveExIndex != null) return { ...s, confirmRemoveExIndex: null };
+      // the delete-day confirm sits above the Edit Week sheet that raised it
+      if (s.confirmRemoveDayKey) return { ...s, confirmRemoveDayKey: null };
       if (s.archiveDetailId) return { ...s, archiveDetailId: null };
       if (s.exerciseHistoryModalId) return { ...s, exerciseHistoryModalId: null };
       if (s.newProgramWizard) return { ...s, newProgramWizard: null };
       if (s.exerciseForm) return { ...s, exerciseForm: null };
       if (s.muscleSwap) return { ...s, muscleSwap: null };
       if (s.weekReviewOpen) return { ...s, weekReviewOpen: false };
+      if (s.editWeekOpen) return { ...s, editWeekOpen: false };
       if (s.warmupDetailId) return { ...s, warmupDetailId: null };
       if (s.swap) return { ...s, swap: null };
       if (s.muscleDrill) return { ...s, muscleDrill: null };
@@ -1712,7 +1876,9 @@ export function useApp() {
       selectExerciseProgress, toggleProgressPicker, toggleMuscleBalance, toggleCompareLift, toggleCompareLiftPicker, setProgressMetric,
       openWeekReview, closeWeekReview, selectReviewWeek, backToWeekList,
       setTrainingType, openSettings, closeSettings, setUnits, setRestPacing, setCoachVoice, setWarmupStyle,
-      renameProgram, setUserName, toggleSkipDay, dismissDeloadSuggestion,
+      renameProgram, setUserName, toggleSkipDay, dismissDeloadSuggestion, applyAllCoachProposals,
+      setDayKind, renameDay, addProgramDay, moveProgramDay, openEditWeek, closeEditWeek,
+      requestRemoveProgramDay, cancelRemoveProgramDay, confirmRemoveProgramDay,
       setDeloadEnabled, setDeloadIntensity, setDeloadCadence, startDeloadNow, endDeloadNow,
       deferDeload, skipDeload,
       exportBackup, stageBackupImport, cancelBackupImport, confirmBackupImport,

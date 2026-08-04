@@ -1,4 +1,8 @@
 ﻿import { EXLIB, MUSCLE_TARGETS, TRAINING_MULT, planRepDefault } from './exercises';
+// state/logic doesn't import anything from this file, so this direction introduces no cycle — and
+// sharing restForExercise() is the point: the balancer's day-time ceiling has to be measured the
+// same way the app measures the day it displays.
+import { restForExercise } from '../state/logic';
 import { mkEx, clamp } from './program';
 import type { Muscle, ProgramDays, ProgramExercise, TrainingType, WizardCustomDay } from './types';
 
@@ -185,21 +189,28 @@ const MAX_DAY_TIME_SEC = 75 * 60;
 // for demanding split/training-type combos (e.g. Full Body x Endurance) the balancer can't help.
 const HARD_MAX_DAY_TIME_SEC = 90 * 60;
 
-function estimateDaySetTimeSec(days: ProgramDays, dayKey: string): number {
+// Must stay in step with estimateDayTimeFormula() in state/logic.ts — this is the number the two
+// day-time ceilings below are enforced against, and the app displays the other one. It used to sum
+// raw `restBase`, i.e. it silently assumed REST_TRAINING_FACTOR was 1.0 for every style; a Strength
+// day was therefore ~40% longer than the balancer believed (bro-split Strength Leg Day displayed
+// 88 min while passing a 75-min cap). restForExercise() applies the same training-type and pacing
+// scaling the real estimate does; pacing is Standard here because a program is generated before
+// any per-user pacing preference applies to it.
+function estimateDaySetTimeSec(days: ProgramDays, dayKey: string, trainingType: TrainingType): number {
   const day = days[dayKey];
   let sec = day.exercises.length * 30;
-  day.exercises.forEach(ex => { sec += ex.sets * (40 + EXLIB[ex.id].restBase); });
+  day.exercises.forEach(ex => { sec += ex.sets * (40 + restForExercise(ex.id, 'Standard', trainingType)); });
   return sec;
 }
 
 // Last-resort trim: whatever generation + balancing produced, no single day is allowed to exceed
 // HARD_MAX_DAY_TIME_SEC — trims sets from whichever exercise has the most, one at a time, until
 // under the cap or every exercise is down to its floor.
-function capDayTime(days: ProgramDays, dayOrder: string[]): void {
+function capDayTime(days: ProgramDays, dayOrder: string[], trainingType: TrainingType): void {
   dayOrder.forEach(dayKey => {
     const day = days[dayKey];
     if ((day.kind || 'training') === 'rest' || !day.exercises.length) return;
-    for (let guard = 0; guard < 200 && estimateDaySetTimeSec(days, dayKey) > HARD_MAX_DAY_TIME_SEC; guard++) {
+    for (let guard = 0; guard < 200 && estimateDaySetTimeSec(days, dayKey, trainingType) > HARD_MAX_DAY_TIME_SEC; guard++) {
       const trimmable = day.exercises.filter(ex => ex.sets > MIN_SETS_PER_EXERCISE);
       if (!trimmable.length) break;
       trimmable.sort((a, b) => b.sets - a.sets);
@@ -229,7 +240,7 @@ function balanceWeeklyVolume(days: ProgramDays, dayOrder: string[], trainingType
     for (let guard = 0; guard < 40; guard++) {
       const pct = (totalSets() / target) * 100;
       if (pct < BALANCE_LOW_PCT) {
-        const candidates = slots.filter(s => setsOf(s) < MAX_SETS_PER_EXERCISE && estimateDaySetTimeSec(days, s.dayKey) < MAX_DAY_TIME_SEC);
+        const candidates = slots.filter(s => setsOf(s) < MAX_SETS_PER_EXERCISE && estimateDaySetTimeSec(days, s.dayKey, trainingType) < MAX_DAY_TIME_SEC);
         if (!candidates.length) break;
         candidates.sort((a, b) => setsOf(a) - setsOf(b));
         days[candidates[0].dayKey].exercises[candidates[0].exIndex].sets += 1;
@@ -262,7 +273,7 @@ export function buildProgramFromPreset(preset: SplitPreset, trainingType: Traini
   });
   if (prefill !== 'scratch') {
     balanceWeeklyVolume(days, dayOrder, trainingType);
-    capDayTime(days, dayOrder);
+    capDayTime(days, dayOrder, trainingType);
   }
   return { days, dayOrder };
 }

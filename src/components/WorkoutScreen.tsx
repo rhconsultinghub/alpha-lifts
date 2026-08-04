@@ -141,7 +141,7 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
       </div>
 
       {w.resting && (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#17140f', borderTop: '1px solid rgba(255,255,255,.1)', padding: '16px 20px', boxShadow: '0 -10px 30px rgba(0,0,0,.4)' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#17140f', borderTop: '1px solid rgba(255,255,255,.1)', padding: '16px 20px calc(16px + var(--safe-b))', boxShadow: '0 -10px 30px rgba(0,0,0,.4)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.5)', letterSpacing: '.03em' }}>RESTING</div>
             <div className="num" style={{ fontSize: 24, fontWeight: 700, color: 'oklch(0.72 0.17 35)' }}>{w.restText}</div>
@@ -158,12 +158,12 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
       )}
 
       {!w.resting && w.workoutAllDone && (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 20px', background: '#17140f', borderTop: '1px solid rgba(255,255,255,.1)' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 20px calc(16px + var(--safe-b))', background: '#17140f', borderTop: '1px solid rgba(255,255,255,.1)' }}>
           <button onClick={w.completeWorkout} style={{ width: '100%', background: 'oklch(0.7 0.15 145)', color: '#0d0c0b', font: "700 15px 'Inter'", padding: 16, borderRadius: 16, border: 'none' }}>✓ Complete Workout</button>
         </div>
       )}
       {!w.resting && !w.workoutAllDone && w.canAdvance && (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 20px', background: '#17140f', borderTop: '1px solid rgba(255,255,255,.1)' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 20px calc(16px + var(--safe-b))', background: '#17140f', borderTop: '1px solid rgba(255,255,255,.1)' }}>
           <button onClick={w.advance} style={{ width: '100%', background: 'oklch(0.65 0.19 35)', color: '#0d0c0b', font: "700 15px 'Inter'", padding: 16, borderRadius: 16, border: 'none' }}>{w.advanceLabel}</button>
         </div>
       )}

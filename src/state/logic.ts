@@ -222,7 +222,7 @@ export function similarExerciseReference(exId: string, allHistory?: Record<strin
   return { name: otherLib.name, weight: top.weight, reps: top.reps, isTime: otherLib.trackingMode === 'time', sameVariant: best.tier === 0 };
 }
 
-export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVoice = 'Encouraging', history?: ExerciseHistoryEntry[], allHistory?: Record<string, ExerciseHistoryEntry[]>, deloadPct?: number | null): Recommendation {
+export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVoice = 'Encouraging', history?: ExerciseHistoryEntry[], allHistory?: Record<string, ExerciseHistoryEntry[]>, deloadPct?: number | null, trainingType: TrainingType = 'progressive_overload'): Recommendation {
   const lib = EXLIB[ex.id];
   const equip = lib.equip[ex.equipIdx];
   const last = effectiveLast(ex, history);
@@ -300,7 +300,12 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
     // hit the rep target but that top set was already to true failure (RIR 0) — hold the weight
     // rather than piling more load onto a set that had no reserve left, even though the rep
     // target was technically met.
-    if (last.rir === 0) {
+    //
+    // Skipped entirely on the low-volume/high-effort plan ('hit'), where RIR 0 is the whole
+    // prescription rather than a warning sign. Under that style every logged set is at failure,
+    // so this rule fired every single session and the load could never go up — a lifter on the
+    // plan that's explicitly about training hard was the one lifter the app refused to progress.
+    if (last.rir === 0 && trainingType !== 'hit') {
       return {
         weight: last.weight, reps: lib.repHi,
         title: phrase('Repeat weight', 'Repeat the weight, build a buffer', 'Hold steady — same weight! 💪'),
@@ -326,14 +331,18 @@ const REST_PACING_MULT: Record<RestPacing, number> = { Relaxed: 1.3, Standard: 1
 
 // Research-backed rest scaling, layered on top of each exercise's restBase (which already encodes
 // compound-vs-isolation and load). Two factors beyond the user's manual pacing override:
-//  - training type: heavy near-max strength work and every-set-to-failure (HIT) need the longest
+//  - training type: heavy near-max strength work and low-volume/high-effort work need the longest
 //    inter-set recovery for performance/volume-load to hold across sets, while endurance/metabolic
 //    work rests shortest (Schoenfeld 2016; NSCA guidance that longer rest on multi-joint work
 //    preserves subsequent-set performance).
 //  - proximity to failure (RIR of the set just finished): a set taken to true failure incurs more
 //    fatigue and needs longer to recover than one left several reps in reserve.
+//
+// 'hit' was 1.3, which stacked with rirRestFactor's 1.25-at-failure into ~3.5 minutes between
+// bench-press sets — sensible for literal one-set-to-failure HIT, punishing for the retuned
+// low-volume style. 1.15 keeps it clearly longer than standard without approaching Strength.
 export const REST_TRAINING_FACTOR: Record<TrainingType, number> = {
-  strength: 1.4, hit: 1.3, progressive_overload: 1, general: 0.85, endurance: 0.6
+  strength: 1.4, hit: 1.15, progressive_overload: 1, general: 0.85, endurance: 0.6
 };
 
 // undefined RIR (not logged for that set, or a static day-time estimate that can't know future

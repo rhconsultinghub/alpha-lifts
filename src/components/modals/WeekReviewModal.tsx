@@ -5,7 +5,7 @@ export function WeekReviewModal({ vm }: { vm: ViewModel }) {
   if (!wr.open) return null;
   return (
     <div onClick={wr.close} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 30, display: 'flex', alignItems: 'flex-end' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#17140f', borderRadius: '22px 22px 0 0', padding: '18px 20px 22px', width: '100%', maxHeight: '80%', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#17140f', borderRadius: '22px 22px 0 0', padding: '18px 20px calc(22px + var(--safe-b))', width: '100%', maxHeight: '80%', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {wr.selected != null && (

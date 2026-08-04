@@ -2,7 +2,7 @@ import type { ViewModel } from '../state/viewModel';
 
 export function ProgramScreen({ vm }: { vm: ViewModel }) {
   return (
-    <div style={{ padding: '24px 20px 100px' }}>
+    <div style={{ padding: '24px 20px calc(var(--tabbar-h) + var(--safe-b) + 28px)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" width={22} height={22} style={{ borderRadius: 6, display: 'block' }} />
@@ -85,7 +85,10 @@ export function ProgramScreen({ vm }: { vm: ViewModel }) {
         </div>
       )}
 
-      <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>TRAINING DAYS</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <span style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em' }}>TRAINING DAYS</span>
+        <button onClick={vm.openEditWeek} style={{ font: "600 11px 'Inter'", padding: '5px 12px', borderRadius: 100, border: '1px solid rgba(255,255,255,.15)', background: 'none', color: 'rgba(245,240,234,.6)' }}>✎ Edit week</button>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {vm.programDays.map(d => (
           <button key={d.key} onClick={d.open} style={{ textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(255,255,255,.04)', border: 'none', borderRadius: 16, padding: '14px 16px', color: '#f5f0ea', opacity: d.rowOpacity, width: '100%' }}>

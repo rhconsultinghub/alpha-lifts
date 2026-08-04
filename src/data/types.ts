@@ -240,7 +240,7 @@ export interface CoachChatMessage {
 
 export type CoachProposalKind =
   | 'add_exercise' | 'swap_exercise' | 'remove_exercise'
-  | 'set_params' | 'build_program' | 'log_bodyweight' | 'navigate';
+  | 'set_params' | 'set_day_kind' | 'rename_day' | 'build_program' | 'log_bodyweight' | 'navigate';
 
 /** Resolved, validated payload for a proposal — ids/keys, not the model's raw names. */
 export type CoachProposalPayload =
@@ -248,6 +248,8 @@ export type CoachProposalPayload =
   | { kind: 'swap_exercise'; dayKey: string; fromExId: string; toExId: string }
   | { kind: 'remove_exercise'; dayKey: string; exId: string }
   | { kind: 'set_params'; dayKey: string; exId: string; sets?: number; reps?: number }
+  | { kind: 'set_day_kind'; dayKey: string; dayKind: 'training' | 'rest' }
+  | { kind: 'rename_day'; dayKey: string; label: string }
   | { kind: 'build_program'; splitId: string; trainingType: TrainingType; name?: string }
   | { kind: 'log_bodyweight'; displayValue: number }
   | { kind: 'navigate'; screen?: Screen; dayKey?: string };
@@ -318,6 +320,12 @@ export interface AppState {
   // pending an explicit confirm — removing one discards its logged sets, so it shouldn't be a
   // single mis-tap away.
   confirmRemoveExIndex: number | null;
+  // Permanent edits to the week's shape (which days exist, training vs. rest, order) — separate
+  // from `skipped`, which is a one-week marker. `editWeekOpen` drives EditWeekModal;
+  // `confirmRemoveDayKey` stages a day deletion behind a confirm, since it discards that day's
+  // exercises. Both optional/back-compat via loadInitial's shallow merge.
+  editWeekOpen?: boolean;
+  confirmRemoveDayKey?: string | null;
   pendingPlanUpdate: PendingPlanUpdate | null;
   activeProgramId: string;
   programName: string;

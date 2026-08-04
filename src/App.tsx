@@ -31,6 +31,7 @@ import { ExerciseHistoryModal } from './components/modals/ExerciseHistoryModal';
 import { ArchiveDetailModal } from './components/modals/ArchiveDetailModal';
 import { NewProgramWizardModal } from './components/modals/NewProgramWizardModal';
 import { WeekReviewModal } from './components/modals/WeekReviewModal';
+import { EditWeekModal } from './components/modals/EditWeekModal';
 
 export default function App() {
   const { state, actions } = useApp();
@@ -66,9 +67,6 @@ export default function App() {
         {vm.isAchievements && <AchievementsScreen vm={vm} />}
         {vm.isCoach && <CoachScreen vm={vm} />}
 
-        <ResumePill vm={vm} />
-        <TabBar vm={vm} />
-
         <ExerciseDetailModal vm={vm} />
         <ExerciseQuickEditModal vm={vm} />
         <SwapModal vm={vm} />
@@ -82,11 +80,22 @@ export default function App() {
         <ArchiveDetailModal vm={vm} />
         <NewProgramWizardModal vm={vm} />
         <WeekReviewModal vm={vm} />
+        <EditWeekModal vm={vm} />
         <RestToast vm={vm} />
         <ConfirmRemoveExerciseModal vm={vm} />
         <IdleWorkoutToast vm={vm} />
         <AppTutorial vm={vm} />
       </div>
+
+      {/* Bottom-anchored chrome lives OUTSIDE .scr on purpose. Both are position:absolute against
+          .app-shell, so while they were rendered inside the scroller the browser had to hold them
+          still against a moving contents layer every frame — which, combined with the tab bar's
+          backdrop-filter, is what made the bar shimmer and lag while scrolling. Moving them out
+          changes no coordinates (their containing block was already .app-shell) and preserves the
+          z-index ladder: .scr is position:static so it creates no stacking context, and every modal
+          inside it still resolves against .app-shell at z 20-60, above these. */}
+      <ResumePill vm={vm} />
+      <TabBar vm={vm} />
     </div>
   );
 }

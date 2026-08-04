@@ -74,7 +74,7 @@ const DIET_OPTS: Option<Diet>[] = [
 const TRAINING_LABEL: Record<TrainingType, string> = {
   progressive_overload: 'Progressive Overload',
   strength: 'Strength',
-  hit: 'High Intensity',
+  hit: 'Low Volume',
   endurance: 'Endurance',
   general: 'General Fitness'
 };

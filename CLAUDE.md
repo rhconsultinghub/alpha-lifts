@@ -1944,3 +1944,137 @@ personalization.
   required-field guard, the `user` context block, STYLE_RULES) are not live until `wrangler deploy`
   is run from `L:\Personal Projects\Alpha Lifts\alpha-lifts\worker`** — the Pages frontend
   auto-deploys on push, the Worker never does.
+
+(44) five-item feedback round: training-style tuning, the bottom bar, two coach-UX gaps, and
+weekly day-structure editing.
+
+- **"High Intensity" was literal Mentzer doctrine and is now "Low Volume / High Effort."** User:
+  "the standard lifter will not be able to fatigue the muscle nearly enough to warrant true mentzer
+  frequency." Correct, and the numbers were stark — `TRAINING_MULT.hit` was **0.4**, which on PPL6
+  produced **50 total weekly sets against Progressive Overload's 134**, with four of five exercises
+  on a Push Day cut to a *single* set (the balancer's 1-set floor dominated so completely that every
+  split converged on ~50 sets regardless of structure — a "Push Day" was 6 sets in 19 minutes, and
+  bro-split Arm Day was 7 sets in 16). Retuned to **0.65** and `REST_TRAINING_FACTOR.hit` 1.3 → 1.15
+  (at 1.3 the `rirRestFactor` 1.25-at-failure stack put bench press at ~3.5 min between sets).
+  **The `'hit'` id is deliberately unchanged** — it's the persisted `TrainingType` in every saved
+  program, the sync blob, and three Worker enum lists; only display strings and the three AI-facing
+  tool descriptions were rebranded.
+
+  Two bugs found while mapping the style, both of which fire *only* for someone who actually trains
+  to failure and logs RIR — i.e. exactly the person who picked it, and a real part of why it felt
+  wrong:
+  - `recommendation()` (`logic.ts`) held the weight whenever a hit-top set was logged at RIR 0.
+    Under a to-failure style that's every session, so **the load could never go up**. `recommendation()`
+    now takes the training type (7th optional arg, so no call site was forced to change) and skips
+    that rule for `'hit'`, where RIR 0 is the prescription rather than a warning sign.
+  - `fatigueRead()` (`deload.ts`) scored +0.6 for "recent sets averaging RIR ≤ 1", which alone clears
+    `TRIGGER_THRESHOLD` — so a deload was proposed **every eligible week** and the other two signals
+    never got a say. Downgraded to 0.25 (a corroborator) for `'hit'` only.
+
+  Also fixed in the same pass because it's the same measurement: `estimateDaySetTimeSec()`
+  (`wizard.ts`), the ceiling the balancer enforces, summed **raw `restBase`** — i.e. it assumed
+  `REST_TRAINING_FACTOR` was 1.0 for every style, despite a comment claiming it mirrored
+  `estimateDayTime()`. It now calls `restForExercise()` (wizard.ts → state/logic.ts introduces no
+  cycle; logic imports nothing from wizard).
+
+  **Audited before/after across all 30 split × training-type combos** by importing the real builder
+  off the dev server, with the pre-change behaviour reproduced from a throwaway `git show HEAD:` copy
+  of `wizard.ts` pinned to the old multipliers (deleted after). Results: Progressive Overload and
+  General are **byte-identical**; Strength loses exactly 1 set on the two splits where the day-time
+  cap had been under-applied (bro-split Leg Day 88 → 85 min); **Endurance improves substantially**
+  (Full Body 127 → 153 sets, and its four out-of-band muscles — Back 48%, Quads 49%, Chest 64%,
+  Calves 77% — all come into band) because the corrected estimate stopped believing its short-rest
+  days were long. The retuned style lands at **78-81 sets on every split** (Strength 75-79, PO
+  102-134), longest day 81 min against the 90-min hard cap, and its only out-of-band muscle is Calves
+  at 77-83% on two splits — milder than Strength's own 83% on the same splits, and above the 70%
+  cutoff that would show the user an "under" warning. Progression and deload fixes verified directly:
+  an RIR-0 hit-top set now returns "+2.5 kg" on this style while PO and Strength still hold the
+  weight, and `fatigueRead` scores 0.25 vs PO's 0.6 on identical RIR-0 history.
+
+  **Note for whoever reads this next:** an existing program already on this style sees its muscle
+  bars drop from ~100% to ~62% overnight, since targets recompute live. That's the honest signal
+  (the plan is under-volumed for the new target), not a bug.
+
+- **The bottom tab bar's scroll glitch was structural.** `TabBar` is `position: absolute` but was
+  rendered *inside* `.scr`, the `overflow-y: auto` scroller — and because `.scr` is
+  `position: static`, its containing block resolved to `.app-shell`, an ancestor **outside** the
+  scroller. So the browser had to hold it still against a moving contents layer every frame, and its
+  `backdrop-filter: blur(10px)` had to re-rasterize a moving backdrop each time. Fixed by moving
+  `<TabBar>` and `<ResumePill>` out of `.scr` to be siblings inside `.app-shell` (no coordinates
+  change — their containing block was already `.app-shell`) and dropping the blur for a 97%-opaque
+  background. The z-index ladder survives untouched because `.scr` creates no stacking context, so
+  modals at z 20-60 still paint above; verified with `elementFromPoint` over the bar with Settings
+  open.
+
+  Three separate causes for "inconsistent", all fixed: `height: 100vh` (on Android Chrome that's the
+  *large* viewport, so with the URL bar showing the shell's bottom edge sat ~50-60px below the fold
+  and slid about as the bar auto-hid) → `100dvh` with the `vh` line kept before it as fallback;
+  no `overscroll-behavior` anywhere, so the inner scroller chained into the document and translated
+  the whole shell → `none` on `html, body`, `contain` on `.scr`; and `viewport-fit=cover` in
+  `index.html` with **zero** `env(safe-area-inset-*)` use in the entire repo, so the bar's hardcoded
+  16px bottom pad sat under the Android gesture pill.
+
+  The three uncoordinated magic numbers for one measurement (bar is ~67px; seven screens reserved
+  100px; `ResumePill` assumed 86px) are now `--tabbar-h` + `--safe-b` CSS vars in `index.css`, used
+  by every tabbed screen's bottom padding and by the pill — which also now only reserves tab-bar room
+  on screens that *have* a tab bar (it appears over Day View and Day Builder, which don't).
+  Bottom sheets and the three WorkoutScreen bottom bars got `+ var(--safe-b)` too. Verified live:
+  bar parent is `app-shell`, `backdropFilter: none`, bar top identical at scrollTop 0/400/end, 29px
+  content clearance at full scroll, shell height == viewport height.
+
+  Deliberately **not** done: lifting WorkoutScreen's three bottom bars out of the scroller (they're
+  opaque, no backdrop-filter, so they don't carry the expensive part, and it would mean routing their
+  state through the view model), and `interactive-widget=resizes-content` (would fix the Coach input
+  hiding behind the keyboard, but it's a separate behaviour change).
+
+- **Coach "Apply all"** — `applyAllCoachProposals(messageId)` folds every pending applicable proposal
+  through the existing pure `applyProposalToState` reducer inside **one** `setState`, so a later
+  change sees the earlier one instead of racing the re-render. Per-proposal `next !== s` identity
+  check means a no-op proposal isn't falsely marked applied. Posts **one** combined ack listing each
+  change (not just a count — the ack is re-sent to the model as history next turn). The button shows
+  on a turn with ≥2 still-actionable cards and counts down as cards are resolved individually.
+
+- **Applying a proposal no longer yanks the chat to the bottom.** The auto-scroll effect keys off
+  `messages.length`, and every Apply appends an ack — so tapping a card above the fold scrolled away
+  from the card being read. Now it only follows when the user was already near the bottom, sampled
+  from a `scroll` listener rather than measured inside the effect (by the time the effect runs the
+  new message is in the DOM and distance-to-bottom always reads "miles away"). A user send or a
+  pending reply still forces the scroll. Verified: scrolled up, Apply left `scrollTop` at 835/835
+  with max 1794; at the bottom the newest ack stays on screen.
+
+- **Weekly day structure is now editable** (`EditWeekModal`, reached from "✎ Edit week" on the
+  Program screen): flip any day training↔rest, rename, reorder, add and remove days. Deliberately the
+  same controls as the New Program wizard's custom-split editor, since that flow can only build a
+  *new* program (it mints a new id and resets the week counter) — this is the in-place equivalent.
+  **Turning a day to rest keeps its exercises** (verified byte-identical on flip-back); they stop
+  counting toward weekly volume because `muscleVolumes()` skips rest days, so the only thing that
+  discards anything is deleting a day, which is confirm-gated.
+
+  Every action routes through one `structuralEdit()` helper that rewrites `dow = WEEKDAYS[i % 7]`
+  across `dayOrder` and re-checks `isWeekComplete` for rollover. That weekday resync is load-bearing:
+  `shouldFireReminder()` finds today's session with `find(d => d.dow === todayName)`, so a duplicated
+  or missing weekday silently breaks reminders. **Which is why the week is now hard-capped at 7 days**
+  — caught during verification when an 8th day was handed a second "Monday". (The wizard's
+  `addWizardCustomDay` has always had the same unguarded `i % 7`; it's just much easier to hit here.)
+  Other guards: the last remaining day can't be deleted, nor can one with a live workout on it;
+  `activeDayKey` is nulled if its day disappears; `skipped`/`lastCompletedAt`/`exercisesDoneMask` are
+  cleared on conversion to rest, since the rollover resets skip rest days and would leave them stale.
+
+  Coach side: `propose_set_day_kind` and `propose_rename_day`, following the established four-layer
+  pattern (schema `required` → `CoachProposalKind`/`Payload` → `parseProposals` case with
+  `reqStr()` + `resolveDayKey()` → an `applyProposalToState` branch reusing `structuralEdit`, so the
+  invariant lives in one place rather than per entry point). `TOOL_RULES` gained a line telling the
+  model **not** to use the kind flip to mean "skip today" — that's the Skip button, and converting
+  the day would change every future week. Add/remove/reorder are deliberately UI-only: every tool
+  schema is re-billed as input tokens on every message, and `propose_build_program` already covers
+  wholesale restructuring. All six parse cases verified (valid flip, valid rename, already-that-kind,
+  bad enum, unknown day, missing name).
+
+  Verification note: the harness's console buffer **persists across navigations and even a dev-server
+  restart**, so stale HMR errors (editing `useApp.ts` while the app is live changes hook order and
+  logs a Rules-of-Hooks error) look like live failures. Opening a fresh tab is what distinguishes
+  them — a clean tab showed zero errors.
+
+  `npx tsc -b`, `npm run build` and the worker's `tsc --noEmit` all clean. **`propose_set_day_kind`,
+  `propose_rename_day`, the TOOL_RULES line and the reworded training-style descriptions need a
+  `wrangler deploy`** from `L:\…\alpha-lifts\worker`; the frontend auto-deploys on push.

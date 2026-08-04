@@ -3,7 +3,10 @@ import type { ViewModel } from '../state/viewModel';
 export function TabBar({ vm }: { vm: ViewModel }) {
   if (!vm.showTabs) return null;
   return (
-    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, display: 'flex', background: 'rgba(15,14,13,.92)', backdropFilter: 'blur(10px)', borderTop: '1px solid rgba(255,255,255,.08)', padding: '10px 8px 16px' }}>
+    // No backdrop-filter: at 97% opacity the blur was invisible anyway, and re-rasterizing a blur
+    // against scrolling content every frame was the single most expensive thing in the scroll path.
+    // Bottom padding consumes the safe-area inset so the labels clear the Android gesture pill.
+    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, display: 'flex', background: 'rgba(15,14,13,.97)', borderTop: '1px solid rgba(255,255,255,.08)', padding: '10px 8px calc(16px + var(--safe-b))' }}>
       <button onClick={vm.goProgram} style={{ flex: 1, background: 'none', border: 'none', color: vm.tabProgramColor, font: "600 10px 'Inter'", display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 0, whiteSpace: 'nowrap' }}>
         <div style={{ fontSize: 18 }}>🏋</div>Program
       </button>

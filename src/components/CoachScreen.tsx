@@ -3,6 +3,9 @@ import type { ViewModel } from '../state/viewModel';
 
 const ACCENT = 'oklch(0.65 0.19 35)';
 
+/** How close to the bottom still counts as "following the conversation" for auto-scroll purposes. */
+const NEAR_BOTTOM_PX = 120;
+
 export function CoachScreen({ vm }: { vm: ViewModel }) {
   const c = vm.coach;
   const endRef = useRef<HTMLDivElement>(null);
@@ -14,15 +17,41 @@ export function CoachScreen({ vm }: { vm: ViewModel }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Pin to the newest message on every change, including while the typing indicator is up —
-  // otherwise a long reply pushes itself out of view as it arrives.
+  // Auto-scroll, but only when the user is actually following along at the bottom.
+  //
+  // This effect fires on any change to messages.length, and applying a proposal appends a "Done —…"
+  // acknowledgement — so tapping Apply on a card further up the chat used to yank the viewport away
+  // from the card being read, once per tap. Whether to follow is decided by where the user already
+  // was, which has to be sampled from scroll events: by the time this effect runs the new message is
+  // already in the DOM, so measuring distance-to-bottom here would always read "miles away".
+  //
+  // The app has exactly one scroll container (.scr in App.tsx) and no ref is threaded down to
+  // screens, hence the closest() lookup rather than a prop.
+  const nearBottomRef = useRef(true);
   useEffect(() => {
+    const scroller = endRef.current?.closest('.scr') as HTMLElement | null;
+    if (!scroller) return;
+    const onScroll = () => {
+      nearBottomRef.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < NEAR_BOTTOM_PX;
+    };
+    onScroll();
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => scroller.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const lastIsUser = c.messages.length > 0 && c.messages[c.messages.length - 1].isUser;
+  useEffect(() => {
+    // Always follow the user's own send and the reply it's waiting on — they just acted, and a
+    // long reply would otherwise push itself out of view as it streams in.
+    if (!c.pending && !lastIsUser && !nearBottomRef.current) return;
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    nearBottomRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [c.messages.length, c.pending]);
 
   if (!c.configured) {
     return (
-      <div style={{ padding: '24px 20px 100px' }}>
+      <div style={{ padding: '24px 20px calc(var(--tabbar-h) + var(--safe-b) + 28px)' }}>
         <div className="num" style={{ fontSize: 30, fontWeight: 700, marginBottom: 4 }}>Coach</div>
         <div style={{ background: 'rgba(255,255,255,.04)', borderRadius: 16, padding: 18, marginTop: 20 }}>
           <div style={{ font: "600 14px 'Inter'", marginBottom: 8 }}>Coach isn’t set up yet</div>
@@ -40,7 +69,7 @@ export function CoachScreen({ vm }: { vm: ViewModel }) {
   }
 
   return (
-    <div style={{ padding: '24px 20px 100px', display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
+    <div style={{ padding: '24px 20px calc(var(--tabbar-h) + var(--safe-b) + 28px)', display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <div className="num" style={{ fontSize: 30, fontWeight: 700 }}>Coach</div>
         {c.hasMessages && (
@@ -97,6 +126,17 @@ export function CoachScreen({ vm }: { vm: ViewModel }) {
             {m.proposals.map((p, i) => (
               <ProposalCard key={i} p={p} />
             ))}
+            {/* Only worth offering once there's more than one thing left to confirm. Applying them
+                together also lands them in a single state update, so a later change sees the
+                earlier one rather than racing it. */}
+            {m.pendingApplicableCount >= 2 && (
+              <button
+                onClick={m.applyAll}
+                style={{ alignSelf: 'flex-start', background: 'none', border: `1px solid ${ACCENT}`, color: ACCENT, borderRadius: 100, padding: '8px 18px', font: "600 12px 'Inter'" }}
+              >
+                Apply all {m.pendingApplicableCount} changes
+              </button>
+            )}
           </div>
         ))}
 
@@ -153,7 +193,7 @@ function CoachLockedScreen() {
     'Build a whole training plan from a chat'
   ];
   return (
-    <div style={{ padding: '24px 20px 100px', display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
+    <div style={{ padding: '24px 20px calc(var(--tabbar-h) + var(--safe-b) + 28px)', display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       <div className="num" style={{ fontSize: 30, fontWeight: 700, marginBottom: 4 }}>Coach</div>
 
       <div style={{ marginTop: 24, background: 'rgba(255,255,255,.04)', border: `1px solid ${ACCENT}`, borderRadius: 20, padding: '22px 20px' }}>

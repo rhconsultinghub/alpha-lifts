@@ -1,6 +1,20 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
-html, body { margin: 0; background: #0d0c0b; font-family: 'Inter', system-ui, sans-serif; }
+:root {
+  /* Measured height of TabBar.tsx (border + padding + icon + label). Single source of truth for
+     every "leave room for the tab bar" number in the app — screens used to hardcode 100px and
+     ResumePill 86px against a bar that is actually ~64px, three numbers for one measurement that
+     drifted independently. */
+  --tabbar-h: 68px;
+  /* index.html sets viewport-fit=cover, which lets the page draw under the Android gesture pill /
+     iOS home indicator. Nothing consumed the inset before, so every bottom-anchored surface's
+     padding was a guess that happened to work on some devices. */
+  --safe-b: env(safe-area-inset-bottom, 0px);
+}
+
+/* overscroll-behavior: the app shell is exactly viewport-height, so any overscroll at the ends of
+   .scr used to chain into the document and translate the whole shell (tab bar included). */
+html, body { margin: 0; background: #0d0c0b; font-family: 'Inter', system-ui, sans-serif; overscroll-behavior: none; }
 * { box-sizing: border-box; }
 #root { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
 
@@ -9,10 +23,14 @@ html, body { margin: 0; background: #0d0c0b; font-family: 'Inter', system-ui, sa
   border-radius: 36px; box-shadow: 0 20px 60px rgba(0,0,0,.5); overflow: hidden; position: relative; margin: 32px auto;
 }
 @media (max-width: 430px) {
-  .app-shell { width: 100vw; height: 100vh; border-radius: 0; margin: 0; }
+  /* dvh, not vh: on Android Chrome 100vh is the *large* viewport (URL bar retracted), so with the
+     URL bar showing the shell's bottom edge — and the bottom-anchored tab bar with it — sat ~50-60px
+     below the visible fold and slid in and out as the bar auto-hid during scroll. The vh line stays
+     first as the fallback for browsers without dvh. */
+  .app-shell { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; margin: 0; }
 }
 
-.scr { width: 100%; height: 100%; overflow-y: auto; color: #f5f0ea; scrollbar-width: none; -ms-overflow-style: none; }
+.scr { width: 100%; height: 100%; overflow-y: auto; overscroll-behavior: contain; color: #f5f0ea; scrollbar-width: none; -ms-overflow-style: none; }
 .scr::-webkit-scrollbar { display: none; }
 
 .num { font-family: 'Space Grotesk', sans-serif; }

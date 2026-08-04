@@ -6,9 +6,10 @@ import type { ExerciseDef, EquipOption, Muscle, TrainingType } from './types';
 // Forearms sits low deliberately: they already get heavy indirect work from every gripping pull
 // (which counts nothing toward the bar, since muscleVolumes() credits primary muscle only), so
 // the direct-work target is a top-up, not a full hypertrophy allotment. 7 rather than a rounder
-// 6 or 8 because of set-count rounding at the HIT multiplier (0.4): 6×0.4 = 2.4 target sets has
-// no integer inside the wizard balancer's 85-115% band, so every HIT program either under- or
-// overshot; 7×0.4 = 2.8 rounds cleanly to 3.
+// 6 or 8 originally because of set-count rounding at the lowest multiplier when that was 0.4
+// (6×0.4 = 2.4 has no integer inside the wizard balancer's 85-115% band; 7×0.4 = 2.8 rounds
+// cleanly to 3). At the retuned 0.65 the constraint is slack either way — 7×0.65 = 4.55 admits
+// both 4 and 5 — so 7 is kept simply because changing it would reshuffle every existing program.
 export const MUSCLE_TARGETS: Record<Muscle, number> = {
   'Back': 16, 'Biceps': 10, 'Rear Delts': 8, 'Chest': 12, 'Triceps': 8, 'Forearms': 7, 'Shoulders': 10,
   'Quads': 14, 'Hamstrings': 10, 'Glutes': 10, 'Calves': 12, 'Core': 10
@@ -16,23 +17,33 @@ export const MUSCLE_TARGETS: Record<Muscle, number> = {
 
 // multiplier applied to the baseline above per training style:
 //  - Strength (low reps near 1RM, not to failure): load does the work, less volume needed.
-//  - High Intensity/Failure (Mentzer/HIT-style, every set to true failure): far less volume needed,
-//    and recovery cost is much higher, so weekly tolerance drops a lot.
+//  - Low Volume / High Effort (the 'hit' id): fewer, harder sets taken at or close to failure.
 //  - Endurance (higher reps, submaximal, rarely to failure): needs more total sets to add up.
 //  - General/maintenance: well under MAV is enough to hold on to gains without progressing hard.
+//
+// The 'hit' multiplier was 0.4 — literal Mentzer/HIT doctrine, and far too aggressive in practice.
+// At 0.4 a PPL6 week came out at 50 total sets against Progressive Overload's 134, with four of
+// five exercises on a Push Day reduced to a SINGLE set (the balancer's 1-set floor dominated so
+// completely that every split converged on ~50 sets regardless of structure). That only makes
+// sense if every set really is taken to true momentary failure, which almost nobody sustains.
+// 0.65 keeps this the lowest-volume style — a touch under Strength's effective output — while
+// leaving enough sets on the bar for a normal hard-training lifter to actually progress.
 export const TRAINING_MULT: Record<TrainingType, number> = {
-  progressive_overload: 1, strength: 0.6, hit: 0.4, endurance: 1.3, general: 0.6
+  progressive_overload: 1, strength: 0.6, hit: 0.65, endurance: 1.3, general: 0.6
 };
 
+// NOTE: the 'hit' *key* is load-bearing and must not be renamed — it's the persisted TrainingType
+// in every saved program, the cloud-sync blob, and three separate enum lists in worker/src. Only
+// the display strings below changed when the style was rebranded away from "High Intensity".
 export const TRAINING_LABELS: Record<TrainingType, string> = {
-  progressive_overload: 'Progressive Overload', strength: 'Strength', hit: 'High Intensity (Failure)',
+  progressive_overload: 'Progressive Overload', strength: 'Strength', hit: 'Low Volume / High Effort',
   endurance: 'Endurance', general: 'General Fitness'
 };
 
 export const TRAINING_TYPE_DESCS: Record<TrainingType, string> = {
   progressive_overload: 'Steadily add weight or reps most sessions, 1-3 reps shy of failure. Standard weekly volume per muscle.',
   strength: 'Low reps near your max, not to failure (e.g. 5/3/1-style). Load does the work — needs less weekly volume.',
-  hit: 'Every set taken to true failure (Mentzer/HIT-style). Each set is so taxing you need far less weekly volume and more recovery time.',
+  hit: 'Fewer sets, each one taken hard — at or within a rep of failure. Effort does the work, so weekly volume stays low and rest between sets runs longer.',
   endurance: 'Higher reps, lighter loads, rarely to failure. Needs more total weekly volume to add up to a stimulus.',
   general: 'Balanced, moderate effort for maintenance. Well under max volume is enough to hold onto gains.'
 };
