@@ -101,7 +101,13 @@ const VIEWS = {
         [55, 423], [426, 425], [93, 362],
         [86, 436], [395, 438], [81, 433], [401, 433],
       ] },
-      { muscle: 'Quads', points: [[206, 489], [275, 488]] },    // vastus medialis inner strips, 32-36%
+      // vastus medialis inner strips + the adductor strips of the inner thigh — the app has no
+      // Adductors group; squats/lunges load them, so Quads is their honest home
+      { muscle: 'Quads', points: [[206, 489], [275, 488], [215, 523], [266, 523], [225, 551], [256, 551]] },
+      // serratus digitations / outer-lower pec edge slivers
+      { muscle: 'Chest', points: [[150, 277], [330, 278], [161, 272], [319, 272], [162, 289], [319, 289], [161, 305], [321, 305]] },
+      // inguinal/hip-flexor pockets between the abs V and the quad tops
+      { muscle: 'Core', points: [[180, 394], [301, 394]] },
     ],
     defs: FRONT_DEFS,
     muscles: ['Shoulders', 'Chest', 'Biceps', 'Forearms', 'Core', 'Quads', 'Calves'],
@@ -128,6 +134,11 @@ const VIEWS = {
       // scapula pockets (infraspinatus/teres/supraspinatus) + lat bottom tips — Back in this app's taxonomy
       { muscle: 'Back', points: [[168, 229], [292, 221], [319, 220], [316, 245], [216, 383], [168, 387], [303, 387], [176, 183], [296, 183], [292, 190]] },
       { muscle: 'Rear Delts', points: [[119, 259], [352, 259]] },        // armpit pocket below the delt cap (symmetric w/ auto-assigned R side)
+      // glute medius / lateral hip bands hugging the glute domes, plus the small trochanter pockets
+      // (the bands are crescents — their centroids fall inside the glute dome, so use edge points)
+      { muscle: 'Glutes', points: [[143, 460], [327, 460], [139, 491], [330, 492]] },
+      // adductor magnus wedge below the glute fold — hip-hinge muscle, Hamstrings is its home here
+      { muscle: 'Hamstrings', points: [[217, 561], [251, 559]] },
     ],
     defs: BACK_DEFS,
     muscles: ['Back', 'Rear Delts', 'Triceps', 'Forearms', 'Glutes', 'Hamstrings', 'Calves'],

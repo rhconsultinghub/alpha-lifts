@@ -1830,6 +1830,17 @@ Things learned doing it, for whoever touches the generator next:
   under-traced — front Biceps sits at x1.39 because the drawn biceps+brachialis compartment is
   genuinely bigger than the phase-32 trace; confirmed contained via the component bbox before
   accepting it.
+- **Synergist mapping (third pass, user-requested):** compartments with no muscle group of their
+  own are mapped to their closest trained group rather than left dark — inner-thigh adductors →
+  Quads, glute medius / lateral hip bands → Glutes, the adductor-magnus wedge below the glute
+  fold → Hamstrings, serratus/outer-pec slivers → Chest, inguinal/hip-flexor pockets → Core.
+  Deliberately still dark: neck, hands, knees/elbows, achilles, and the **soleus region below the
+  back gastrocs** — the art draws almost no muscle there (just achilles lines + silhouette), so
+  tinting it recreates the "blob down the achilles" that phase 32 removed. Also: two seed-point
+  traps found this round — a crescent-shaped compartment's *centroid falls outside it* (the glute
+  bands' centroids sit inside the glute domes), and the art is not mirror-symmetric (the right
+  medial-elbow sliver opens into the biceps compartment, so a mirrored seed there would steal the
+  entire right biceps for Forearms — that nearly shipped, caught by the per-muscle area totals).
 - Verified: offline debug + production-tint composites at full res and 34×63 (the containment
   gate), then live DOM against `npm run dev` — mask layer count/URLs/opacities per view correct on
   the Day View thumbnail and both modal views, all 14 masks 200, zero console errors. Seeded a
