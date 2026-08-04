@@ -3,7 +3,6 @@ import { SPLIT_PRESETS, DAY_TYPE_LABELS } from '../data/wizard';
 import { WARMUP_LIBRARY } from '../data/warmups';
 import { ACHIEVEMENT_FAMILIES, CATEGORY_LABELS, TOTAL_POSSIBLE_POINTS, TOTAL_TIERS, type AchievementCategory } from '../data/achievements';
 import type { AppState, HistoryEntry, Muscle, TrainingType } from '../data/types';
-import { testVibration } from './alerts';
 import { COACH_CONFIGURED } from './coach';
 import { deloadPlan, activeDeloadPct, backstopFor, DELOAD_BACKSTOP_WEEKS } from './deload';
 import type { Actions } from './useApp';
@@ -53,6 +52,13 @@ function sessionRowVM(h: HistoryEntry, s: AppState, actions: Actions) {
 export function buildViewModel(state: AppState, actions: Actions) {
   const s = state;
   const bars = muscleBarsList(s);
+
+  // ---------- who we're talking to ----------
+  // First token only — the app addresses the user the way a training partner would, and a stored
+  // "Ryan House" shouldn't produce "Hey Ryan House". Empty when no name is known (accounts
+  // onboarded before userName existed whose program name didn't yield one, or a cleared Settings
+  // field), which every greeting below has to read cleanly without.
+  const firstName = (s.userName || '').trim().split(/\s+/)[0] || '';
 
   // ---------- auto deload weeks (see state/deload.ts) ----------
   // Derived fresh every render like the achievements block below — the plan is a pure function of
@@ -165,6 +171,11 @@ export function buildViewModel(state: AppState, actions: Actions) {
   const settings = {
     open: s.showSettings,
     close: actions.closeSettings,
+    // Raw (untrimmed) so the field behaves like a normal text input mid-typing; every consumer
+    // trims for itself. Editable outside the ACCOUNT block on purpose — the name is local state,
+    // not an account field, and a signed-out user should still be able to set it.
+    userName: s.userName || '',
+    setUserName: (v: string) => actions.setUserName(v),
     unitsKgBg: s.units === 'kg' ? ACCENT : 'rgba(255,255,255,.06)',
     unitsKgColor: s.units === 'kg' ? '#0d0c0b' : 'rgba(245,240,234,.6)',
     unitsLbBg: s.units === 'lb' ? ACCENT : 'rgba(255,255,255,.06)',
@@ -240,7 +251,6 @@ export function buildViewModel(state: AppState, actions: Actions) {
     // an installed PWA), where the Vibrate toggle would be a switch wired to nothing. Detect it and
     // say so rather than letting the setting quietly lie.
     vibrationSupported: typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function',
-    testVibration,
     toggleRestAlertSound: () => actions.setRestAlertSound(!s.restAlertSound),
     toggleRestAlertVibrate: () => actions.setRestAlertVibrate(!s.restAlertVibrate),
     toggleRestAlertNotify: () => actions.setRestAlertNotify(!s.restAlertNotify),
@@ -827,8 +837,28 @@ export function buildViewModel(state: AppState, actions: Actions) {
 
   const completeSubtitle = (() => {
     const label = currentDay ? currentDay.label : (s.activeDayKey ? s.program[s.activeDayKey]?.label : '');
-    return label + ' — nice work.';
+    return label + (firstName ? ` — nice work, ${firstName}.` : ' — nice work.');
   })();
+
+  // Home-screen greeting. Rotates by calendar day rather than per render: a line that changes on
+  // every repaint reads as noise, and one fixed line goes stale within a week. Every variant is
+  // written to still make sense with no name, since firstName is legitimately empty for accounts
+  // that never stored one.
+  const homeGreeting = (() => {
+    const hour = new Date().getHours();
+    const partOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+    const who = firstName ? `, ${firstName}` : '';
+    const lines = [
+      `Hey${who} — let’s get to training!`,
+      `Good ${partOfDay}${who}. Time to put the work in.`,
+      `Let’s go${who} — today’s session is waiting.`,
+      `Back at it${who}. Let’s make it count.`
+    ];
+    return lines[Math.floor(Date.now() / 86400000) % lines.length];
+  })();
+
+  // One line above Day View's Start Workout button.
+  const startWorkoutHint = firstName ? `Ready when you are, ${firstName}.` : 'Ready when you are.';
 
   const showResume = !!s.workout && s.screen !== 'workout' && s.screen !== 'complete';
   const resumeText = s.workout ? ('Resume ' + s.program[s.workout.dayKey].label + ' — Exercise ' + (s.workout.exIndex + 1) + ' of ' + s.program[s.workout.dayKey].exercises.length) : '';
@@ -1001,6 +1031,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     warmupDetail,
     planPrompt,
     completeSubtitle,
+    firstName, homeGreeting, startWorkoutHint,
     showResume, resumeText, resumeElapsedText, resumeWorkout: actions.resumeWorkout,
     currentUnitsLabel, currentPlanLabel: TRAINING_LABELS[s.trainingType], programName: s.programName,
     renameProgram: (name: string) => actions.renameProgram(name),

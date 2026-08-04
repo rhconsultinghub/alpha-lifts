@@ -35,6 +35,9 @@ export interface RestContext {
   /** "100 lb × 5", or '' for a lift with no target to show. */
   targetText: string;
   dayLabel: string;
+  /** What to call the user, if anything is known. Used only in the rest-complete body — the title
+   *  is the one line guaranteed to render on a locked phone and it can't afford the characters. */
+  firstName?: string;
 }
 
 // Motivational close-out, in the voice the user already picked for in-app coaching copy (Settings →
@@ -66,19 +69,10 @@ function contextBody(ctx: RestContext | undefined, suffix: string, withName: boo
 
 // Returns whether the browser *accepted* the call. Chrome returns false when it refuses to vibrate
 // (most commonly because the frame has no user activation yet); it returns true once the request is
-// handed to the OS, which is not the same as the phone actually buzzing — see testVibration().
+// handed to the OS, which is not the same as the phone actually buzzing — Android can still suppress
+// it at the device level (Do Not Disturb, haptics off, battery-saver profile), which no page can
+// override.
 export function vibrateRestEnd(): boolean {
-  try { return typeof navigator.vibrate === 'function' ? navigator.vibrate(REST_END_PATTERN) : false; }
-  catch { return false; }
-}
-
-// Fired straight from a tap in Settings, so user activation is guaranteed. That's what makes it a
-// useful diagnostic: it splits the two failure modes apart, which need completely different fixes.
-//   - returns false  -> the browser refused the call outright (Vibration API blocked/absent).
-//   - returns true but nothing is felt -> the call reached the OS and Android suppressed it, i.e.
-//     device-level haptics: Do Not Disturb, "Vibration & haptics" turned down/off, a per-app or
-//     per-site block, or an OEM battery-saver profile. Nothing the page can override.
-export function testVibration(): boolean {
   try { return typeof navigator.vibrate === 'function' ? navigator.vibrate(REST_END_PATTERN) : false; }
   catch { return false; }
 }
@@ -109,8 +103,9 @@ export async function notifyRestEnd(vibrate: boolean, ctx?: RestContext, voice =
     // frequently all that renders, so burying the "get back to it" in the body would mean the one
     // thing this alert exists to say is the part most likely to be cut off.
     const title = restEndLine(voice);
+    const callToAction = ctx?.firstName ? `${ctx.firstName}, tap to jump back in.` : 'Tap to jump back in.';
     const options = {
-      body: contextBody(ctx, 'Tap to jump back in.', true), icon: ICON(), badge: BADGE(),
+      body: contextBody(ctx, callToAction, true), icon: ICON(), badge: BADGE(),
       tag: TAG_DONE, renotify: true,
       data: { type: 'rest-complete' },
       ...(vibrate ? { vibrate: [200, 100, 200] } : {})

@@ -10,6 +10,15 @@
 /** The subset of the app's state the coach is allowed to see. Mirrors CoachContext in the client. */
 export interface CoachContext {
   units?: 'kg' | 'lb';
+  // Who the coach is talking to: the name they chose plus the onboarding answers. All optional —
+  // an account with no stored name and no onboarding profile omits the whole block.
+  user?: {
+    name?: string;
+    experience?: string;
+    goal?: string;
+    equipment?: string;
+    diet?: string;
+  };
   programName?: string;
   trainingType?: string;
   weekNumber?: number;
@@ -79,12 +88,27 @@ Respond only with your final answer; do not narrate your reasoning.
 
 When the user's own program or history is in context, use it — name their actual exercises and
 numbers instead of speaking generally. If they ask something about their training that the
-context doesn't cover, say what you'd need rather than guessing at their numbers.`;
+context doesn't cover, say what you'd need rather than guessing at their numbers.
+
+If their name is in context, use it the way a training partner would — occasionally, where it lands
+naturally, not in every message and never as a greeting on a mid-workout answer. If no name is
+given, don't ask for one.`;
 
 function renderContext(ctx: CoachContext | undefined): string {
   if (!ctx) return 'The user has not shared their program with this conversation.';
 
   const lines: string[] = [];
+  const u = ctx.user;
+  if (u) {
+    if (u.name) lines.push(`The user's name is ${u.name}.`);
+    const about: string[] = [];
+    if (u.experience) about.push(`experience: ${u.experience}`);
+    if (u.goal) about.push(`main goal: ${u.goal}`);
+    if (u.equipment) about.push(`trains with: ${u.equipment}`);
+    if (u.diet) about.push(`eating: ${u.diet}`);
+    if (about.length) lines.push(`About them — ${about.join('; ')}.`);
+    if (lines.length) lines.push('');
+  }
   if (ctx.programName) lines.push(`Program: ${ctx.programName}`);
   if (ctx.trainingType) lines.push(`Training style: ${ctx.trainingType}`);
   if (ctx.weekNumber) lines.push(`Currently on week ${ctx.weekNumber}`);

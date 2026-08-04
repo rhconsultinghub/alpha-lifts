@@ -76,6 +76,16 @@ export interface CoachMessage {
  */
 export interface CoachContext {
   units: 'kg' | 'lb';
+  /** Who the coach is talking to. Every field optional — the name comes from AppState.userName
+   *  (absent for accounts that never stored one) and the rest from onboardingProfile, which only
+   *  exists for accounts onboarded through the guided flow. */
+  user?: {
+    name?: string;
+    experience?: string;
+    goal?: string;
+    equipment?: string;
+    diet?: string;
+  };
   programName?: string;
   trainingType?: string;
   weekNumber?: number;
@@ -166,8 +176,38 @@ export function buildCatalog(): CoachContext['catalog'] {
   return Object.entries(byMuscle).map(([muscle, names]) => ({ muscle, names: names.sort() }));
 }
 
+/** onboardingProfile stores the raw option ids the wizard used. The coach reads prose, so translate
+ *  them here rather than shipping "trains with: full_gym" into the prompt. Unknown values (a future
+ *  option this map hasn't caught up with) pass through as-is instead of being dropped. */
+const PROFILE_LABELS: Record<'experience' | 'goal' | 'equipment' | 'diet', Record<string, string>> = {
+  experience: { beginner: 'new to lifting', intermediate: 'trains consistently', advanced: 'experienced lifter' },
+  goal: { muscle: 'building muscle', strength: 'getting stronger', general: 'general fitness', endurance: 'building endurance' },
+  equipment: { full_gym: 'a full gym', home_basic: 'a home setup (dumbbells, bands, maybe a bench)', minimal: 'minimal equipment' },
+  diet: { build: 'eating to build', lean: 'leaning out', maintain: 'maintaining', unsure: 'unsure about nutrition' }
+};
+
 export function buildCoachContext(s: AppState): CoachContext {
   const ctx: CoachContext = { units: s.units };
+
+  // Who they are. The onboarding answers have been persisted since AI onboarding shipped but were
+  // never read anywhere — this is the first consumer, and the reason the coach can say "for someone
+  // your first year in, eating to build" rather than asking every time. Only emitted when non-empty
+  // so an account with neither a name nor a profile costs no extra input tokens.
+  const userName = (s.userName || '').trim();
+  const profile = s.onboardingProfile;
+  if (userName || profile) {
+    ctx.user = {
+      ...(userName ? { name: userName } : {}),
+      ...(profile
+        ? {
+            experience: PROFILE_LABELS.experience[profile.experience] || profile.experience,
+            goal: PROFILE_LABELS.goal[profile.goal] || profile.goal,
+            equipment: PROFILE_LABELS.equipment[profile.equipment] || profile.equipment,
+            diet: PROFILE_LABELS.diet[profile.diet] || profile.diet
+          }
+        : {})
+    };
+  }
 
   if (s.programName) ctx.programName = s.programName;
   if (s.trainingType) ctx.trainingType = s.trainingType;
@@ -221,7 +261,15 @@ let exactNameToId: Record<string, string> | null = null;
 function nameToIdMap(): Record<string, string> {
   if (!exactNameToId) {
     exactNameToId = {};
-    for (const [id, def] of Object.entries(EXLIB)) exactNameToId[normalizeName(def.name)] = id;
+    for (const [id, def] of Object.entries(EXLIB)) {
+      const key = normalizeName(def.name);
+      // A name made entirely of punctuation/emoji ("...", "🔥") normalizes to '' — legal for a
+      // custom exercise, since saveExerciseForm only requires a non-empty *trimmed* name. Letting
+      // it into the map would poison every lookup: the substring fallback below tests
+      // `q.includes(name)`, which is unconditionally true for ''. That turns any unresolvable
+      // name into a confidently-wrong match instead of an honest error card.
+      if (key) exactNameToId[key] = id;
+    }
   }
   return exactNameToId;
 }
@@ -281,6 +329,24 @@ const SCREEN_LABELS: Record<string, string> = {
 };
 
 function str(v: unknown): string | undefined { return typeof v === 'string' ? v : undefined; }
+
+/**
+ * A *name* argument from a tool call, or undefined when it isn't usable as one. Missing, blank and
+ * punctuation-only values all collapse to undefined rather than being passed downstream: none can
+ * ever resolve to a real exercise or day, and interpolating one into an error message is what
+ * produced the meaningless `"" isn't in the exercise library.` card. Callers turn undefined into
+ * INCOMPLETE instead of quoting an empty string back at the user.
+ *
+ * The Worker now drops tool calls missing a schema-required field (worker/src/tools.ts
+ * #isCompleteToolInput), so this is the second line of defence — it still matters because the
+ * client is the only side that knows a name has to survive normalizeName() to be resolvable.
+ */
+function reqStr(v: unknown): string | undefined {
+  const raw = str(v);
+  return raw && normalizeName(raw) ? raw.trim() : undefined;
+}
+
+const INCOMPLETE = 'That suggestion came through incomplete — ask me to try it again.';
 function num(v: unknown): number | undefined { return typeof v === 'number' && Number.isFinite(v) ? v : undefined; }
 function repsIn(v: unknown): number | undefined { const n = num(v); return n != null ? Math.max(1, Math.round(n)) : undefined; }
 function setsIn(v: unknown): number | undefined { const n = num(v); return n != null ? Math.max(1, Math.min(8, Math.round(n))) : undefined; }
@@ -306,10 +372,11 @@ export function parseProposals(raw: unknown, s: AppState): CoachProposal[] {
 
     switch (r.tool) {
       case 'propose_add_exercise': {
-        const dayName = str(input.day) ?? '', exName_ = str(input.exercise) ?? '';
-        const dayKey = resolveDayKey(dayName, s), exId = resolveExerciseId(exName_);
+        const dayName = reqStr(input.day), exName_ = reqStr(input.exercise);
         const sets = setsIn(input.sets), reps = repsIn(input.reps);
-        if (!dayKey) { out.push(err(`Add ${exName_ || 'exercise'}`, `Couldn't find a day called "${dayName}".`)); break; }
+        if (!dayName || !exName_) { out.push(err('Add exercise', INCOMPLETE)); break; }
+        const dayKey = resolveDayKey(dayName, s), exId = resolveExerciseId(exName_);
+        if (!dayKey) { out.push(err(`Add ${exName_}`, `Couldn't find a day called "${dayName}".`)); break; }
         if (!exId) { out.push(err(`Add ${exName_}`, `"${exName_}" isn't in the exercise library.`)); break; }
         out.push({
           kind: 'add_exercise',
@@ -319,7 +386,8 @@ export function parseProposals(raw: unknown, s: AppState): CoachProposal[] {
         break;
       }
       case 'propose_swap_exercise': {
-        const dayName = str(input.day) ?? '', fromName = str(input.from_exercise) ?? '', toName = str(input.to_exercise) ?? '';
+        const dayName = reqStr(input.day), fromName = reqStr(input.from_exercise), toName = reqStr(input.to_exercise);
+        if (!dayName || !fromName || !toName) { out.push(err('Swap exercise', INCOMPLETE)); break; }
         const dayKey = resolveDayKey(dayName, s), toExId = resolveExerciseId(toName);
         if (!dayKey) { out.push(err('Swap exercise', `Couldn't find a day called "${dayName}".`)); break; }
         const fromExId = resolveExerciseOnDay(fromName, dayKey, s);
@@ -333,7 +401,8 @@ export function parseProposals(raw: unknown, s: AppState): CoachProposal[] {
         break;
       }
       case 'propose_remove_exercise': {
-        const dayName = str(input.day) ?? '', exName_ = str(input.exercise) ?? '';
+        const dayName = reqStr(input.day), exName_ = reqStr(input.exercise);
+        if (!dayName || !exName_) { out.push(err('Remove exercise', INCOMPLETE)); break; }
         const dayKey = resolveDayKey(dayName, s);
         if (!dayKey) { out.push(err('Remove exercise', `Couldn't find a day called "${dayName}".`)); break; }
         const exId = resolveExerciseOnDay(exName_, dayKey, s);
@@ -346,9 +415,10 @@ export function parseProposals(raw: unknown, s: AppState): CoachProposal[] {
         break;
       }
       case 'propose_set_exercise_params': {
-        const dayName = str(input.day) ?? '', exName_ = str(input.exercise) ?? '';
-        const dayKey = resolveDayKey(dayName, s);
+        const dayName = reqStr(input.day), exName_ = reqStr(input.exercise);
         const sets = setsIn(input.sets), reps = repsIn(input.reps);
+        if (!dayName || !exName_) { out.push(err('Adjust exercise', INCOMPLETE)); break; }
+        const dayKey = resolveDayKey(dayName, s);
         if (!dayKey) { out.push(err('Adjust exercise', `Couldn't find a day called "${dayName}".`)); break; }
         const exId = resolveExerciseOnDay(exName_, dayKey, s);
         if (!exId) { out.push(err('Adjust exercise', `"${exName_}" isn't on ${s.program[dayKey].label}.`)); break; }
@@ -361,8 +431,9 @@ export function parseProposals(raw: unknown, s: AppState): CoachProposal[] {
         break;
       }
       case 'propose_build_program': {
-        const splitId = str(input.split) ?? '', trainingType = str(input.training_type) ?? '';
+        const splitId = str(input.split)?.trim() ?? '', trainingType = str(input.training_type)?.trim() ?? '';
         const name = str(input.name)?.trim() || undefined;
+        if (!splitId || !trainingType) { out.push(err('Build a program', INCOMPLETE)); break; }
         if (!SPLIT_LABELS[splitId]) { out.push(err('Build a program', `Unknown split "${splitId}".`)); break; }
         if (!TRAINING_LABELS_SHORT[trainingType]) { out.push(err('Build a program', `Unknown training style "${trainingType}".`)); break; }
         out.push({
@@ -383,7 +454,7 @@ export function parseProposals(raw: unknown, s: AppState): CoachProposal[] {
         break;
       }
       case 'propose_navigate': {
-        const dayName = str(input.day), screen = str(input.screen);
+        const dayName = reqStr(input.day), screen = str(input.screen)?.trim();
         if (dayName) {
           const dayKey = resolveDayKey(dayName, s);
           if (!dayKey) { out.push(err('Open day', `Couldn't find a day called "${dayName}".`)); break; }
@@ -499,7 +570,7 @@ export async function askCoach(messages: CoachMessage[], context: CoachContext):
     return { ok: false, error: 'Can’t reach the coach. Check your connection and try again.' };
   }
 
-  let data: { reply?: string; error?: string; truncated?: boolean; proposals?: unknown };
+  let data: { reply?: string; error?: string; truncated?: boolean; droppedProposals?: number; proposals?: unknown };
   try {
     data = await res.json();
   } catch {
@@ -528,7 +599,16 @@ export async function askCoach(messages: CoachMessage[], context: CoachContext):
   if (!reply && proposals.length) reply = 'Here’s what I can do — tap Apply to make the change:';
   if (!reply) return { ok: false, error: 'The coach came back empty. Try asking again.' };
 
-  return { ok: true, reply: data.truncated ? `${reply}…` : reply, rawProposals: proposals };
+  if (data.truncated) reply = `${reply}…`;
+  // The Worker dropped a tool call whose input arrived incomplete. Say so — the prose above may
+  // describe a change that has no card under it, and silently showing fewer cards than were
+  // promised is worse than admitting the answer got cut off.
+  if (data.droppedProposals) {
+    const n = data.droppedProposals;
+    reply = `${reply}\n\n(${n === 1 ? 'One change I described didn’t' : `${n} changes I described didn’t`} come through in full — ask me again and I’ll redo ${n === 1 ? 'it' : 'them'}.)`;
+  }
+
+  return { ok: true, reply, rawProposals: proposals };
 }
 
 // ---------- AI plan parsing (Pro-gated /parse-plan route) ----------

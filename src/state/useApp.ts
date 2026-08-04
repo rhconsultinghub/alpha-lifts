@@ -50,6 +50,14 @@ function loadInitial(): AppState {
       if (parsed.onboarded === undefined && parsed.dayOrder && parsed.dayOrder.length > 0) {
         state.onboarded = true;
       }
+      // back-compat: onboarding has always asked for a name, but until userName existed the answer
+      // only survived as the program name ("Ryan's Program", see onboarding.ts#defaultProgramName).
+      // Recover it once so existing accounts get greeted by name too. A one-time derivation, not an
+      // ongoing link — renaming the program later doesn't rename the user.
+      if (!state.userName) {
+        const m = /^(.+?)['’]s\s+Program$/i.exec((state.programName || '').trim());
+        if (m) state.userName = m[1].trim();
+      }
       // An in-flight coach request can't survive a reload — if the app was closed mid-send, the
       // persisted `true` would restore a chat stuck showing the typing indicator forever, with
       // no request running to ever clear it.
@@ -114,7 +122,7 @@ export function useApp() {
       if (!shouldFireReminder(cur, now)) return;
       const dow = now.toLocaleDateString(undefined, { weekday: 'long' });
       const todayProgDay = cur.dayOrder.map(k => cur.program[k]).find(d => d && d.dow === dow);
-      fireReminder(todayProgDay ? todayProgDay.label : 'Today’s workout');
+      fireReminder(todayProgDay ? todayProgDay.label : 'Today’s workout', (cur.userName || '').trim().split(/\s+/)[0] || undefined);
       setState(s => ({ ...s, lastReminderFiredDate: now.toDateString() }));
     }, 60000);
     return () => window.clearInterval(id);
@@ -216,6 +224,9 @@ export function useApp() {
   const setCoachVoice = useCallback((v: CoachVoice) => setState(s => ({ ...s, coachVoice: v })), []);
   const setWarmupStyle = useCallback((v: WarmupStyle) => setState(s => ({ ...s, warmupStyle: v })), []);
   const renameProgram = useCallback((name: string) => setState(s => ({ ...s, programName: name })), []);
+  // Direct write, same shape as renameProgram — the value is stored raw (trimmed only where it's
+  // read) so the Settings field behaves like a normal text input while it's being typed in.
+  const setUserName = useCallback((name: string) => setState(s => ({ ...s, userName: name })), []);
   const dismissDeloadSuggestion = useCallback(() => setState(s => ({ ...s, deloadDismissedWeek: s.weekNumber })), []);
 
   // ---------- auto deload weeks ----------
@@ -482,7 +493,9 @@ export function useApp() {
   // welcome + answers so the app remembers who this plan was built for.
   const finishOnboarding = useCallback(
     (choice: {
+      // the *program* name, not the person's — that's `userName`.
       name: string;
+      userName?: string;
       trainingType: TrainingType;
       splitId: string;
       welcome: string;
@@ -502,6 +515,7 @@ export function useApp() {
         return {
           ...s,
           onboarded: true,
+          userName: (choice.userName || '').trim(),
           onboardingWelcome: choice.welcome,
           onboardingProfile: choice.profile,
           showTutorial: !!choice.startTutorial,
@@ -1243,7 +1257,8 @@ export function useApp() {
       exerciseName: EXLIB[ex.id]?.name || 'Next exercise',
       setLabel: sets.length ? `Set ${setNo} of ${sets.length}` : '',
       targetText: target ? (target.weight > 0 ? `${fmtWeight(target.weight, s.units)} × ${target.reps}` : `${target.reps} reps`) : '',
-      dayLabel: s.program[w.dayKey]?.label || ''
+      dayLabel: s.program[w.dayKey]?.label || '',
+      firstName: (s.userName || '').trim().split(/\s+/)[0] || undefined
     };
   }, []);
 
@@ -1697,7 +1712,7 @@ export function useApp() {
       selectExerciseProgress, toggleProgressPicker, toggleMuscleBalance, toggleCompareLift, toggleCompareLiftPicker, setProgressMetric,
       openWeekReview, closeWeekReview, selectReviewWeek, backToWeekList,
       setTrainingType, openSettings, closeSettings, setUnits, setRestPacing, setCoachVoice, setWarmupStyle,
-      renameProgram, toggleSkipDay, dismissDeloadSuggestion,
+      renameProgram, setUserName, toggleSkipDay, dismissDeloadSuggestion,
       setDeloadEnabled, setDeloadIntensity, setDeloadCadence, startDeloadNow, endDeloadNow,
       deferDeload, skipDeload,
       exportBackup, stageBackupImport, cancelBackupImport, confirmBackupImport,

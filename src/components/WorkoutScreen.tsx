@@ -39,6 +39,7 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <button onClick={w.openSwap} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.6)' }}>⇄ Swap</button>
               <button onClick={w.openDetail} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.6)' }}>▶ How-to</button>
+              <button onClick={w.openAddExercise} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px dashed rgba(255,255,255,.25)', background: 'none', color: 'rgba(245,240,234,.6)' }}>+ Add Exercise</button>
               {w.canMoveUp && (
                 <button onClick={w.moveUp} style={{ font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.6)' }}>↑ Move Up</button>
               )}
@@ -135,6 +136,8 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
           </div>
         ))}
         <button onClick={w.addSet} style={{ width: '100%', marginTop: 4, background: 'none', border: '1px dashed rgba(255,255,255,.25)', color: 'rgba(245,240,234,.6)', font: "600 13px 'Inter'", padding: 13, borderRadius: 14 }}>+ Add Set</button>
+        <button onClick={w.openAddExercise} style={{ width: '100%', marginTop: 10, background: 'none', border: '1px dashed rgba(255,255,255,.25)', color: 'rgba(245,240,234,.6)', font: "600 13px 'Inter'", padding: 13, borderRadius: 14 }}>+ Add Exercise to This Workout</button>
+        <div style={{ font: "400 10px/1.4 'Inter'", color: 'rgba(245,240,234,.35)', textAlign: 'center', marginTop: 7 }}>Added just for today — you’ll be asked whether to keep it in your plan when you finish.</div>
       </div>
 
       {w.resting && (

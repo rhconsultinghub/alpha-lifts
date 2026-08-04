@@ -188,7 +188,8 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
           );
         })}
 
-        <button onClick={vm.startWorkout} style={{ width: '100%', marginTop: 20, background: 'oklch(0.65 0.19 35)', color: '#0d0c0b', font: "700 15px 'Inter'", textAlign: 'center', padding: 16, borderRadius: 16, border: 'none' }}>Start Workout</button>
+        <div style={{ font: "600 12px 'Inter'", color: 'rgba(245,240,234,.5)', textAlign: 'center', marginTop: 20 }}>{vm.startWorkoutHint}</div>
+        <button onClick={vm.startWorkout} style={{ width: '100%', marginTop: 8, background: 'oklch(0.65 0.19 35)', color: '#0d0c0b', font: "700 15px 'Inter'", textAlign: 'center', padding: 16, borderRadius: 16, border: 'none' }}>Start Workout</button>
       </div>
 
       <MusclesWorkedModal vm={vm} />

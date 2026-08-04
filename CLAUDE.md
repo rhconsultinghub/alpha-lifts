@@ -991,6 +991,8 @@ reported chime (turning Sound off silences it). Deliberately left alone: the
 `restAlertVibrate || restAlertNotify` gate on `notifyRestEnd()`, since with vibrate defaulting on that
 gate is what makes the notification fire at all. Verified both readouts by stubbing `navigator.vibrate`
 to return true and then false at runtime. **Outcome: the user confirmed vibration works after this.**
+(The "Test buzz" control was removed in phase 43 once it had served that diagnostic purpose —
+`vibrationSupported`, the lengthened pattern, and the help copy all stayed.)
 
 (27) achievement cadence — "make it very easy to hit some sort of achievement every workout".
 Phase 22's tiering fixed "nothing left to chase" but not *frequency*: the ladders jumped 10 → 25 → 50,
@@ -1850,3 +1852,95 @@ Things learned doing it, for whoever touches the generator next:
   `.claude/launch.json` was added because the browser tool resolves it from the workspace root
   (`L:\Personal Projects\Alpha Lifts`), not the app subfolder — it runs
   `npm run dev --prefix alpha-lifts`.
+
+(43) four-item feedback round: a coach error, a discoverability miss, a diagnostic removal, and
+personalization.
+
+- **The coach's `"" isn't in the exercise library.` card — a truncation bug, not a naming bug.**
+  Reported while asking the coach to update several exercises at once, and the plural is the clue:
+  `MAX_TOKENS` was 1024 in `worker/src/index.ts` while the request also runs `thinking: adaptive`,
+  so thinking tokens, the prose reply, **and every `propose_*` tool call's input JSON** shared one
+  budget. Running out mid-serialization yields a `tool_use` block with fields missing, which
+  `index.ts` forwarded verbatim; client-side `parseProposals` then did `str(input.exercise) ?? ''`
+  and interpolated the blank straight into `` `"${exName_}" isn't in the exercise library.` ``. No
+  wrong mutation was ever possible (`resolveExerciseId('')` returns null) — the card was just
+  meaningless. Fixed on both sides: `MAX_TOKENS` → 2048 for headroom, plus `isCompleteToolInput()`
+  in `worker/src/tools.ts` which checks a call against its **own schema's `required` array** (blank
+  and whitespace strings count as missing) and drops incomplete calls rather than forwarding them,
+  reporting the count as `droppedProposals` so `askCoach` can append "N changes I described didn't
+  come through in full" instead of silently showing fewer cards than the prose promised. Client
+  side, a `reqStr()` helper (undefined for anything `normalizeName()` collapses to `''`) guards
+  every `propose_*` case, and a missing name now yields "That suggestion came through incomplete —
+  ask me to try it again." Genuine failures keep their specific messages ("Zorbulon Thrusters isn't
+  in the exercise library", "isn't on Upper Day"). **Also fixed in the same pass**, since it's the
+  same blank-name defect class: `nameToIdMap()` now skips entries whose normalized name is empty. A
+  custom exercise named `"..."` or `"🔥"` is legal (`saveExerciseForm` only requires a non-empty
+  *trimmed* name) and normalizes to `''`; with `''` in the map, the substring fallback's
+  `q.includes(name)` is unconditionally true, so **any** unresolvable name would have resolved to
+  that junk exercise — a confidently-wrong applicable proposal instead of an error card. Verified
+  live by importing the real `coach.ts` off the dev server and running crafted raw proposals
+  through `parseProposals` (missing / whitespace / punctuation-only / null names across all six
+  tools — no `""` anywhere, the valid one still resolved), and the Worker guard via a scratch
+  script that transpiles `tools.ts`/`prompt.ts` with the worker's own `typescript` (11/11 cases).
+  **Still open** (deliberately out of scope): `exactNameToId` is memoized once per session and
+  never invalidated, so a custom exercise created *after* the first resolve is advertised to the
+  model by `buildCatalog()` (which reads `EXLIB` live) yet can't be resolved back.
+
+- **"Add an exercise on the workout page" already worked — nobody could find the button.**
+  `swapConfirm`'s in-session `isAdd` branch, `changesMade`, and the completion screen's "Update My
+  Plan / Just This Once" card were all built and correct; the only entry point was the last pill in
+  the *horizontally-scrolling* exercise nav strip. Measured on a 375px viewport with 7 exercises it
+  sat at `left: 1136px` — 761px off-screen, which is why the only add path the user knew was the
+  Day Builder (permanent, no confirmation). Fixed as pure discoverability: `+ Add Exercise` added
+  to the always-visible action pill row under the exercise name, plus a full-width
+  `+ Add Exercise to This Workout` under `+ Add Set` with a one-line note that it's today-only and
+  will be offered for the plan at the end. Both reuse `w.openAddExercise` verbatim — no new state,
+  no new action. Verified end-to-end live: added Chest Press mid-session → `changesMade 1`,
+  `dayExercises` 8, `program` still 7; ended the workout → the prompt appeared → "Update My Plan"
+  wrote `chest_press` into `program` and cleared `pendingPlanUpdate`. Note `viewModel.ts`'s swap
+  `inSession` has an extra `&& !s.swap.isAdd` that `swapConfirm`'s doesn't — checked and harmless
+  (in add mode `exercisesArr` only feeds `currentEx`, which is null), left alone.
+
+- **"Test buzz" removed** (see phase 26 for why it existed). Five deletions: the SettingsModal JSX
+  block + its `vibeTest` state, the `testVibration` VM field + its now-sole-purpose import, and
+  `testVibration()` in `alerts.ts`. `vibrationSupported`, `vibrateRestEnd()` and `REST_END_PATTERN`
+  all stay — the first still gates both the unsupported-browser notice and the Vibrate toggle's
+  disabled state.
+
+- **The user's name is now stored and used.** Onboarding has always asked "WHAT SHOULD WE CALL
+  YOU?" and then thrown the answer away: it only ever became the *program* name
+  (`defaultProgramName` → "Ryan's Program") and a frozen welcome string, and
+  `OnboardingScreen` passed `plan.name` (the program name) to `ob.finish`, so `finishOnboarding`
+  never saw the person's name at all. New optional `AppState.userName` (back-compat via
+  `loadInitial`'s existing shallow-merge, no migration), threaded through both onboarding paths,
+  and editable in a new Settings "YOUR NAME" field — deliberately outside the ACCOUNT block, since
+  it's local state, not an account field, and a signed-out user should still be able to set it.
+  **Existing accounts recover their name for free**: `loadInitial()` derives it once from a
+  `/^(.+?)['’]s\s+Program$/i` match on `programName` (a one-time derivation, not an ongoing link —
+  renaming the program later doesn't rename the user). Consumed by: a day-rotating home greeting
+  (`vm.homeGreeting`, four variants, seeded on the calendar day so it doesn't churn every repaint),
+  Day View's `Ready when you are, Ryan.` above Start Workout, `completeSubtitle`, the rest-complete
+  notification **body** (never the title — Android truncates titles ~40 chars, and the motivational
+  line is the one thing that must survive), `fireReminder`, and a new `user` block in the coach
+  context carrying the name plus `onboardingProfile` — which had been persisted since AI onboarding
+  shipped with **zero read sites anywhere**, so this is its first consumer. The profile's raw
+  option ids are humanized client-side via `PROFILE_LABELS` (`full_gym` → "a full gym") so the
+  prompt reads as prose, keeping the Worker app-agnostic; `STYLE_RULES` gained one line about using
+  the name the way a training partner would rather than as a greeting on every message. Every
+  greeting is written to read correctly with **no** name — verified by clearing the Settings field
+  ("Good evening. Time to put the work in.", no dangling comma) and by stripping `userName` from a
+  persisted blob to confirm the derivation kicks in on reload.
+
+  Local-verification note: the app is behind `AuthGate` whenever `VITE_COACH_API_URL` is set, and
+  there's no real API key in dev. Seeding `alpha-lifts-auth-token` + `alpha-lifts-auth-account` in
+  `localStorage` gets past it — the background `/auth/me` revalidation fails as a *network* error
+  from localhost (the Worker's origin allowlist), not a 401, so `AuthGate` keeps the cached account
+  rather than signing out. Also worth knowing: the browser tool's `computer` click was unreliable
+  against this app's buttons in this session, while in-page `element.click()` via `javascript_exec`
+  drove the whole onboarding → workout → completion flow fine.
+
+  `npx tsc -b`, `npm run build` (184 precache entries) and the worker's `tsc --noEmit` all clean;
+  zero console and zero dev-server errors throughout. **The Worker changes (MAX_TOKENS, the
+  required-field guard, the `user` context block, STYLE_RULES) are not live until `wrangler deploy`
+  is run from `L:\Personal Projects\Alpha Lifts\alpha-lifts\worker`** — the Pages frontend
+  auto-deploys on push, the Worker never does.

@@ -24,10 +24,12 @@ export function shouldFireReminder(state: AppState, now: Date): boolean {
 // Both paths are also BASE_URL-relative now — the bare 'icon-192.png' here resolved against the
 // page URL, which is wrong under the '/alpha-lifts/' production base whenever the app isn't sitting
 // at the scope root.
-export function fireReminder(dayLabel: string): void {
+// `firstName` is optional throughout — plenty of accounts have no stored name (see AppState.userName)
+// and a reminder reading "undefined, Push Day is on today's plan." would be worse than the plain one.
+export function fireReminder(dayLabel: string, firstName?: string): void {
   try {
     new Notification('Time to train', {
-      body: dayLabel + ' is on today’s plan.',
+      body: firstName ? `${firstName}, ${dayLabel} is on today’s plan.` : dayLabel + ' is on today’s plan.',
       icon: `${import.meta.env.BASE_URL}icon-192.png`,
       badge: `${import.meta.env.BASE_URL}badge-96.png`
     });

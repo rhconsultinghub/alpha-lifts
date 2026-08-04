@@ -9,7 +9,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { buildSystem, type CoachContext } from './prompt';
-import { COACH_TOOLS } from './tools';
+import { COACH_TOOLS, isCompleteToolInput } from './tools';
 import { isEntitled } from './access';
 import { checkBudget, costMicroUsd, recordSpend } from './usage';
 import { corsHeaders, json } from './http';
@@ -51,8 +51,16 @@ export interface Env {
 
 const MODEL = 'claude-opus-4-8';
 
-/** Fitness answers are short. This is a hard ceiling on cost-per-message, not a target. */
-const MAX_TOKENS = 1024;
+/**
+ * Fitness answers are short. This is a hard ceiling on cost-per-message, not a target.
+ *
+ * Raised from 1024 after a real bug: adaptive thinking, the prose reply, AND every propose_* tool
+ * call's input JSON all come out of this one budget. A multi-change request ("update my exercises")
+ * emits several tool calls, and running out mid-JSON yields a tool_use block with missing fields —
+ * which surfaced client-side as a nonsense `"" isn't in the exercise library.` card. The headroom
+ * is the real fix; dropping truncated calls below is the safety net.
+ */
+const MAX_TOKENS = 2048;
 
 /** Longest single user message we'll forward, in characters. */
 const MAX_MESSAGE_CHARS = 2000;
@@ -226,14 +234,22 @@ async function handleCoach(request: Request, env: Env, cors: Record<string, stri
     // ids, checking the day/exercise exists) before it ever shows an Apply button, so a
     // hallucinated tool name or bad argument degrades to a dismissable "couldn't do that" card
     // rather than anything executing.
-    const proposals = response.content
-      .filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use')
+    //
+    // A call whose input is missing a schema-required field is dropped rather than forwarded: it
+    // can't resolve to anything, so the only card it could produce is a broken one. `dropped` is
+    // reported so the client can say the answer came back incomplete instead of silently showing
+    // fewer changes than were described in the prose.
+    const toolBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+    const proposals = toolBlocks
+      .filter(b => isCompleteToolInput(b.name, b.input))
       .map(b => ({ tool: b.name, input: b.input }));
+    const droppedProposals = toolBlocks.length - proposals.length;
 
     return json(
       {
         reply,
         proposals,
+        droppedProposals,
         truncated: response.stop_reason === 'max_tokens',
         usage: { microUsd, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens }
       },

@@ -126,7 +126,9 @@ function fallbackTrainingType(goal: Goal): TrainingType {
   }
 }
 
-function defaultProgramName(answers: OnboardingAnswers): string {
+/** "Ryan's Program" — also what loadInitial() reads back to recover a userName for accounts
+ *  onboarded before that field existed, so keep the possessive shape if this changes. */
+export function defaultProgramName(answers: Pick<OnboardingAnswers, 'name'>): string {
   const first = answers.name.trim().split(/\s+/)[0];
   return first ? `${first}'s Program` : 'My Program';
 }

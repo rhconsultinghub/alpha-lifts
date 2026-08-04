@@ -3,6 +3,7 @@ import type { ViewModel } from '../state/viewModel';
 import { SPLIT_PRESETS } from '../data/wizard';
 import type { TrainingType } from '../data/types';
 import {
+  defaultProgramName,
   generateOnboardingPlan,
   type Diet,
   type Equipment,
@@ -89,7 +90,10 @@ export function OnboardingScreen({ vm }: { vm: ViewModel }) {
   // Opt-out completion: build an empty starter program (they'll fill it in), then launch the tour.
   function finishManual() {
     ob.finish({
-      name: answers.name ?? '',
+      // the program gets the same possessive name the AI path uses; the person's own name is
+      // kept separately as userName.
+      name: defaultProgramName({ name: answers.name ?? '' }),
+      userName: answers.name ?? '',
       trainingType: 'general',
       splitId: 'full_body',
       welcome: '',
@@ -233,6 +237,7 @@ export function OnboardingScreen({ vm }: { vm: ViewModel }) {
             onEnter={() =>
               ob.finish({
                 name: plan.name,
+                userName: answers.name ?? '',
                 trainingType: plan.trainingType,
                 splitId: plan.splitId,
                 welcome: plan.welcome,

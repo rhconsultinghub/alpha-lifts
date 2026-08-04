@@ -10,6 +10,7 @@ export function ProgramScreen({ vm }: { vm: ViewModel }) {
         </div>
         <button onClick={vm.openSettings} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 15 }}>⚙</button>
       </div>
+      <div style={{ font: "600 13px 'Inter'", color: 'oklch(0.72 0.17 35)', marginBottom: 2 }}>{vm.homeGreeting}</div>
       <input
         value={vm.programName}
         onChange={e => vm.renameProgram(e.target.value)}

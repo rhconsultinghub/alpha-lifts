@@ -22,9 +22,6 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
   const [planError, setPlanError] = useState('');
   const [aiText, setAiText] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
-  // result of the manual "Test buzz" tap: null = untested, 'accepted' = the browser handed the
-  // request to the OS, 'blocked' = the browser refused it outright. See alerts.ts#testVibration.
-  const [vibeTest, setVibeTest] = useState<null | 'accepted' | 'blocked'>(null);
   if (!st.open) return null;
 
   const handleFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,6 +109,18 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
             <span style={{ flex: 1 }}>Replay app tutorial</span>
             <span style={{ color: 'rgba(245,240,234,.4)', fontSize: 16 }}>›</span>
           </button>
+
+          <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>YOUR NAME</div>
+          <input
+            value={st.userName}
+            onChange={e => st.setUserName(e.target.value)}
+            placeholder="What should we call you?"
+            autoCapitalize="words"
+            style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 14, padding: '13px 14px', color: '#f5f0ea', font: "600 13px 'Inter'", marginBottom: 6 }}
+          />
+          <div style={{ font: "400 10.5px/1.5 'Inter'", color: 'rgba(245,240,234,.35)', marginBottom: 24 }}>
+            Used to greet you around the app and so your AI coach knows who it’s talking to. Leave it blank to keep things impersonal.
+          </div>
 
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>UNITS</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
@@ -226,19 +235,6 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
           {!st.vibrationSupported && (
             <div style={{ font: "400 11px/1.45 'Inter'", color: 'oklch(0.78 0.13 230)', background: 'oklch(0.7 0.13 230 / 0.1)', border: '1px solid oklch(0.7 0.13 230 / 0.3)', borderRadius: 10, padding: '8px 10px', marginBottom: 8 }}>
               This browser doesn't expose vibration to web apps, so Vibrate can't do anything here. Turn on Notify and leave the app in the background during rest — your phone's own notification settings will buzz it.
-            </div>
-          )}
-          {st.vibrationSupported && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <button
-                onClick={() => setVibeTest(st.testVibration() ? 'accepted' : 'blocked')}
-                style={{ flex: 'none', font: "600 11px 'Inter'", padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.75)' }}
-              >Test buzz</button>
-              <div style={{ flex: 1, font: "400 10px/1.4 'Inter'", color: vibeTest === 'blocked' ? 'oklch(0.75 0.16 25)' : 'rgba(245,240,234,.45)' }}>
-                {vibeTest === null && 'Tap to check whether this phone will actually buzz.'}
-                {vibeTest === 'accepted' && 'Sent to the phone. If you felt nothing, it’s an Android setting blocking it — check Do Not Disturb and Settings → Sound & vibration → Vibration & haptics.'}
-                {vibeTest === 'blocked' && 'Chrome refused the vibration call. Vibration is disabled for this site or browser.'}
-              </div>
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>

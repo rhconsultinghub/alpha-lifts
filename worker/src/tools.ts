@@ -25,6 +25,30 @@ const SPLIT_IDS = ['ppl6', 'upper_lower', 'full_body', 'bro_split', 'ppl_rest', 
 const TRAINING_TYPES = ['progressive_overload', 'strength', 'hit', 'endurance', 'general'] as const;
 const SCREENS = ['program', 'progress', 'exercises', 'achievements'] as const;
 
+/**
+ * Whether a tool call carries every field its own schema marks required.
+ *
+ * The API can return a `tool_use` block whose input JSON was cut off mid-serialization when the
+ * response hits `max_tokens` — the missing fields then arrive as `undefined`. Forwarding that
+ * produces a proposal the client can only render as a broken card (this is what caused the
+ * `"" isn't in the exercise library.` report), so an incomplete call is dropped at the Worker
+ * instead. Empty/whitespace strings count as missing: every required field here is a name the
+ * client has to resolve, and a blank one can never resolve to anything.
+ */
+export function isCompleteToolInput(name: string, input: unknown): boolean {
+  const tool = COACH_TOOLS.find(t => t.name === name);
+  if (!tool) return false;
+  const required = (tool.input_schema as { required?: string[] }).required || [];
+  if (required.length === 0) return true;
+  if (typeof input !== 'object' || input === null) return false;
+  const obj = input as Record<string, unknown>;
+  return required.every(key => {
+    const v = obj[key];
+    if (typeof v === 'string') return v.trim() !== '';
+    return v != null;
+  });
+}
+
 export const COACH_TOOLS: Anthropic.Tool[] = [
   {
     name: 'propose_add_exercise',

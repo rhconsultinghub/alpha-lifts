@@ -3,6 +3,7 @@ import type { AppState } from './types';
 export function createInitialState(): AppState {
   return {
     onboarded: false,
+    userName: '',
     screen: 'program',
     trainingType: 'progressive_overload',
     dayOrder: [],

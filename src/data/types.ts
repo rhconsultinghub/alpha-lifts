@@ -271,6 +271,11 @@ export type WarmupStyle = 'Minimal' | 'Standard' | 'Cautious';
 
 export interface AppState {
   onboarded: boolean;
+  // What to call the user. Collected during onboarding ("WHAT SHOULD WE CALL YOU?") and editable in
+  // Settings. Optional: accounts onboarded before this existed have no stored name — loadInitial()
+  // derives one from a "<First>'s Program" programName where it can, and everything that greets the
+  // user has a name-less fallback for when it can't.
+  userName?: string;
   // Personalized welcome message produced by AI onboarding (or a templated fallback), kept so it
   // can be shown again after first run (e.g. re-read from a "Your welcome" entry). Optional —
   // absent for accounts onboarded before this existed, and cleared is fine.
