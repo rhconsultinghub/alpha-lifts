@@ -1,6 +1,8 @@
 import type { ViewModel } from '../state/viewModel';
+import { useElapsedText } from '../state/useClock';
 
 export function ResumePill({ vm }: { vm: ViewModel }) {
+  const elapsedText = useElapsedText(vm.showResume ? vm.workoutStartedAt : null);
   if (!vm.showResume) return null;
   return (
     // Was a hardcoded `bottom: 86` — hand-tuned against a ~64px bar, and wrong twice over: it
@@ -10,7 +12,7 @@ export function ResumePill({ vm }: { vm: ViewModel }) {
       <button onClick={vm.resumeWorkout} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, background: 'oklch(0.65 0.19 35)', border: 'none', color: '#0d0c0b', font: "700 12px 'Inter'", padding: '12px 16px', borderRadius: 100, boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
         <span style={{ fontSize: 14 }}>▶</span>
         <span style={{ flex: 1, textAlign: 'left' }}>{vm.resumeText}</span>
-        <span className="num" style={{ fontWeight: 700 }}>{vm.resumeElapsedText}</span>
+        <span className="num" style={{ fontWeight: 700 }}>{elapsedText}</span>
       </button>
     </div>
   );

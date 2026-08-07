@@ -8,12 +8,20 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { buildSystem, type CoachContext } from './prompt';
+import { buildSystem, sanitizeContext, type CoachContext } from './prompt';
 import { COACH_TOOLS, isCompleteToolInput } from './tools';
 import { isEntitled } from './access';
 import { checkBudget, costMicroUsd, recordSpend } from './usage';
 import { corsHeaders, json } from './http';
 import { authenticate } from './auth';
+import {
+  allowRate,
+  clientIp,
+  readJsonCapped,
+  sanitizeId,
+  MAX_AI_BODY_BYTES,
+  type RateLimiter
+} from './guard';
 import { handleOnboard } from './onboard';
 import { handleParsePlan } from './parsePlan';
 import {
@@ -47,6 +55,10 @@ export interface Env {
   RESEND_FROM?: string;
   // Where the /auth/verify landing page links back to. Set in wrangler.toml; defaults to the app.
   APP_URL?: string;
+  // Per-IP rate limiters ([[ratelimits]] in wrangler.toml). Optional — absent bindings fail open
+  // (guard.ts), since the hard gates (session auth, entitlement, budget) fail closed on their own.
+  AUTH_LIMITER?: RateLimiter;
+  AI_LIMITER?: RateLimiter;
 }
 
 const MODEL = 'claude-opus-4-8';
@@ -87,66 +99,96 @@ export default {
     const origin = request.headers.get('Origin');
     const cors = corsHeaders(origin, env);
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: cors });
+    // Everything below runs inside one containment net: an uncaught error (a D1 hiccup, a bug)
+    // used to escape to Cloudflare's bare 500 with NO CORS headers, which the browser reports as
+    // an opaque CORS failure instead of the real error. Catch it here and answer in our own
+    // shape, with CORS, so the client sees an actionable `internal_error`.
+    try {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: cors });
+      }
+
+      const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
+      const method = request.method;
+
+      // /auth/verify is a top-level browser navigation from an email link — it carries no Origin
+      // header, so it must bypass the CORS-origin gate below and returns an HTML page, not JSON.
+      if (path === '/auth/verify' && method === 'GET') return await handleVerify(request, env);
+
+      // An empty `cors` map means the Origin wasn't on the allowlist. Reject outright rather
+      // than serving the request with no CORS header — the browser would block the *response*,
+      // but only after we'd already done the work. Applies to every route below.
+      if (Object.keys(cors).length === 0) {
+        return json({ error: 'Origin not allowed' }, 403, {});
+      }
+
+      // Per-IP rate limiting, before any datastore or API work. Auth routes get the tight
+      // limiter (password guessing, signup/resend email spam); AI-calling routes get a looser
+      // one that still stops a runaway loop from burning the Anthropic budget.
+      const ip = clientIp(request);
+      if (path.startsWith('/auth/') && method === 'POST') {
+        if (!(await allowRate(env.AUTH_LIMITER, ip))) return json({ error: 'rate_limited' }, 429, cors);
+      }
+      const isAiRoute = (path === '/' && method === 'POST') || path === '/onboard' || path === '/parse-plan';
+      if (isAiRoute && !(await allowRate(env.AI_LIMITER, ip))) {
+        return json({ error: 'rate_limited' }, 429, cors);
+      }
+
+      // Route by path. `/` (POST) is the coach — the original behaviour — and everything under
+      // /auth and /state is accounts + cloud sync (handlers.ts).
+
+      if (path === '/auth/signup' && method === 'POST') return await handleSignup(request, env, cors, ctx);
+      if (path === '/auth/login' && method === 'POST') return await handleLogin(request, env, cors);
+      if (path === '/auth/me' && method === 'GET') return await handleMe(request, env, cors);
+      if (path === '/auth/resend-verification' && method === 'POST') return await handleResendVerification(request, env, cors, ctx);
+      if (path === '/state' && method === 'GET') return await handleGetState(request, env, cors);
+      if (path === '/state' && method === 'PUT') return await handlePutState(request, env, cors);
+      if (path === '/onboard' && method === 'POST') return await handleOnboard(request, env, cors);
+      if (path === '/parse-plan' && method === 'POST') return await handleParsePlan(request, env, cors);
+
+      // The coach lives at POST / (unchanged contract).
+      if (path !== '/') return json({ error: 'Not found' }, 404, cors);
+      if (method !== 'POST') return json({ error: 'Method not allowed' }, 405, cors);
+
+      return await handleCoach(request, env, cors);
+    } catch (err) {
+      console.error('Unhandled error', err);
+      return json({ error: 'internal_error' }, 500, cors);
     }
-
-    const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
-    const method = request.method;
-
-    // /auth/verify is a top-level browser navigation from an email link — it carries no Origin
-    // header, so it must bypass the CORS-origin gate below and returns an HTML page, not JSON.
-    if (path === '/auth/verify' && method === 'GET') return handleVerify(request, env);
-
-    // An empty `cors` map means the Origin wasn't on the allowlist. Reject outright rather
-    // than serving the request with no CORS header — the browser would block the *response*,
-    // but only after we'd already done the work. Applies to every route below.
-    if (Object.keys(cors).length === 0) {
-      return json({ error: 'Origin not allowed' }, 403, {});
-    }
-
-    // Route by path. `/` (POST) is the coach — the original behaviour — and everything under
-    // /auth and /state is accounts + cloud sync (handlers.ts). Method-mismatched routes 405.
-
-    if (path === '/auth/signup' && method === 'POST') return handleSignup(request, env, cors, ctx);
-    if (path === '/auth/login' && method === 'POST') return handleLogin(request, env, cors);
-    if (path === '/auth/me' && method === 'GET') return handleMe(request, env, cors);
-    if (path === '/auth/resend-verification' && method === 'POST') return handleResendVerification(request, env, cors, ctx);
-    if (path === '/state' && method === 'GET') return handleGetState(request, env, cors);
-    if (path === '/state' && method === 'PUT') return handlePutState(request, env, cors);
-    if (path === '/onboard' && method === 'POST') return handleOnboard(request, env, cors);
-    if (path === '/parse-plan' && method === 'POST') return handleParsePlan(request, env, cors);
-
-    // The coach lives at POST / (unchanged contract).
-    if (path !== '/') return json({ error: 'Not found' }, 404, cors);
-    if (method !== 'POST') return json({ error: 'Method not allowed' }, 405, cors);
-
-    return handleCoach(request, env, cors);
   }
 };
 
-async function handleCoach(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
-    let body: ChatRequest;
-    try {
-      body = (await request.json()) as ChatRequest;
-    } catch {
-      return json({ error: 'Invalid JSON' }, 400, cors);
-    }
+/** Estimated worst-case cost of one coach exchange, pre-charged to the budget before the API
+ *  call and settled to the real cost after (see recordSpend). Sized so that even a parallel
+ *  burst of requests racing the KV counter each pre-pay their way toward the cap. */
+const COACH_RESERVE_MICRO_USD = 30_000; // $0.03
 
-    // Identity for entitlement + budget. Prefer the verified account from the session token — so
-    // spend and access follow the *account* across devices and reinstalls — and fall back to the
-    // client-supplied device UUID only when there's no valid session (anonymous / local-only
-    // builds, or a signed-out user). Deriving it server-side from the signed token means a client
-    // can't claim to be a different account by editing the body.
+async function handleCoach(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+    const read = await readJsonCapped<ChatRequest>(request, MAX_AI_BODY_BYTES);
+    if (!read.ok) {
+      return read.reason === 'too_large'
+        ? json({ error: 'body_too_large' }, 413, cors)
+        : json({ error: 'Invalid JSON' }, 400, cors);
+    }
+    const body = read.value;
+
+    // Identity for entitlement + budget, derived from the verified session token — so spend and
+    // access follow the *account* across devices, and a client can't claim to be a different
+    // account by editing the body. When accounts are configured, a session is REQUIRED: the old
+    // body.userId fallback let an unauthenticated caller name any pro account's UUID (not a
+    // secret — /auth/me returns it) and inherit its entitlement, or mint fresh ids to reset the
+    // spend counter. The real app always has a session here (the coach UI sits behind AuthGate
+    // whenever the coach is configured), so nothing user-facing changes. The device-UUID path
+    // survives only for accounts-unconfigured builds (no SESSION_SECRET), where there are no
+    // subscriptions to steal and the KV allowlist is the sole gate.
     const session = env.SESSION_SECRET ? await authenticate(request, env.SESSION_SECRET) : null;
-    const userId = session
-      ? session.sub
-      : typeof body.userId === 'string'
-        ? body.userId.slice(0, 128)
-        : 'anonymous';
+    if (env.SESSION_SECRET && !session) {
+      return json({ error: 'unauthorized' }, 401, cors);
+    }
+    const userId = session ? session.sub : sanitizeId(body.userId);
 
     // Entitlement, evaluated once and reused for both the status probe and the real request.
-    const entitled = await isEntitled(env, userId);
+    const entitled = await isEntitled(env, userId, { viaSession: session != null });
 
     // Status probe: report whether this caller may use the coach, without an Anthropic call. The
     // app calls this on opening the Coach tab to decide chat-vs-locked screen. `entitled` here is
@@ -186,6 +228,10 @@ async function handleCoach(request: Request, env: Env, cors: Record<string, stri
       );
     }
 
+    // Reserve-then-settle: pre-charge the estimate so parallel requests racing the KV counter
+    // each pay up front, then correct to the real cost (or refund on failure) below.
+    await recordSpend(env, userId, COACH_RESERVE_MICRO_USD);
+
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
     let response;
@@ -193,9 +239,11 @@ async function handleCoach(request: Request, env: Env, cors: Record<string, stri
       response = await client.messages.create({
         model: MODEL,
         max_tokens: MAX_TOKENS,
-        // Note the system prompt is built here from the request's *context* only. Whatever
-        // the client may have put in a `system` field is not read anywhere in this file.
-        system: buildSystem(body.context),
+        // Note the system prompt is built here from the request's *context* only — passed
+        // through sanitizeContext, which caps every array and string, so a forged request can't
+        // stuff unbounded (billed) text into the prompt. Whatever the client may have put in a
+        // `system` field is not read anywhere in this file.
+        system: buildSystem(sanitizeContext(body.context)),
         thinking: { type: 'adaptive' },
         output_config: { effort: 'low' },
         // The coach can propose app changes via tools. These are deliberately single-turn:
@@ -205,6 +253,7 @@ async function handleCoach(request: Request, env: Env, cors: Record<string, stri
         messages
       });
     } catch (err) {
+      await recordSpend(env, userId, -COACH_RESERVE_MICRO_USD); // refund the reservation
       if (err instanceof Anthropic.RateLimitError) {
         return json({ error: 'rate_limited' }, 429, cors);
       }
@@ -217,7 +266,7 @@ async function handleCoach(request: Request, env: Env, cors: Record<string, stri
     }
 
     const microUsd = costMicroUsd(MODEL, response.usage);
-    await recordSpend(env, userId, microUsd);
+    await recordSpend(env, userId, microUsd - COACH_RESERVE_MICRO_USD);
 
     if (response.stop_reason === 'refusal') {
       return json({ error: 'refused' }, 200, cors);

@@ -31,15 +31,21 @@ export function allowKey(userId: string): string {
   return `allow:${userId}`;
 }
 
-export async function isEntitled(env: AccessEnv, userId: string): Promise<boolean> {
+export async function isEntitled(
+  env: AccessEnv,
+  userId: string,
+  opts: { viaSession?: boolean } = {}
+): Promise<boolean> {
   // Gate off unless explicitly required.
   if ((env.REQUIRE_ALLOWLIST ?? '').toLowerCase() !== 'true') return true;
 
-  // An active subscription on the account grants access outright — the primary paid path. Only
-  // matters when `userId` is a real account id (an authenticated request); a device UUID won't
-  // match a users row, so this quietly falls through to the allowlist below. When billing lands,
-  // writing `sub_status = 'active'` on the user row is all it takes to entitle them here.
-  if (env.DB) {
+  // An active subscription on the account grants access outright — the primary paid path. ONLY
+  // consulted when `userId` came from a verified session token (`viaSession`): before this guard,
+  // an unauthenticated request could put a pro account's UUID in its body and inherit that
+  // account's entitlement — account ids aren't secret-grade (they're returned by /auth/me and sit
+  // in the client's localStorage). When billing lands, writing `sub_status = 'active'` on the user
+  // row is still all it takes to entitle them here.
+  if (env.DB && opts.viaSession) {
     const user = await findUserById(env.DB, userId);
     if (user && user.sub_status === 'active') return true;
   }

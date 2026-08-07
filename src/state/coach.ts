@@ -620,7 +620,9 @@ export async function askCoach(messages: CoachMessage[], context: CoachContext):
   if (!res.ok || data.error) {
     switch (data.error) {
       case 'not_entitled':
-        return { ok: false, error: 'This device isn’t approved for the coach yet. Share your Coach ID (shown below) to get access.' };
+        return { ok: false, error: 'The coach is a Premium feature and this account doesn’t have access yet.' };
+      case 'unauthorized':
+        return { ok: false, error: 'Your session has expired — sign in again to use the coach.' };
       case 'budget_exhausted':
         return { ok: false, error: 'You’ve used up this month’s coach messages.' };
       case 'rate_limited':

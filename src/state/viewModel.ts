@@ -9,7 +9,7 @@ import type { Actions } from './useApp';
 import { ACCENT, ACCENT_TEXT } from '../theme';
 import {
   muscleBarsList, dayWarning, recommendation, estimateDayTime, formatDuration,
-  warmupInfo, dayMuscleRanks, formatElapsed, fmtWeight, weightStep, formatSetTime,
+  warmupInfo, dayMuscleRanks, fmtWeight, weightStep, formatSetTime,
   volumeChartData, weeklyHeatmapData, exerciseProgressData, compareLiftsData, consistencyData,
   volumeDonutData, durationTrendData, warmupForDay, bodyWeightChartData, platesBreakdown, deloadSuggestion,
   effectiveLast, lifetimeVolumeKg, totalTrainingMinutes, completedWorkoutCount, lifetimeReps, lifetimeSets,
@@ -17,6 +17,42 @@ import {
 } from './logic';
 import { weightFactoid, timeFactoid } from '../data/factoids';
 import { seededFrac } from '../data/program';
+import { createInitialState } from '../data/initialState';
+
+// Empty-state stand-ins for the Progress tab's analytics when it is NOT the active screen.
+// buildViewModel used to compute every chart (volume, heatmap, per-exercise progress across all
+// ~151 lifts twice, consistency, donut, trends) on every render regardless of screen — thousands
+// of allocations per keystroke while the user was nowhere near the Progress tab. ProgressScreen
+// is the only consumer of these fields and only renders when isProgress, so off-screen they can
+// be static empties. Built once from a blank AppState so the types match the real builders
+// exactly, and cached — the stub itself must not become a per-render cost.
+let progressStubsCache: {
+  bodyWeightChart: ReturnType<typeof bodyWeightChartData>;
+  volumeChart: ReturnType<typeof volumeChartData>;
+  weeklyHeatmap: ReturnType<typeof weeklyHeatmapData>;
+  exerciseProgress: ReturnType<typeof exerciseProgressData>;
+  compareLifts: ReturnType<typeof compareLiftsData>;
+  consistency: ReturnType<typeof consistencyData>;
+  volumeDonut: ReturnType<typeof volumeDonutData>;
+  durationTrend: ReturnType<typeof durationTrendData>;
+} | null = null;
+function progressStubs() {
+  if (!progressStubsCache) {
+    const e = createInitialState();
+    const noop = () => {};
+    progressStubsCache = {
+      bodyWeightChart: bodyWeightChartData(e),
+      volumeChart: volumeChartData(e),
+      weeklyHeatmap: weeklyHeatmapData(e, muscleBarsList(e)),
+      exerciseProgress: exerciseProgressData(e, noop, 'weight'),
+      compareLifts: compareLiftsData(e, noop, 'weight'),
+      consistency: consistencyData(e),
+      volumeDonut: volumeDonutData(e),
+      durationTrend: durationTrendData(e)
+    };
+  }
+  return progressStubsCache;
+}
 
 // "a", "a and b", "a, b and c" — the deload banner can cite up to three fatigue signals at once,
 // and joining them all with " and " reads as a run-on.
@@ -54,6 +90,7 @@ function sessionRowVM(h: HistoryEntry, s: AppState, actions: Actions) {
 
 export function buildViewModel(state: AppState, actions: Actions) {
   const s = state;
+  const onProgress = s.screen === 'progress';
   const bars = muscleBarsList(s);
 
   // ---------- who we're talking to ----------
@@ -541,8 +578,6 @@ export function buildViewModel(state: AppState, actions: Actions) {
       setsText: warmupRaw.sets.map(ws => fmtWeight(ws.weight, s.units) + ' × ' + ws.reps).join('  ·  ')
     } : { show: false };
     const allDone = currentSets.length > 0 && currentSets.every(r => r.done);
-    const mm = Math.floor(s.workout.restRemaining / 60);
-    const ss = String(s.workout.restRemaining % 60).padStart(2, '0');
     const navList = dayExercises.map((e2, i) => {
       const l2 = EXLIB[e2.id];
       const es = s.workout!.exSets[i];
@@ -564,7 +599,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
 
     workout = {
       progressText: 'Exercise ' + (exIndex + 1) + ' of ' + dayExercises.length,
-      elapsedText: formatElapsed(Date.now() - (s.workout.startedAt || Date.now())),
+      // Raw timestamp — the live elapsed clock is derived in the component via useElapsedText,
+      // so ticking it re-renders only that leaf instead of rebuilding this whole view model.
+      startedAt: s.workout.startedAt || null,
       navList, workoutAllDone, supersetPartnerName,
       completeWorkout: actions.completeWorkout,
       endEarly: actions.requestEndEarly,
@@ -582,8 +619,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
       canMoveDown: exIndex < dayExercises.length - 1,
       moveDown: () => actions.moveWorkoutExercise('down'),
       resting: s.workout.resting,
-      restText: mm + ':' + ss,
-      restPct: s.workout.restTotal > 0 ? Math.round((s.workout.restRemaining / s.workout.restTotal) * 100) : 0,
+      // Raw countdown inputs — RestToast/WorkoutScreen derive the live "1:27" via useRestClock.
+      restEndAt: s.workout.restEndAt ?? null,
+      restTotal: s.workout.restTotal,
       restMinus: () => actions.restAdjust(-15),
       restPlus: () => actions.restAdjust(15),
       restSkip: actions.restSkip,
@@ -969,7 +1007,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
 
   const showResume = !!s.workout && s.screen !== 'workout' && s.screen !== 'complete';
   const resumeText = s.workout ? ('Resume ' + s.program[s.workout.dayKey].label + ' — Exercise ' + (s.workout.exIndex + 1) + ' of ' + s.program[s.workout.dayKey].exercises.length) : '';
-  const resumeElapsedText = s.workout ? formatElapsed(Date.now() - (s.workout.startedAt || Date.now())) : '';
+  // Raw timestamp for ResumePill/IdleWorkoutToast — the live text derives via useElapsedText.
+  const workoutStartedAt = s.workout ? s.workout.startedAt || null : null;
 
   const confirmRemoveExercise = (() => {
     const idx = s.confirmRemoveExIndex;
@@ -1045,7 +1084,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
   const idlePrompt = {
     show: !!s.workout && s.idleWorkoutPrompt,
     exerciseName: s.workout ? (EXLIB[s.workout.dayExercises[s.workout.exIndex]?.id]?.name || '') : '',
-    elapsedText: resumeElapsedText,
+    startedAt: workoutStartedAt,
     continueWorkout: actions.continueWorkoutFromIdle,
     endWorkout: actions.endWorkoutFromIdle
   };
@@ -1145,7 +1184,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     editWeek, openEditWeek: actions.openEditWeek,
     funStats, sessionFactoid,
     firstName, homeGreeting, startWorkoutHint,
-    showResume, resumeText, resumeElapsedText, resumeWorkout: actions.resumeWorkout,
+    showResume, resumeText, workoutStartedAt, resumeWorkout: actions.resumeWorkout,
     currentUnitsLabel, currentPlanLabel: TRAINING_LABELS[s.trainingType], programName: s.programName,
     renameProgram: (name: string) => actions.renameProgram(name),
     weekNumber: s.weekNumber,
@@ -1157,6 +1196,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
     exerciseSearchQuery: s.exerciseSearchQuery || '',
     setExerciseSearchQuery: actions.setExerciseSearchQuery,
     exerciseLibraryGroups: (() => {
+      // Only ExercisesScreen consumes this, and it only renders on the exercises tab — skip the
+      // 12-pass walk over the whole library on every other screen's renders.
+      if (s.screen !== 'exercises') return [];
       const query = (s.exerciseSearchQuery || '').trim().toLowerCase();
       const matches = (id: string) => {
         if (!query) return true;
@@ -1274,16 +1316,20 @@ export function buildViewModel(state: AppState, actions: Actions) {
     })(),
 
     // ---------- Progress tab ----------
+    // Heavy analytics only when the Progress tab is the active screen (ProgressScreen is their
+    // sole consumer); static empty stubs otherwise — see progressStubs() above.
     bodyWeight: {
-      ...bodyWeightChartData(s),
+      ...(onProgress ? bodyWeightChartData(s) : progressStubs().bodyWeightChart),
       inputValue: s.bodyWeightInput,
       setInput: (v: string) => actions.setBodyWeightInput(v),
       log: actions.logBodyWeight,
       unitsLabel: currentUnitsLabel
     },
-    volumeChart: volumeChartData(s),
-    weeklyHeatmap: weeklyHeatmapData(s, bars),
-    exerciseProgress: exerciseProgressData(s, actions.selectExerciseProgress, s.progressMetric),
+    volumeChart: onProgress ? volumeChartData(s) : progressStubs().volumeChart,
+    weeklyHeatmap: onProgress ? weeklyHeatmapData(s, bars) : progressStubs().weeklyHeatmap,
+    exerciseProgress: onProgress
+      ? exerciseProgressData(s, actions.selectExerciseProgress, s.progressMetric)
+      : progressStubs().exerciseProgress,
     progressPickerOpen: !!s.progressPickerOpen,
     toggleProgressPicker: actions.toggleProgressPicker,
     progressMetric: s.progressMetric,
@@ -1293,14 +1339,25 @@ export function buildViewModel(state: AppState, actions: Actions) {
     progressMetricE1rmColor: s.progressMetric === 'e1rm' ? '#0d0c0b' : 'rgba(245,240,234,.7)',
     setProgressMetricWeight: () => actions.setProgressMetric('weight'),
     setProgressMetricE1rm: () => actions.setProgressMetric('e1rm'),
-    compareLifts: compareLiftsData(s, actions.toggleCompareLift, s.progressMetric),
+    compareLifts: onProgress
+      ? compareLiftsData(s, actions.toggleCompareLift, s.progressMetric)
+      : progressStubs().compareLifts,
     compareLiftPickerOpen: !!s.compareLiftPickerOpen,
     toggleCompareLiftPicker: actions.toggleCompareLiftPicker,
-    consistency: consistencyData(s),
-    volumeDonut: volumeDonutData(s),
-    durationTrend: durationTrendData(s),
-    sessionArchive: s.history.slice(0, 20).map(h => sessionRowVM(h, s, actions)),
+    consistency: onProgress ? consistencyData(s) : progressStubs().consistency,
+    volumeDonut: onProgress ? volumeDonutData(s) : progressStubs().volumeDonut,
+    durationTrend: onProgress ? durationTrendData(s) : progressStubs().durationTrend,
+    sessionArchive: onProgress ? s.history.slice(0, 20).map(h => sessionRowVM(h, s, actions)) : [],
     weekReview: (() => {
+      // Only walk history while the modal is actually open — its `open` flag is all the closed
+      // state needs.
+      if (!s.weekReviewOpen) {
+        return {
+          open: false, selected: null as number | null, weeks: [] as { num: number; label: string; isCurrent: boolean; sessionCount: number; select: () => void }[],
+          sessions: [] as ReturnType<typeof sessionRowVM>[], selectedLabel: '',
+          back: actions.backToWeekList, close: actions.closeWeekReview
+        };
+      }
       const currentWeek = s.weekNumber;
       const weekNums = [...new Set(s.history.map(h => h.weekNumber || 1))];
       if (!weekNums.includes(currentWeek)) weekNums.push(currentWeek);

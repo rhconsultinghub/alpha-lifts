@@ -8,6 +8,7 @@ import {
   type Account
 } from '../state/auth';
 import { AuthContext } from '../state/AuthContext';
+import { flushBeforeLogout } from '../state/sync';
 import { LoginScreen } from './LoginScreen';
 import { SyncBoundary } from './SyncBoundary';
 
@@ -71,7 +72,17 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setPhase('authed');
   }
 
-  function logout() {
+  async function logout() {
+    // Push any unsynced change up BEFORE dropping the session — signing out used to discard a
+    // pending debounced push, and the token it needed to send was gone. Bounded so a dead
+    // network can't trap the user in a sign-out that never completes; on timeout/failure the
+    // blob simply stays local (sign-out never deletes it), and syncs on the next sign-in.
+    if (token && account) {
+      await Promise.race([
+        flushBeforeLogout(token, account.id),
+        new Promise(resolve => setTimeout(resolve, 4000))
+      ]).catch(() => {});
+    }
     clearSession();
     setToken(null);
     setAccount(null);

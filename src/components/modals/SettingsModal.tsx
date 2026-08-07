@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { ViewModel } from '../../state/viewModel';
 import { useAuth } from '../../state/AuthContext';
 import { parsePlanFile } from '../../data/planIO';
+import { validateBackup } from '../../data/backup';
 
 /** Friendly one-liner for the account's subscription. Kept trivial on purpose — real billing
  *  (and a Manage/Upgrade button) is a later phase; today accounts are 'free'/'none' by default,
@@ -30,9 +31,15 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
     if (!file) return;
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text);
+      // Validate before staging — an arbitrary JSON blob spread over the app state can crash
+      // render and (because state persists immediately) brick the app on every reload.
+      const checked = validateBackup(JSON.parse(text));
+      if (!checked.ok) {
+        setImportError(checked.error);
+        return;
+      }
       setImportError('');
-      st.stageBackupImport(parsed);
+      st.stageBackupImport(checked.data);
     } catch {
       setImportError('Could not read that file — make sure it’s an Alpha Lifts backup JSON file.');
     }
@@ -340,7 +347,7 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: 14, borderRadius: 14, background: 'oklch(0.65 0.19 35 / 0.12)', border: '1px solid oklch(0.65 0.19 35 / 0.4)', marginTop: 8 }}>
               <div style={{ flex: 1 }}>
                 <div style={{ font: "600 12px 'Inter'", color: 'oklch(0.8 0.15 35)' }}>Erase everything?</div>
-                <div style={{ font: "400 12px/1.4 'Inter'", color: 'rgba(245,240,234,.75)', marginTop: 2 }}>This can't be undone. All programs, history, and settings on this device will be gone.</div>
+                <div style={{ font: "400 12px/1.4 'Inter'", color: 'rgba(245,240,234,.75)', marginTop: 2 }}>This can't be undone. All programs, history, and settings will be gone — and if you're signed in, the cleared state syncs to your account, erasing its cloud copy too.</div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                   <button onClick={st.resetApp} style={{ flex: 1, font: "700 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: 'oklch(0.65 0.19 35)', color: '#0d0c0b' }}>Erase Everything</button>
                   <button onClick={st.cancelResetApp} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.7)' }}>Cancel</button>

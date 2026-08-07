@@ -13,7 +13,9 @@ compatibility_flags = ["nodejs_compat"]
 # — a project site is always https://<owner>.github.io. If a custom domain is ever
 # added, this needs to change with it, or every request 403s.
 [vars]
-ALLOWED_ORIGINS = "https://rhconsultinghub.github.io,http://localhost:5173"
+# Production origins only — localhost is NOT trusted by the deployed Worker. Local dev gets it
+# via worker/.dev.vars (gitignored), which overrides [vars] under `wrangler dev`.
+ALLOWED_ORIGINS = "https://rhconsultinghub.github.io"
 
 # Email verification (src/email.ts). It only switches ON when the RESEND_API_KEY secret is set:
 #   npx wrangler secret put RESEND_API_KEY        # from resend.com dashboard
@@ -60,3 +62,18 @@ database_id = "6ad3186c-a28a-4385-98f3-4a2853aef3ac"
 [[kv_namespaces]]
 binding = "USAGE"
 id = "496221f5b449499cad2e3dca769cc6d3"
+
+# Per-IP rate limits (Workers Rate Limiting API — needs wrangler >= 4.36, no dashboard setup;
+# namespace_id is just a per-worker-unique integer). Auth routes get a tight limit (password
+# guessing, signup/resend email spam); AI routes a looser one that still stops a runaway loop
+# from burning the Anthropic budget. The bindings are optional in code (guard.ts fails open),
+# so removing these blocks degrades to no limiting rather than breaking the Worker.
+[[ratelimits]]
+name = "AUTH_LIMITER"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "AI_LIMITER"
+namespace_id = "1002"
+simple = { limit = 30, period = 60 }

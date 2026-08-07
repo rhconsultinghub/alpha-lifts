@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EXLIB, EQUIP_CATALOG, MUSCLES, planRepDefault } from '../data/exercises';
 import { mkEx, slugify } from '../data/program';
 import { createInitialState } from '../data/initialState';
-import { exportBackup as exportBackupFile, mergeBackupIntoDefaults } from '../data/backup';
+import { exportBackup as exportBackupFile, mergeBackupIntoDefaults, safeCustomEntries } from '../data/backup';
+import { clearSyncMeta } from './syncMeta';
 import { exportPlan as exportPlanFile } from '../data/planIO';
 import { SPLIT_PRESETS, WEEKDAYS, buildProgramFromPreset, buildCustomProgram } from '../data/wizard';
 import type {
@@ -60,11 +61,24 @@ function countsFromResultText(rows: { resultText: string }[]): { setCount: numbe
   return { setCount, repCount };
 }
 
+// Ids bundled in exercises.ts, captured at module load — before any session customs are merged
+// into the EXLIB singleton — so restore paths can refuse to overwrite a built-in exercise.
+const BUILTIN_EXERCISE_IDS: ReadonlySet<string> = new Set(Object.keys(EXLIB));
+
+// Set when loadInitial finds an unparseable persisted blob. The blob is stashed under a recovery
+// key rather than silently overwritten; this flag surfaces a one-line notice in the UI.
+let corruptStateStashed = false;
+
 function loadInitial(): AppState {
   const defaults = createInitialState();
   let state: AppState = defaults;
+  let raw: string | null = null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+  try {
     // shallow-merge over fresh defaults so fields added in later app versions (not present in an
     // older saved session) fall back to their default rather than being `undefined`.
     if (raw) {
@@ -102,11 +116,25 @@ function loadInitial(): AppState {
       state.coachPending = false;
     }
   } catch {
+    // The persisted blob didn't parse (or a migration threw). Stash a copy under a recovery key
+    // BEFORE falling back — the save effect persists the fresh defaults immediately, which used
+    // to permanently destroy a possibly-recoverable blob (and, signed in, push the empty state
+    // to the cloud over the server's copy).
+    if (raw != null) {
+      try {
+        localStorage.setItem('alpha-lifts-corrupt-' + Date.now(), raw);
+        corruptStateStashed = true;
+      } catch {
+        /* storage full — nothing more we can do */
+      }
+    }
     state = defaults;
   }
   // custom exercises live in persisted state but the exercise library itself is a module-level
   // singleton (mutated everywhere, like the original prototype) — merge them back in on load.
-  Object.entries(state.customExercises || {}).forEach(([id, def]) => { EXLIB[id] = def; });
+  // safeCustomEntries drops malformed defs and unsafe keys (__proto__ etc.), and refuses to
+  // shadow a built-in exercise — this state may have arrived via backup import or cloud sync.
+  safeCustomEntries(state.customExercises, BUILTIN_EXERCISE_IDS).forEach(([id, def]) => { EXLIB[id] = def; });
   // back-compat: progress is now tracked per equipment variant, but pre-existing history entries have
   // no `equip` tag. Attribute each to the equipment that exercise's current program slot uses (per the
   // upgrade choice), falling back to the library's default equip. One-time; only fills missing tags.
@@ -163,8 +191,6 @@ function restTotalFor(dayExercises: ProgramExercise[], idx: number, restPacing: 
 export function useApp() {
   const [state, setState] = useState<AppState>(loadInitial);
   const restInterval = useRef<number | null>(null);
-  const elapsedInterval = useRef<number | null>(null);
-  const [, forceTick] = useState(0);
   // Timestamp of the last in-app user interaction, tracked in a ref (no re-render on every tap) and
   // used only to decide whether an in-progress workout has gone idle. Not persisted.
   const lastActivityRef = useRef(Date.now());
@@ -172,9 +198,18 @@ export function useApp() {
   // completion branch idempotent across the interval and the visibilitychange resync.
   const restDoneForRef = useRef<number | null>(null);
 
+  // True while persisting is failing (storage full/unavailable) — surfaced as a visible banner.
+  // Before this flag existed a quota failure was swallowed silently: the app kept running
+  // normally and simply stopped saving, so every workout after the quota hit vanished on reload.
+  const [persistFailed, setPersistFailed] = useState(false);
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* storage full/unavailable */ }
-  }, [state]);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      if (persistFailed) setPersistFailed(false);
+    } catch {
+      if (!persistFailed) setPersistFailed(true);
+    }
+  }, [state, persistFailed]);
 
   // reminder check runs every 60s while the app is open (see reminders.ts for why that's the
   // ceiling on what a backend-less reminder can do) — reads the latest state via a ref rather
@@ -213,17 +248,29 @@ export function useApp() {
     };
   }, []);
 
-  const startElapsedTimer = useCallback(() => {
-    if (elapsedInterval.current) window.clearInterval(elapsedInterval.current);
-    elapsedInterval.current = window.setInterval(() => forceTick(t => t + 1), 1000);
-  }, []);
-  const stopElapsedTimer = useCallback(() => {
-    if (elapsedInterval.current) { window.clearInterval(elapsedInterval.current); elapsedInterval.current = null; }
-  }, []);
-  // keep the elapsed timer alive across reloads if a workout is already running
+  // (The old app-wide 1s "elapsed" forceTick interval is gone: elapsed/rest displays now tick
+  // locally in the components that show them, off startedAt/restEndAt — see state/useClock.ts.)
+  //
+  // Keep the rest countdown alive across reloads if a workout is already mid-rest. The rest
+  // interval used to be created only inside startRest(), so reloading mid-rest froze the
+  // countdown at its persisted value forever; restEndAt is absolute epoch-ms, so the timer
+  // resumes exactly. A rest that already expired while the app was closed completes silently —
+  // restDoneForRef suppresses the hours-late vibrate/sound/notification.
   useEffect(() => {
-    if (state.workout) startElapsedTimer();
-    return () => stopElapsedTimer();
+    const w = state.workout;
+    if (w?.resting && w.restEndAt != null) {
+      if (w.restEndAt <= Date.now()) {
+        restDoneForRef.current = w.restEndAt;
+        setState(s => (s.workout ? { ...s, workout: { ...s.workout, resting: false, restRemaining: 0, restEndAt: null } } : s));
+      } else {
+        if (restInterval.current) window.clearInterval(restInterval.current);
+        restInterval.current = window.setInterval(restTick, 1000);
+      }
+    }
+    return () => {
+      // clear the rest interval on unmount — it used to leak across hot-reloads/unmounts.
+      if (restInterval.current) { window.clearInterval(restInterval.current); restInterval.current = null; }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -283,13 +330,17 @@ export function useApp() {
   const requestResetApp = useCallback(() => setState(s => ({ ...s, confirmResetApp: true })), []);
   const cancelResetApp = useCallback(() => setState(s => ({ ...s, confirmResetApp: false })), []);
   const resetApp = useCallback(() => {
-    setState(s => {
-      try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage unavailable */ }
-      // only drop the custom exercises this session merged into the EXLIB singleton — the ~151
-      // built-in exercises live in exercises.ts, not localStorage, and must survive a reset.
-      Object.keys(s.customExercises || {}).forEach(id => { delete EXLIB[id]; });
-      return createInitialState();
-    });
+    // Side effects live OUTSIDE the setState updater — updaters must be pure (StrictMode
+    // double-invokes them), same reasoning as confirmPlanImport below. State is read via
+    // stateRef, which is current at call time.
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage unavailable */ }
+    // Also forget the sync relationship: a "fresh install" that still carries the old account's
+    // sync-meta isn't fresh from the sync layer's point of view.
+    clearSyncMeta();
+    // only drop the custom exercises this session merged into the EXLIB singleton — the ~151
+    // built-in exercises live in exercises.ts, not localStorage, and must survive a reset.
+    Object.keys(stateRef.current.customExercises || {}).forEach(id => { delete EXLIB[id]; });
+    setState(createInitialState());
   }, []);
   const setUnits = useCallback((u: Units) => setState(s => ({ ...s, units: u })), []);
   const setRestPacing = useCallback((v: RestPacing) => setState(s => ({ ...s, restPacing: v })), []);
@@ -345,12 +396,16 @@ export function useApp() {
   const stageBackupImport = useCallback((data: Partial<AppState>) => setState(s => ({ ...s, pendingBackupImport: data })), []);
   const cancelBackupImport = useCallback(() => setState(s => ({ ...s, pendingBackupImport: null })), []);
   const confirmBackupImport = useCallback(() => {
-    setState(s => {
-      if (!s.pendingBackupImport) return s;
-      const restored = mergeBackupIntoDefaults(s.pendingBackupImport);
-      Object.entries(restored.customExercises || {}).forEach(([id, def]) => { EXLIB[id] = def; });
-      return { ...restored, pendingBackupImport: null };
-    });
+    // EXLIB mutation is a side effect — kept outside the updater (StrictMode double-invoke, see
+    // confirmPlanImport). safeCustomEntries re-filters here even though the file was validated at
+    // selection time: it's the single choke point every EXLIB merge goes through.
+    const pending = stateRef.current.pendingBackupImport;
+    if (!pending) return;
+    const restored = mergeBackupIntoDefaults(pending);
+    const safeCustoms = safeCustomEntries(restored.customExercises, BUILTIN_EXERCISE_IDS);
+    safeCustoms.forEach(([id, def]) => { EXLIB[id] = def; });
+    restored.customExercises = Object.fromEntries(safeCustoms);
+    setState(s => (s.pendingBackupImport ? { ...restored, pendingBackupImport: null } : s));
   }, []);
 
   // ---------- workout-plan (program) import/export ----------
@@ -368,7 +423,9 @@ export function useApp() {
     // second pass then skips persisting the custom into customExercises (it'd render this session
     // but vanish on reload, since EXLIB customs are rehydrated from customExercises on load).
     const addedCustoms: Record<string, ExerciseDef> = {};
-    Object.entries(plan.customExercises || {}).forEach(([id, def]) => {
+    // safeCustomEntries: same unsafe-key/shape filter as backup restore (every EXLIB merge goes
+    // through it); the !EXLIB[id] check then keeps built-ins and already-present customs as-is.
+    safeCustomEntries(plan.customExercises, BUILTIN_EXERCISE_IDS).forEach(([id, def]) => {
       if (!EXLIB[id]) { EXLIB[id] = def; addedCustoms[id] = def; }
     });
     setState(s => {
@@ -1505,10 +1562,13 @@ export function useApp() {
       return;
     }
     // Best-effort live countdown in the tray while backgrounded — the in-app toast (RestToast)
-    // already covers the foreground case with a true every-second update, so this only needs to
-    // run when the document is actually hidden.
+    // already covers the foreground case (ticking locally off restEndAt, see useClock.ts), so
+    // this only needs to run when the document is actually hidden. Note there is deliberately NO
+    // per-second setState here anymore: writing restRemaining into AppState every second meant a
+    // full re-render + view-model rebuild + state re-serialization (persist AND cloud-sync
+    // dirty-marking) once a second for every rest period. restRemaining is still written at
+    // transition points (start/adjust/skip/end) but is no longer a live counter.
     if (cur.restAlertNotify && document.hidden) updateRestProgressNotification(Math.round(remainingMs / 1000), restContext(cur));
-    setState(s => (s.workout && s.workout.resting ? { ...s, workout: { ...s.workout, restRemaining: Math.round(remainingMs / 1000) } } : s));
   }, [restContext]);
 
   // Vibrate/WebAudio are both restricted to a visible document by the browser (vibrate no-ops
@@ -1546,8 +1606,7 @@ export function useApp() {
         }
       };
     });
-    startElapsedTimer();
-  }, [startElapsedTimer]);
+  }, []);
 
   // restSecOverride lets the caller (toggleSetDone) recompute rest against the RIR of the set that
   // was just completed — the stored workout.restTotal is the neutral (RIR-unknown) value set when
@@ -1570,9 +1629,11 @@ export function useApp() {
 
   const restAdjust = useCallback((delta: number) => {
     setState(s => {
-      if (!s.workout) return s;
-      const restRemaining = Math.max(0, s.workout.restRemaining + delta);
-      const restEndAt = s.workout.restEndAt != null ? s.workout.restEndAt + delta * 1000 : null;
+      if (!s.workout || s.workout.restEndAt == null) return s;
+      // Derive the new remaining time from the absolute restEndAt, not the stored restRemaining —
+      // that field is no longer ticked down every second (see restTick), so it can be stale here.
+      const restEndAt = Math.max(Date.now(), s.workout.restEndAt + delta * 1000);
+      const restRemaining = Math.round((restEndAt - Date.now()) / 1000);
       return { ...s, workout: { ...s.workout, restRemaining, restTotal: Math.max(s.workout.restTotal, restRemaining), restEndAt } };
     });
   }, []);
@@ -1790,8 +1851,7 @@ export function useApp() {
         ...(deloadFields || {}), pendingPlanUpdate: null
       };
     });
-    stopElapsedTimer();
-  }, [stopElapsedTimer]);
+  }, []);
 
   const applyPlanUpdate = useCallback(() => {
     setState(s => {
@@ -1942,8 +2002,16 @@ export function useApp() {
     return () => window.removeEventListener('popstate', onPopState);
   }, [closeTopmost]);
 
+  // One-line data-safety notice for App.tsx to surface. Persist failure outranks the corrupt
+  // stash — it's ongoing, the stash already happened.
+  const storageNotice = persistFailed
+    ? 'Storage is full — your changes are NOT being saved. Export a backup from Settings, then free up space.'
+    : corruptStateStashed
+      ? 'Your saved data could not be read, so the app started fresh. A recovery copy was kept in this browser’s storage (key "alpha-lifts-corrupt-…").'
+      : null;
+
   return {
-    state, setState,
+    state, setState, storageNotice,
     actions: {
       goProgram, goProgress, goExercises, goAchievements, goCoach, markAchievementsSeen, openDay, openDayBuilder, closeDayBuilder,
       setCoachInput, sendCoachMessage, clearCoachChat, applyCoachProposal, dismissCoachProposal, refreshCoachEntitlement,

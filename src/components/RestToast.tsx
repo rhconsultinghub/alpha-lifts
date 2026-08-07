@@ -1,12 +1,14 @@
 import type { ViewModel } from '../state/viewModel';
+import { useRestClock } from '../state/useClock';
 
 // Persistent, always-on-top rest countdown. The big in-page rest card in WorkoutScreen already
 // shows this, but it's hidden behind any modal (exercise history, swap, etc. all render as
 // full-screen overlays) — this floats above everything (including modals) so the live countdown
-// stays visible no matter what the user is doing mid-rest, updating every second while the app is
-// foregrounded (see alerts.ts/useApp.ts for the best-effort background/minimized equivalent).
+// stays visible no matter what the user is doing mid-rest, ticking locally off the absolute
+// restEndAt (see useClock.ts; alerts.ts/useApp.ts cover the background/minimized equivalent).
 export function RestToast({ vm }: { vm: ViewModel }) {
   const w = vm.workout;
+  const { restText, restPct } = useRestClock(!!w?.resting, w?.restEndAt, w?.restTotal ?? 0);
   if (!w || !w.resting) return null;
   return (
     <div style={{ position: 'absolute', left: 16, right: 16, top: 12, zIndex: 30, pointerEvents: 'none' }}>
@@ -14,9 +16,9 @@ export function RestToast({ vm }: { vm: ViewModel }) {
         <span style={{ fontSize: 13 }}>⏱</span>
         <span style={{ font: "500 12px 'Inter'", color: 'rgba(245,240,234,.65)', flex: 'none' }}>Resting</span>
         <div style={{ flex: 1, height: 4, borderRadius: 3, background: 'rgba(255,255,255,.1)', overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${w.restPct}%`, background: 'oklch(0.65 0.19 35)' }} />
+          <div style={{ height: '100%', width: `${restPct}%`, background: 'oklch(0.65 0.19 35)' }} />
         </div>
-        <span className="num" style={{ fontSize: 14, fontWeight: 700, color: 'oklch(0.78 0.15 35)', flex: 'none' }}>{w.restText}</span>
+        <span className="num" style={{ fontSize: 14, fontWeight: 700, color: 'oklch(0.78 0.15 35)', flex: 'none' }}>{restText}</span>
         <button onClick={w.restSkip} style={{ flex: 'none', font: "700 11px 'Inter'", padding: '6px 10px', borderRadius: 100, border: 'none', background: 'rgba(255,255,255,.1)', color: 'rgba(245,240,234,.8)' }}>Skip</button>
       </div>
     </div>

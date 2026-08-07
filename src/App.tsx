@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useApp } from './state/useApp';
 import { useCloudSync } from './state/useCloudSync';
 import { buildViewModel } from './state/viewModel';
@@ -33,11 +33,29 @@ import { NewProgramWizardModal } from './components/modals/NewProgramWizardModal
 import { WeekReviewModal } from './components/modals/WeekReviewModal';
 import { EditWeekModal } from './components/modals/EditWeekModal';
 
+// Fixed data-safety banner (storage full / corrupt state recovered). Deliberately rendered from
+// App directly rather than through the view model: it reports infrastructure state (localStorage
+// health), not app state, and it must be visible on every screen including onboarding.
+function StorageNoticeBanner({ text }: { text: string }) {
+  return (
+    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 70, background: '#7a2e2e', color: '#f5f0ea', font: "500 12px 'Inter'", lineHeight: 1.45, padding: '10px 14px', textAlign: 'center' }}>
+      ⚠️ {text}
+    </div>
+  );
+}
+
 export default function App() {
-  const { state, actions } = useApp();
+  const { state, actions, storageNotice } = useApp();
   // Mirror local state to the server (debounced) while signed in; no-op otherwise.
   useCloudSync(state);
-  const vm = buildViewModel(state, actions);
+  // Rebuild the (large) view model only when state actually changes. `actions` is deliberately
+  // not a dependency: it's a fresh object literal each render, but every callback inside it is a
+  // useCallback whose deps are state slices — so any render where a callback's identity changed
+  // is a render where `state` changed too, and the memo re-runs with that render's fresh actions.
+  // Renders where state is unchanged (auth context updates, parent re-renders) safely reuse the
+  // previous VM.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const vm = useMemo(() => buildViewModel(state, actions), [state]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -47,6 +65,7 @@ export default function App() {
   if (vm.needsOnboarding) {
     return (
       <div className="app-shell">
+        {storageNotice && <StorageNoticeBanner text={storageNotice} />}
         <div className="scr" style={{ background: '#0f0e0d' }}>
           <OnboardingScreen vm={vm} />
         </div>
@@ -56,6 +75,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {storageNotice && <StorageNoticeBanner text={storageNotice} />}
       <div className="scr" ref={scrollRef} style={{ background: '#0f0e0d' }}>
         {vm.isProgram && <ProgramScreen vm={vm} />}
         {vm.isDayView && <DayViewScreen vm={vm} />}

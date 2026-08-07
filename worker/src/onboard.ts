@@ -20,9 +20,13 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { authenticate } from './auth';
 import { json } from './http';
-import { costMicroUsd, recordSpend } from './usage';
+import { checkBudget, costMicroUsd, recordSpend } from './usage';
+import { capNum, capStr, readJsonCapped, sanitizeCatalog, MAX_AI_BODY_BYTES } from './guard';
 
 const MODEL = 'claude-opus-4-8';
+
+/** Pre-charged cost estimate, settled to the real cost after the call (see usage.ts). */
+const ONBOARD_RESERVE_MICRO_USD = 30_000; // $0.03
 
 // Kept in sync with the client's SPLIT_PRESETS ids (src/data/wizard.ts) and TrainingType — same
 // enums the coach's propose_build_program tool uses.
@@ -139,6 +143,24 @@ toward a sensible, sustainable approach. This is general guidance, not medical o
 
 Call the create_onboarding_plan tool exactly once with your choices and the welcome message.`;
 
+/** Rebuild the client-supplied answers with hard caps on every field — they flow into the
+ *  (billed) prompt, so nothing unbounded may pass (same reasoning as prompt.ts sanitizeContext). */
+function sanitizeAnswers(raw: unknown): OnboardAnswers {
+  if (!raw || typeof raw !== 'object') return {};
+  const a = raw as Record<string, unknown>;
+  return {
+    name: capStr(a.name, 80),
+    experience: capStr(a.experience, 40),
+    goal: capStr(a.goal, 40),
+    days: capNum(a.days, 1, 7),
+    equipment: capStr(a.equipment, 40),
+    diet: capStr(a.diet, 40),
+    units: capStr(a.units, 10),
+    gym: capStr(a.gym, 100),
+    catalog: sanitizeCatalog(a.catalog)
+  };
+}
+
 function describeAnswers(a: OnboardAnswers): string {
   const parts: string[] = [];
   parts.push(a.name ? `Name: ${a.name}` : 'Name: (not given)');
@@ -168,18 +190,40 @@ export async function handleOnboard(request: Request, env: OnboardEnv, cors: Rec
 
   // One AI onboarding per account. The flag has no expiry — onboarding is genuinely once-per-account
   // (the client also skips this route entirely once the account's synced state says onboarded).
+  //
+  // The flag is CLAIMED here, before the API call — a read-at-the-top/write-at-the-bottom version
+  // let N parallel requests from one account all pass the check and all bill an API call. Claiming
+  // up front (and rolling back on failure below) closes that; KV's eventual consistency can still
+  // let a tight race through, but it's one extra call, not N. If a crash lands between claim and
+  // rollback the account loses its one AI shot — acceptable, since the client always has the
+  // deterministic local fallback.
   const kv = env.USAGE;
   const onboardedKey = `onboarded:${userId}`;
-  if (kv && (await kv.get(onboardedKey))) {
-    return json({ error: 'already_onboarded' }, 409, cors);
+  if (kv) {
+    if (await kv.get(onboardedKey)) return json({ error: 'already_onboarded' }, 409, cors);
+    await kv.put(onboardedKey, '1');
   }
+  const rollbackClaim = async () => {
+    if (kv) await kv.delete(onboardedKey).catch(() => {});
+  };
 
-  let answers: OnboardAnswers;
-  try {
-    answers = (await request.json()) as OnboardAnswers;
-  } catch {
-    return json({ error: 'invalid_json' }, 400, cors);
+  const read = await readJsonCapped<unknown>(request, MAX_AI_BODY_BYTES);
+  if (!read.ok) {
+    await rollbackClaim();
+    return read.reason === 'too_large'
+      ? json({ error: 'body_too_large' }, 413, cors)
+      : json({ error: 'invalid_json' }, 400, cors);
   }
+  const answers = sanitizeAnswers(read.value);
+
+  // Same monthly spend cap as the coach — this route is free of the *entitlement* gate (it must
+  // run before the paywall), but it was never meant to be free of the budget.
+  const budget = await checkBudget(env, userId);
+  if (!budget.allowed) {
+    await rollbackClaim();
+    return json({ error: 'budget_exhausted' }, 402, cors);
+  }
+  await recordSpend(env, userId, ONBOARD_RESERVE_MICRO_USD);
 
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   let response: Anthropic.Message;
@@ -194,6 +238,8 @@ export async function handleOnboard(request: Request, env: OnboardEnv, cors: Rec
       messages: [{ role: 'user', content: describeAnswers(answers) }]
     });
   } catch (err) {
+    await recordSpend(env, userId, -ONBOARD_RESERVE_MICRO_USD);
+    await rollbackClaim();
     if (err instanceof Anthropic.APIError) {
       console.error('Onboard API error', err.status, err.message);
       return json({ error: 'upstream_error' }, 502, cors);
@@ -202,7 +248,7 @@ export async function handleOnboard(request: Request, env: OnboardEnv, cors: Rec
     return json({ error: 'internal_error' }, 500, cors);
   }
 
-  await recordSpend(env, userId, costMicroUsd(MODEL, response.usage));
+  await recordSpend(env, userId, costMicroUsd(MODEL, response.usage) - ONBOARD_RESERVE_MICRO_USD);
 
   const toolUse = response.content.find(
     (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'create_onboarding_plan'
@@ -217,7 +263,9 @@ export async function handleOnboard(request: Request, env: OnboardEnv, cors: Rec
     !TRAINING_TYPES.includes(input.training_type as (typeof TRAINING_TYPES)[number]) ||
     typeof input.welcome !== 'string'
   ) {
-    // Malformed — let the client fall back to its deterministic mapping rather than shipping junk.
+    // Malformed — let the client fall back to its deterministic mapping rather than shipping
+    // junk, and release the claim so the account's one AI shot isn't burned on a bad response.
+    await rollbackClaim();
     return json({ error: 'bad_plan' }, 502, cors);
   }
 
@@ -234,9 +282,8 @@ export async function handleOnboard(request: Request, env: OnboardEnv, cors: Rec
         .map(s => ({ from: s.from.slice(0, 80), to: s.to.slice(0, 80) }))
     : [];
 
-  // Mark done only after a valid plan, so a failed attempt doesn't burn the account's one shot.
-  if (kv) await kv.put(onboardedKey, '1');
-
+  // (The onboarded flag was already claimed before the API call; every failure path above rolled
+  // it back, so reaching here means the claim correctly stands.)
   return json(
     {
       split: input.split,

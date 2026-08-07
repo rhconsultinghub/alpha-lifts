@@ -93,18 +93,23 @@ export async function checkBudget(env: UsageEnv, userId: string): Promise<Budget
 }
 
 /**
- * Called AFTER a successful API response, with the real cost. Read-modify-write on the month's
- * counter. Not atomic (KV has no atomic increment) — two racing requests can under-count by
- * one, which for a ~$1.50 personal cap is acceptable slop, not a correctness problem. The key
- * is written with a ~40-day TTL so a month's counter self-cleans well after that month ends,
- * refreshed on every write within the month.
+ * Adjust the month's spend counter by a (possibly negative) delta. Read-modify-write on KV —
+ * not atomic (KV has no atomic increment), so two racing requests can slightly mis-count; for
+ * a ~$1.50 personal cap that's acceptable slop, not a correctness problem. The key is written
+ * with a ~40-day TTL so a month's counter self-cleans well after that month ends, refreshed on
+ * every write within the month.
+ *
+ * Callers use this in a reserve-then-settle pattern (see the AI routes): an estimated cost is
+ * ADDED before the API call — so a parallel burst of requests each pre-charge the counter and
+ * can't all sail past the cap on a stale read — then settled to the real cost afterwards
+ * (`actual - reserve`, negative when the estimate was high) or refunded on failure.
  */
 export async function recordSpend(env: UsageEnv, userId: string, microUsd: number): Promise<void> {
   const kv = env.USAGE;
-  if (!kv || microUsd <= 0) return;
+  if (!kv || microUsd === 0) return;
 
   const key = periodKey(userId);
   const raw = await kv.get(key);
   const spent = raw ? parseInt(raw, 10) || 0 : 0;
-  await kv.put(key, String(spent + microUsd), { expirationTtl: 60 * 60 * 24 * 40 });
+  await kv.put(key, String(Math.max(0, spent + microUsd)), { expirationTtl: 60 * 60 * 24 * 40 });
 }

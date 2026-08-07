@@ -325,13 +325,17 @@ export const EQUIP_CATALOG: EquipOption[] = [
   { v: 'assisted', label: 'Assisted Machine' }, { v: 'kettlebell', label: 'Kettlebell' }
 ];
 
-export function incrementForEquip(v: string): number | null {
-  if (v === 'barbell' || v === 'smith' || v === 'trapbar') return 2.5;
-  if (v === 'dumbbell' || v === 'cable' || v === 'machine' || v === 'ezbar' || v === 'band' || v === 'kettlebell') return 1;
-  return null; // bodyweight / assisted -> rep-based progression
-}
-
 export const KG_PER_LB_STEP = 5 / 2.20462; // manual stepper moves a clean 5lb when in lb mode
+
+// Progression increment in kg, chosen in the user's DISPLAY units. For lb users everything steps
+// 5 lb — the app's whole lb experience is on a 5-lb grid (fmtWeight rounds to 5, the stepper
+// moves 5), and the old fixed 1 kg small-equipment increment fell *below* that grid: fmtWeight(1
+// kg) renders "0 lb", so every dumbbell/cable/machine recommendation read "Push for +0 lb today".
+export function incrementForEquip(v: string, units: 'kg' | 'lb' = 'kg'): number | null {
+  if (v === 'bodyweight' || v === 'assisted') return null; // rep-based progression
+  if (units === 'lb') return KG_PER_LB_STEP;
+  return v === 'barbell' || v === 'smith' || v === 'trapbar' ? 2.5 : 1;
+}
 
 export const DAY_ORDER = ['push', 'pull', 'legs', 'upper', 'lower'];
 

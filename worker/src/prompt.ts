@@ -7,6 +7,8 @@
  * system prompt; anything a client sends in that field is ignored (see index.ts).
  */
 
+import { capNum, capStr, capStrArray, sanitizeCatalog } from './guard';
+
 /** The subset of the app's state the coach is allowed to see. Mirrors CoachContext in the client. */
 export interface CoachContext {
   units?: 'kg' | 'lb';
@@ -96,6 +98,109 @@ context doesn't cover, say what you'd need rather than guessing at their numbers
 If their name is in context, use it the way a training partner would — occasionally, where it lands
 naturally, not in every message and never as a greeting on a mid-workout answer. If no name is
 given, don't ask for one.`;
+
+/**
+ * Rebuild the client-supplied context field-by-field with hard caps on every array length and
+ * string. The context is joined into the (billed) system prompt, so without this a forged
+ * request could stuff arbitrary megabytes into input tokens — and place attacker text in the
+ * strongest position to override TOPIC_RULES. Unknown fields are dropped by construction.
+ */
+export function sanitizeContext(raw: unknown): CoachContext | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const c = raw as Record<string, unknown>;
+  const out: CoachContext = {};
+
+  if (c.units === 'kg' || c.units === 'lb') out.units = c.units;
+
+  if (c.user && typeof c.user === 'object') {
+    const u = c.user as Record<string, unknown>;
+    const user: NonNullable<CoachContext['user']> = {};
+    const name = capStr(u.name, 60);
+    if (name) user.name = name;
+    for (const k of ['experience', 'goal', 'equipment', 'diet'] as const) {
+      const v = capStr(u[k], 80);
+      if (v) user[k] = v;
+    }
+    if (Object.keys(user).length) out.user = user;
+  }
+
+  const programName = capStr(c.programName, 80);
+  if (programName) out.programName = programName;
+  const trainingType = capStr(c.trainingType, 40);
+  if (trainingType) out.trainingType = trainingType;
+  const weekNumber = capNum(c.weekNumber, 1, 10_000);
+  if (weekNumber != null) out.weekNumber = weekNumber;
+
+  if (Array.isArray(c.days)) {
+    out.days = c.days
+      .slice(0, 14)
+      .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
+      .map(d => ({
+        name: capStr(d.name, 60) ?? '?',
+        kind: capStr(d.kind, 20) ?? 'training',
+        exercises: capStrArray(d.exercises, 20, 80)
+      }));
+  }
+
+  if (Array.isArray(c.recentWorkouts)) {
+    out.recentWorkouts = c.recentWorkouts
+      .slice(0, 15)
+      .filter((w): w is Record<string, unknown> => !!w && typeof w === 'object')
+      .map(w => ({
+        day: capStr(w.day, 60) ?? '?',
+        when: capStr(w.when, 40) ?? '',
+        exercises: capStrArray(w.exercises, 25, 120)
+      }));
+  }
+
+  if (c.bodyWeight && typeof c.bodyWeight === 'object') {
+    const b = c.bodyWeight as Record<string, unknown>;
+    const value = capNum(b.value, 0, 2000);
+    if (value != null) out.bodyWeight = { value, when: capStr(b.when, 40) ?? '' };
+  }
+
+  if (c.stats && typeof c.stats === 'object') {
+    const s = c.stats as Record<string, unknown>;
+    const stats: NonNullable<CoachContext['stats']> = {};
+    const totalWorkouts = capNum(s.totalWorkouts, 0, 1_000_000);
+    if (totalWorkouts != null) stats.totalWorkouts = totalWorkouts;
+    const currentStreak = capNum(s.currentStreak, 0, 1_000_000);
+    if (currentStreak != null) stats.currentStreak = currentStreak;
+    const totalPRs = capNum(s.totalPRs, 0, 1_000_000);
+    if (totalPRs != null) stats.totalPRs = totalPRs;
+    const lifetimeVolume = capStr(s.lifetimeVolume, 60);
+    if (lifetimeVolume) stats.lifetimeVolume = lifetimeVolume;
+    const bestSession = capStr(s.bestSession, 60);
+    if (bestSession) stats.bestSession = bestSession;
+    if (Array.isArray(s.muscleVolume)) {
+      stats.muscleVolume = s.muscleVolume
+        .slice(0, 14)
+        .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
+        .map(m => ({
+          muscle: capStr(m.muscle, 40) ?? '?',
+          sets: capNum(m.sets, 0, 10_000) ?? 0,
+          range: capStr(m.range, 30) ?? '',
+          status: capStr(m.status, 30) ?? ''
+        }));
+    }
+    if (Array.isArray(s.topLifts)) {
+      stats.topLifts = s.topLifts
+        .slice(0, 10)
+        .filter((l): l is Record<string, unknown> => !!l && typeof l === 'object')
+        .map(l => ({
+          name: capStr(l.name, 80) ?? '?',
+          best: capStr(l.best, 60) ?? '',
+          e1rm: capStr(l.e1rm, 60) ?? ''
+        }));
+    }
+    if (Object.keys(stats).length) out.stats = stats;
+  }
+
+  const catalog = sanitizeCatalog(c.catalog);
+  if (catalog.length) out.catalog = catalog;
+
+  return Object.keys(out).length ? out : undefined;
+}
 
 function renderContext(ctx: CoachContext | undefined): string {
   if (!ctx) return 'The user has not shared their program with this conversation.';

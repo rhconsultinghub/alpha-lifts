@@ -145,3 +145,49 @@ export async function putState(
   // defensively rather than assert.
   return row ?? { state_json: stateJson, version: 1, updated_at: now };
 }
+
+export type PutStateResult =
+  | { ok: true; row: StateRow }
+  | { ok: false; current: StateRow | null };
+
+/**
+ * Version-checked upsert — the optimistic-concurrency half of cloud sync. The client sends the
+ * server version its blob was based on; if the row has moved past it (another device pushed in
+ * between), nothing is written and the caller gets the current row back to reconcile against.
+ * This is what stops a stale device from silently overwriting a newer device's whole state —
+ * the single most likely real-data-loss path found in the 2026-08 audit.
+ *
+ * `baseVersion === 0` means "I believe no server state exists yet"; a lost race on the first
+ * insert surfaces as a conflict the same way.
+ */
+export async function putStateChecked(
+  db: D1Database,
+  userId: string,
+  stateJson: string,
+  baseVersion: number
+): Promise<PutStateResult> {
+  const now = Date.now();
+  if (baseVersion > 0) {
+    const res = await db
+      .prepare(
+        'UPDATE user_state SET state_json = ?, version = version + 1, updated_at = ? WHERE user_id = ? AND version = ?'
+      )
+      .bind(stateJson, now, userId, baseVersion)
+      .run();
+    if ((res.meta?.changes ?? 0) > 0) {
+      const row = await getState(db, userId);
+      return { ok: true, row: row ?? { state_json: stateJson, version: baseVersion + 1, updated_at: now } };
+    }
+    return { ok: false, current: await getState(db, userId) };
+  }
+  try {
+    await db
+      .prepare('INSERT INTO user_state (user_id, state_json, version, updated_at) VALUES (?, ?, 1, ?)')
+      .bind(userId, stateJson, now)
+      .run();
+    return { ok: true, row: { state_json: stateJson, version: 1, updated_at: now } };
+  } catch {
+    // A row already exists (UNIQUE user_id) — the "no state yet" belief was stale.
+    return { ok: false, current: await getState(db, userId) };
+  }
+}

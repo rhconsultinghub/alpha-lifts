@@ -1,9 +1,14 @@
 import type { ViewModel } from '../state/viewModel';
+import { useElapsedText, useRestClock } from '../state/useClock';
 import { ExercisePhoto } from './ExercisePhoto';
 import { SetTimeControl } from './SetTimeControl';
 
 export function WorkoutScreen({ vm }: { vm: ViewModel }) {
   const w = vm.workout;
+  // Local 1s clocks (before the early return — hook order). Deriving these here means the ticks
+  // re-render only this screen, not the whole app; see useClock.ts.
+  const elapsedText = useElapsedText(w?.startedAt);
+  const { restText, restPct } = useRestClock(!!w?.resting, w?.restEndAt, w?.restTotal ?? 0);
   if (!w) return null;
   return (
     <>
@@ -11,7 +16,7 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
         <button onClick={vm.exitWorkout} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14 }}>‹</button>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
           <div style={{ font: "600 12px 'Inter'", color: 'rgba(245,240,234,.6)' }}>{w.progressText}</div>
-          <div className="num" style={{ font: "700 12px 'Space Grotesk'", color: 'oklch(0.72 0.17 35)' }}>⏱ {w.elapsedText}</div>
+          <div className="num" style={{ font: "700 12px 'Space Grotesk'", color: 'oklch(0.72 0.17 35)' }}>⏱ {elapsedText}</div>
         </div>
         <button onClick={w.endEarly} style={{ background: 'none', border: 'none', color: 'rgba(245,240,234,.4)', fontSize: 11, fontWeight: 600 }}>End</button>
       </div>
@@ -144,10 +149,10 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
         <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: '#17140f', borderTop: '1px solid rgba(255,255,255,.1)', padding: '16px 20px calc(16px + var(--safe-b))', boxShadow: '0 -10px 30px rgba(0,0,0,.4)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.5)', letterSpacing: '.03em' }}>RESTING</div>
-            <div className="num" style={{ fontSize: 24, fontWeight: 700, color: 'oklch(0.72 0.17 35)' }}>{w.restText}</div>
+            <div className="num" style={{ fontSize: 24, fontWeight: 700, color: 'oklch(0.72 0.17 35)' }}>{restText}</div>
           </div>
           <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,.1)', overflow: 'hidden', marginBottom: 12 }}>
-            <div style={{ height: '100%', width: `${w.restPct}%`, background: 'oklch(0.65 0.19 35)' }} />
+            <div style={{ height: '100%', width: `${restPct}%`, background: 'oklch(0.65 0.19 35)' }} />
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={w.restMinus} style={{ flex: 1, background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', font: "600 12px 'Inter'", padding: 10, borderRadius: 10 }}>-15s</button>

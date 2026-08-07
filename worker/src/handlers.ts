@@ -14,11 +14,13 @@ import {
   getState,
   markEmailVerified,
   putState,
+  putStateChecked,
   setVerifyToken,
   toAccountView
 } from './db';
 import { newVerifyToken, sendVerificationEmail, verificationEnabled } from './email';
 import { json } from './http';
+import { readJsonCapped, MAX_AUTH_BODY_BYTES, MAX_STATE_BODY_BYTES } from './guard';
 
 export interface RouteEnv {
   DB?: D1Database;
@@ -29,6 +31,9 @@ export interface RouteEnv {
   RESEND_FROM?: string;
   // Where the /auth/verify page sends the user back to after confirming. Defaults to the live app.
   APP_URL?: string;
+  // Shared KV namespace (same binding the budget/allowlist use) — here it backs the per-email
+  // send cooldown that stops signup/resend from being used as an email-spam relay.
+  USAGE?: KVNamespace;
 }
 
 const DEFAULT_APP_URL = 'https://rhconsultinghub.github.io/alpha-lifts/';
@@ -59,12 +64,24 @@ function requireConfig(env: RouteEnv, cors: Cors): { db: D1Database; secret: str
   return { db: env.DB, secret: env.SESSION_SECRET };
 }
 
-async function readJson<T>(request: Request): Promise<T | null> {
-  try {
-    return (await request.json()) as T;
-  } catch {
-    return null;
-  }
+/** Auth bodies are an email + password; anything bigger than a few KB is not a real client. */
+async function readAuthBody<T>(request: Request): Promise<T | null> {
+  const read = await readJsonCapped<T>(request, MAX_AUTH_BODY_BYTES);
+  return read.ok ? read.value : null;
+}
+
+/**
+ * At most one verification email per address per minute, across signup + resend. KV-backed
+ * (60s is KV's minimum TTL — exactly the cooldown we want). Returns true when a send is
+ * allowed *and* claims the slot. Fails open without KV: the per-IP rate limiter still applies.
+ */
+async function claimEmailSendSlot(env: RouteEnv, email: string): Promise<boolean> {
+  const kv = env.USAGE;
+  if (!kv) return true;
+  const key = `emailcd:${email}`;
+  if (await kv.get(key)) return false;
+  await kv.put(key, '1', { expirationTtl: 60 });
+  return true;
 }
 
 // --- POST /auth/signup ----------------------------------------------------------------------
@@ -73,7 +90,7 @@ export async function handleSignup(request: Request, env: RouteEnv, cors: Cors, 
   const cfg = requireConfig(env, cors);
   if (cfg instanceof Response) return cfg;
 
-  const body = await readJson<{ email?: unknown; password?: unknown }>(request);
+  const body = await readAuthBody<{ email?: unknown; password?: unknown }>(request);
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
   const password = typeof body?.password === 'string' ? body.password : '';
 
@@ -82,8 +99,16 @@ export async function handleSignup(request: Request, env: RouteEnv, cors: Cors, 
     return json({ error: 'invalid_password' }, 400, cors);
   }
 
+  // With verification ON, an already-registered address gets the SAME "check your email" 201 as
+  // a fresh signup (no email is sent, and no account is touched) — a distinct 409 here was a
+  // clean oracle for testing whether any address has an account. The 409 remains only when
+  // verification is off, where signup returns a live session and can't be made uniform.
+  const verifying = verificationEnabled(env);
   const existing = await findUserByEmail(cfg.db, email);
-  if (existing) return json({ error: 'email_taken' }, 409, cors);
+  if (existing) {
+    if (verifying) return json({ verification_required: true, email }, 201, cors);
+    return json({ error: 'email_taken' }, 409, cors);
+  }
 
   const passwordHash = await hashPassword(password);
 
@@ -91,21 +116,34 @@ export async function handleSignup(request: Request, env: RouteEnv, cors: Cors, 
   // session — the user must confirm before they can sign in. This is what stops bogus/throwaway
   // signups from getting a working account. Even if the email send fails, the account exists
   // unverified so they can trigger a resend rather than being stuck mid-signup.
-  if (verificationEnabled(env)) {
+  if (verifying) {
     const { token, expires } = newVerifyToken();
-    await createUser(cfg.db, email, passwordHash, { verified: false, token, expires });
+    try {
+      await createUser(cfg.db, email, passwordHash, { verified: false, token, expires });
+    } catch {
+      // Two signups for one email raced past the check above; the UNIQUE constraint caught the
+      // loser. Answer exactly like the existing-account path — uniform, no oracle.
+      return json({ verification_required: true, email }, 201, cors);
+    }
     const verifyUrl = `${new URL(request.url).origin}/auth/verify?token=${encodeURIComponent(token)}`;
-    // Fire-and-forget so the response doesn't wait on the email round-trip. waitUntil keeps the
-    // send alive past the response; without a ctx (shouldn't happen in the Workers runtime) fall
-    // back to a detached promise.
-    const send = sendVerificationEmail(env, email, verifyUrl);
-    if (ctx) ctx.waitUntil(send);
-    else void send;
+    if (await claimEmailSendSlot(env, email)) {
+      // Fire-and-forget so the response doesn't wait on the email round-trip. waitUntil keeps the
+      // send alive past the response; without a ctx (shouldn't happen in the Workers runtime) fall
+      // back to a detached promise.
+      const send = sendVerificationEmail(env, email, verifyUrl);
+      if (ctx) ctx.waitUntil(send);
+      else void send;
+    }
     return json({ verification_required: true, email }, 201, cors);
   }
 
   // Verification off (no Resend configured): behave as before — create verified, sign straight in.
-  const user = await createUser(cfg.db, email, passwordHash);
+  let user;
+  try {
+    user = await createUser(cfg.db, email, passwordHash);
+  } catch {
+    return json({ error: 'email_taken' }, 409, cors); // lost a signup race on the UNIQUE index
+  }
   const token = await signSession(user.id, cfg.secret);
   return json({ token, account: toAccountView(user) }, 201, cors);
 }
@@ -116,7 +154,7 @@ export async function handleLogin(request: Request, env: RouteEnv, cors: Cors): 
   const cfg = requireConfig(env, cors);
   if (cfg instanceof Response) return cfg;
 
-  const body = await readJson<{ email?: unknown; password?: unknown }>(request);
+  const body = await readAuthBody<{ email?: unknown; password?: unknown }>(request);
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
   const password = typeof body?.password === 'string' ? body.password : '';
 
@@ -187,16 +225,23 @@ export async function handleResendVerification(request: Request, env: RouteEnv, 
   const cfg = requireConfig(env, cors);
   if (cfg instanceof Response) return cfg;
 
-  const body = await readJson<{ email?: unknown }>(request);
+  const body = await readAuthBody<{ email?: unknown }>(request);
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
 
   // Always 200 regardless — never reveal whether an email is registered. Only actually re-send for
-  // a real, still-unverified account while verification is enabled.
+  // a real, still-unverified account while verification is enabled, at most once a minute per
+  // address (claimEmailSendSlot) so this can't be looped as an email-spam relay.
   if (verificationEnabled(env) && email) {
     const user = await findUserByEmail(cfg.db, email);
-    if (user && user.email_verified !== 1) {
-      const { token, expires } = newVerifyToken();
-      await setVerifyToken(cfg.db, user.id, token, expires);
+    if (user && user.email_verified !== 1 && (await claimEmailSendSlot(env, email))) {
+      // Reuse a still-valid pending token rather than rotating: rotating on every call meant a
+      // spammer could keep invalidating the link sitting in the real user's inbox.
+      let token = user.verify_token;
+      if (!token || user.verify_expires == null || user.verify_expires < Date.now()) {
+        const fresh = newVerifyToken();
+        token = fresh.token;
+        await setVerifyToken(cfg.db, user.id, token, fresh.expires);
+      }
       const verifyUrl = `${new URL(request.url).origin}/auth/verify?token=${encodeURIComponent(token)}`;
       const send = sendVerificationEmail(env, email, verifyUrl);
       if (ctx) ctx.waitUntil(send);
@@ -252,7 +297,9 @@ export async function handlePutState(request: Request, env: RouteEnv, cors: Cors
   const session = await authenticate(request, cfg.secret);
   if (!session) return json({ error: 'unauthorized' }, 401, cors);
 
-  const body = await readJson<{ state?: unknown }>(request);
+  const read = await readJsonCapped<{ state?: unknown; baseVersion?: unknown }>(request, MAX_STATE_BODY_BYTES);
+  if (!read.ok && read.reason === 'too_large') return json({ error: 'state_too_large' }, 413, cors);
+  const body = read.ok ? read.value : null;
   if (body == null || typeof body !== 'object' || !('state' in body)) {
     return json({ error: 'missing_state' }, 400, cors);
   }
@@ -265,6 +312,38 @@ export async function handlePutState(request: Request, env: RouteEnv, cors: Cors
     return json({ error: 'invalid_state' }, 400, cors);
   }
   if (stateJson.length > MAX_STATE_BYTES) return json({ error: 'state_too_large' }, 413, cors);
+
+  // Optimistic concurrency: when the client says which server version its blob was based on,
+  // the write only lands if the row is still at that version — otherwise 409 with the current
+  // server state so the client can reconcile (last-write-wins by timestamp, client-side) instead
+  // of silently clobbering another device's push. Omitting baseVersion keeps the old
+  // unconditional behaviour, so previously-deployed clients keep working unchanged.
+  const rawBase = (body as { baseVersion?: unknown }).baseVersion;
+  const baseVersion =
+    typeof rawBase === 'number' && Number.isInteger(rawBase) && rawBase >= 0 ? rawBase : null;
+
+  if (baseVersion != null) {
+    const result = await putStateChecked(cfg.db, session.sub, stateJson, baseVersion);
+    if (!result.ok) {
+      let state: unknown = null;
+      try {
+        state = result.current ? JSON.parse(result.current.state_json) : null;
+      } catch {
+        state = null;
+      }
+      return json(
+        {
+          error: 'version_conflict',
+          state,
+          version: result.current?.version ?? 0,
+          updatedAt: result.current?.updated_at ?? 0
+        },
+        409,
+        cors
+      );
+    }
+    return json({ version: result.row.version, updatedAt: result.row.updated_at }, 200, cors);
+  }
 
   const row = await putState(cfg.db, session.sub, stateJson);
   return json({ version: row.version, updatedAt: row.updated_at }, 200, cors);

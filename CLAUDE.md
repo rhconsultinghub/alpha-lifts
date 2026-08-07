@@ -554,8 +554,11 @@ committed state is the corrected, re-verified one described above.
   `viewModel.ts`: an active query now bypasses the theme filter entirely; browsing with no query
   keeps the original theme-scoped behavior.
 - **Fresh-install test data** — investigated and confirmed clean: `defaultProgram()`/
-  `dumbbellProgram()`/`seededFrac()` in `src/data/program.ts` are dead code, not imported anywhere
-  in the live app; `createInitialState()` genuinely returns an empty program and `onboarded: false`.
+  `dumbbellProgram()` in `src/data/program.ts` are dead code, not imported anywhere in the live
+  app; `createInitialState()` genuinely returns an empty program and `onboarded: false`.
+  (⚠️ Only those two functions are dead — the FILE is load-bearing: `mkEx`/`slugify`/`clamp`/
+  `roundTo` are imported by useApp/coach/onboarding/logic, and `seededFrac` was revived by
+  phase 45's session-seeded factoids. Do not delete program.ts wholesale.)
   A truly fresh `localStorage` always lands on the onboarding wizard. The most likely explanation
   for the user seeing old data after a "fresh install" is that reinstalling a PWA's home-screen icon
   on Android does *not* clear the underlying browser origin's `localStorage` — only explicitly
@@ -2128,3 +2131,78 @@ requested with those exact examples. Frontend-only.
   the equivalent of 96 car tyres", the Progress card, and the empty-history starter. `npx tsc -b` and
   `npm run build` clean, zero console errors on a fresh tab. **No `worker/` changes — pure frontend,
   auto-deploys on push, no `wrangler deploy` needed.**
+
+(46) **security & data-integrity hardening round** — a full three-track audit (Worker, frontend
+state/sync, build/PWA) followed by fixes for every critical/high finding. The remaining
+medium/low findings are documented in the audit plan (`~/.claude/plans/perform-a-full-audit-*.md`)
+for later rounds. What changed, by layer:
+
+- **Worker security** (`worker/src/`, new `guard.ts`): the coach route now REQUIRES a session
+  when `SESSION_SECRET` is set — the old `body.userId` fallback let an unauthenticated caller
+  name any pro account's UUID (returned by `/auth/me`, so not secret) and inherit its
+  entitlement, or mint fresh ids to reset the KV spend counter; `isEntitled()` also only
+  consults the D1 subscription branch for session-verified ids (`viaSession`). `/onboard` and
+  `/parse-plan` now enforce `checkBudget()` (parse-plan could bill ~$0.20/call unmetered), and
+  all AI routes use reserve-then-settle spend accounting (pre-charge an estimate, settle to real
+  cost / refund on failure) so parallel bursts can't race past the cap on stale KV reads.
+  `/onboard`'s one-per-account flag is claimed BEFORE the API call and rolled back on failure
+  (was read-top/write-bottom — N parallel requests all passed). Every route reads its body via
+  `readJsonCapped` (8 KB auth / 64 KB AI / 4 MB state); the LLM context is sanitized field-by-
+  field with hard caps (`sanitizeContext` in prompt.ts, `sanitizeAnswers` in onboard.ts) so a
+  forged request can't stuff unbounded billed text into the system prompt. Top-level try/catch
+  in `fetch` returns JSON 500 WITH CORS headers (uncaught D1 errors used to surface as opaque
+  CORS failures); signup handles the UNIQUE race and, with verification on, returns the same
+  201 for an existing email (no enumeration oracle); resend-verification reuses a still-valid
+  token (rotation-spam protection) and both email sends sit behind a 60s per-address KV
+  cooldown. Per-IP rate limiting via `[[ratelimits]]` bindings (AUTH_LIMITER 10/min,
+  AI_LIMITER 30/min — verified enforcing locally under `wrangler dev`). Production
+  `ALLOWED_ORIGINS` no longer includes localhost (dev gets it via `.dev.vars`).
+- **Cloud sync** (`sync.ts`/`useCloudSync.ts`/`handlers.ts`/`db.ts`, new `syncMeta.ts`):
+  `PUT /state` now supports optimistic concurrency — the client sends `baseVersion` (from
+  sync-meta) and the Worker 409s with its current copy if the row moved; on conflict the client
+  applies the same LWW rule as sign-in reconcile (local newer → re-push on top; server newer →
+  adopt + reload). Omitting baseVersion keeps the old unconditional write, so pre-update clients
+  still work. The dirty flag is only cleared when the pushed state object is still current
+  (identity check — an edit landing mid-flight used to be marked clean and could be lost);
+  pending pushes flush on pagehide/hidden via keepalive fetch, and `logout()` awaits a bounded
+  `flushBeforeLogout` so signing out can't drop an unsynced change. An account-switch that would
+  discard another account's dirty blob now stashes it under `alpha-lifts-orphan-<accountId>`.
+- **Frontend data integrity**: backup import is validated (`validateBackup` in backup.ts) before
+  staging, and every merge into the EXLIB singleton goes through `safeCustomEntries` (drops
+  `__proto__`/`constructor`/`prototype` keys — `EXLIB["__proto__"] = x` rewires the prototype
+  chain — malformed defs, and built-in-id collisions). A corrupt persisted blob is stashed to
+  `alpha-lifts-corrupt-<ts>` instead of being silently overwritten by defaults, and quota
+  failures set a visible banner (both surfaced via `storageNotice` from useApp, rendered in
+  App.tsx). `resetApp` runs its side effects outside the setState updater, clears sync-meta, and
+  its confirm copy says the cloud copy is erased too. The rest timer resumes after a reload
+  mid-rest (mount effect restarts the interval off the absolute `restEndAt`; an already-elapsed
+  rest completes silently). A meta CSP was added to `index.html` (GitHub Pages can't set
+  headers) — script/connect/frame/img/font sources pinned; title fixed ("Forge" → "Alpha
+  Lifts"). lb display: `incrementForEquip` now takes units (5 lb for everything in lb mode —
+  the old 1 kg small-equipment increment rendered as "Push for +0 lb today" under fmtWeight's
+  5-lb rounding), and bodyweight uses new 0.1-precision `fmtBodyWeight` (a 2 lb change used to
+  show "+0 lb").
+- **Performance** (`useClock.ts` new): `buildViewModel` is memoized on `[state]` in App.tsx
+  (safe because every action callback's identity only changes when state does); the Progress
+  tab's analytics, the exercise-library groups, and the week-review list are computed only when
+  their screen/modal is active (typed empty stubs otherwise — see `progressStubs()`); and the
+  two 1-second clocks moved out of global state entirely: the app-wide `forceTick` interval is
+  gone and `restTick` no longer writes `restRemaining` per second — elapsed/rest displays
+  derive locally in RestToast/WorkoutScreen/ResumePill/IdleWorkoutToast via
+  `useElapsedText`/`useRestClock` off `startedAt`/`restEndAt`. Net effect: no state writes, no
+  VM rebuilds, no localStorage serialization, and no sync dirtying on a per-second cadence
+  (verified: zero PUT /state during a live rest countdown). `restAdjust` derives from
+  `restEndAt` since `restRemaining` is no longer live.
+
+Verified: worker `tsc --noEmit` + a 23-case scripted suite against local `wrangler dev`
+(spoofed-identity 401s, entitlement 403s, 413 body caps, 409 version conflicts + legacy
+no-baseVersion path, onboard claim rollback, 429 rate limiting); frontend `npx tsc -b` +
+`npm run build` clean and a full live browser pass against the local Worker (signup → onboarding
+→ versioned sync push; forced 409 → observed LWW retry sequence `[base 2 → 409, base 8 → 200]`;
+corrupt-blob stash + banner + clean boot; reload mid-rest → countdown resumes and ticks; hostile
+backup customs filtered with prototype unpolluted; "+5 lb" dumbbell recommendation in lb; all
+five tabs render with the gated VM; YouTube embed loads under the CSP; zero console errors and
+zero CSP violations). **Worker changes require `wrangler deploy` from
+`L:\Personal Projects\Alpha Lifts\alpha-lifts\worker`** — the client is backward-compatible with
+the old Worker (baseVersion is additive), but the deployed Worker won't enforce any of the new
+protections until deployed.

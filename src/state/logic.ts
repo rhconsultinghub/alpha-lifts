@@ -8,6 +8,14 @@ export function fmtWeight(kg: number, units: Units): string {
   return Math.round(kg * 2) / 2 + ' kg';
 }
 
+// Fine-grained weight formatting (0.1 precision) for measurements where fmtWeight's 5-lb display
+// grid erases the signal — bodyweight above all, where a real 2 lb change over a month rendered
+// as "+0 lb" or "+5 lb". Lifting numbers stay on fmtWeight's plate-friendly grid.
+export function fmtBodyWeight(kg: number, units: Units): string {
+  if (units === 'lb') return Math.round(kg * 2.20462 * 10) / 10 + ' lb';
+  return Math.round(kg * 10) / 10 + ' kg';
+}
+
 const LB_BAR = 45;
 const KG_BAR = 20;
 const LB_PLATES = [45, 35, 25, 10, 5, 2.5];
@@ -342,7 +350,7 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
           '. Leave plenty in the tank — you’re recovering, not testing.'
       };
     }
-    const inc = incrementForEquip(equip.v) ?? 2.5;
+    const inc = incrementForEquip(equip.v, units) ?? 2.5;
     const raw = last.weight * deloadPct;
     const w = last.weight > 0 ? Math.max(inc, Math.round(raw / inc) * inc) : 0;
     return {
@@ -363,7 +371,7 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
       note: 'Last time: ' + fmtVal(last.reps) + '. Aim for ' + fmtVal(val) + (isTime ? '.' : ' across your sets.')
     };
   }
-  const inc = incrementForEquip(equip.v) ?? 2.5;
+  const inc = incrementForEquip(equip.v, units) ?? 2.5;
   if (last.hitTop) {
     // hit the rep target but that top set was already to true failure (RIR 0) — hold the weight
     // rather than piling more load onto a set that had no reserve left, even though the rep
@@ -897,9 +905,9 @@ export function bodyWeightChartData(state: AppState) {
   const first = entries[0], latest = entries[entries.length - 1];
   const deltaKg = latest.weightKg - first.weightKg;
   const deltaText = entries.length > 1
-    ? (deltaKg >= 0 ? '+' : '-') + fmtWeight(Math.abs(deltaKg), state.units) + ' since ' + first.date
+    ? (deltaKg >= 0 ? '+' : '-') + fmtBodyWeight(Math.abs(deltaKg), state.units) + ' since ' + first.date
     : 'First logged ' + first.date;
-  return { hasData: true, empty: false, points, linePoints, deltaText, latestText: fmtWeight(latest.weightKg, state.units) };
+  return { hasData: true, empty: false, points, linePoints, deltaText, latestText: fmtBodyWeight(latest.weightKg, state.units) };
 }
 
 export function durationTrendData(state: AppState) {

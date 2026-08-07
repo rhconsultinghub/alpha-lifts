@@ -1,4 +1,5 @@
 import type { ViewModel } from '../state/viewModel';
+import { useElapsedText } from '../state/useClock';
 
 // Shown when a workout has been open with no in-app interaction for the idle timeout (30 min). A
 // deliberately blocking dialog rather than a dismissible toast: it's a decision (are you still
@@ -6,6 +7,7 @@ import type { ViewModel } from '../state/viewModel';
 // elapsed timer and any pending session don't quietly keep accumulating.
 export function IdleWorkoutToast({ vm }: { vm: ViewModel }) {
   const p = vm.idlePrompt;
+  const elapsedText = useElapsedText(p.show ? p.startedAt : null);
   if (!p.show) return null;
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'rgba(6,6,5,.6)', backdropFilter: 'blur(2px)' }}>
@@ -13,7 +15,7 @@ export function IdleWorkoutToast({ vm }: { vm: ViewModel }) {
         <div style={{ fontSize: 30, marginBottom: 10 }}>⏳</div>
         <div style={{ font: "700 19px 'Inter'", color: '#f5f0ea', marginBottom: 6 }}>Still working out?</div>
         <div style={{ font: "400 13px/1.5 'Inter'", color: 'rgba(245,240,234,.6)', marginBottom: 20 }}>
-          Your workout has been running for {p.elapsedText} with no activity for a while{p.exerciseName ? <>, currently on <span style={{ color: 'rgba(245,240,234,.85)', fontWeight: 600 }}>{p.exerciseName}</span></> : ''}.
+          Your workout has been running for {elapsedText} with no activity for a while{p.exerciseName ? <>, currently on <span style={{ color: 'rgba(245,240,234,.85)', fontWeight: 600 }}>{p.exerciseName}</span></> : ''}.
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button onClick={p.continueWorkout} style={{ width: '100%', background: 'oklch(0.65 0.19 35)', color: '#0d0c0b', font: "700 15px 'Inter'", padding: 15, borderRadius: 14, border: 'none' }}>Continue workout</button>

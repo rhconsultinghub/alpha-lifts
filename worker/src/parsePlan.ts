@@ -15,9 +15,15 @@ import Anthropic from '@anthropic-ai/sdk';
 import { authenticate } from './auth';
 import { isEntitled } from './access';
 import { json } from './http';
-import { costMicroUsd, recordSpend } from './usage';
+import { checkBudget, costMicroUsd, recordSpend } from './usage';
+import { readJsonCapped, sanitizeCatalog, MAX_AI_BODY_BYTES } from './guard';
 
 const MODEL = 'claude-opus-4-8';
+
+/** Pre-charged cost estimate, settled to the real cost after the call (see usage.ts). Higher
+ *  than the coach's: max_tokens 8000 of Opus output alone is ~$0.20, so this is the honest
+ *  worst-case a single parse can bill. */
+const PARSE_RESERVE_MICRO_USD = 200_000; // $0.20
 
 // Kept in sync with the client's Muscle union (src/data/types.ts) and EQUIP_CATALOG v-values
 // (src/data/exercises.ts). The model may only emit these, so a hallucinated muscle/equipment
@@ -129,16 +135,29 @@ export async function handleParsePlan(request: Request, env: ParsePlanEnv, cors:
   if (!session) return json({ error: 'unauthorized' }, 401, cors);
   const userId = session.sub;
 
-  // Premium gate — this is the Pro feature, unlike the free onboarding route.
-  if (!(await isEntitled(env, userId))) return json({ error: 'not_entitled' }, 403, cors);
+  // Premium gate — this is the Pro feature, unlike the free onboarding route. Identity here is
+  // always session-verified (401 above), so the D1 subscription branch may be consulted.
+  if (!(await isEntitled(env, userId, { viaSession: true }))) return json({ error: 'not_entitled' }, 403, cors);
 
-  let body: ParsePlanBody;
-  try {
-    body = (await request.json()) as ParsePlanBody;
-  } catch {
-    return json({ error: 'invalid_json' }, 400, cors);
+  const read = await readJsonCapped<ParsePlanBody>(request, MAX_AI_BODY_BYTES);
+  if (!read.ok) {
+    return read.reason === 'too_large'
+      ? json({ error: 'body_too_large' }, 413, cors)
+      : json({ error: 'invalid_json' }, 400, cors);
   }
+  const body: ParsePlanBody = {
+    text: typeof read.value?.text === 'string' ? read.value.text : undefined,
+    catalog: sanitizeCatalog(read.value?.catalog)
+  };
   if (!body.text || !body.text.trim()) return json({ error: 'empty' }, 400, cors);
+
+  // Same monthly spend cap as the coach — this was the one AI route that recorded spend but
+  // never enforced the limit, at the highest max_tokens in the Worker.
+  const budget = await checkBudget(env, userId);
+  if (!budget.allowed) {
+    return json({ error: 'budget_exhausted', spent: budget.spent, limit: budget.limit }, 402, cors);
+  }
+  await recordSpend(env, userId, PARSE_RESERVE_MICRO_USD);
 
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   let response: Anthropic.Message;
@@ -156,6 +175,7 @@ export async function handleParsePlan(request: Request, env: ParsePlanEnv, cors:
       messages: [{ role: 'user', content: describe(body) }]
     });
   } catch (err) {
+    await recordSpend(env, userId, -PARSE_RESERVE_MICRO_USD); // refund the reservation
     if (err instanceof Anthropic.APIError) {
       console.error('ParsePlan API error', err.status, err.message);
       return json({ error: 'upstream_error' }, 502, cors);
@@ -164,7 +184,7 @@ export async function handleParsePlan(request: Request, env: ParsePlanEnv, cors:
     return json({ error: 'internal_error' }, 500, cors);
   }
 
-  await recordSpend(env as { USAGE?: KVNamespace }, userId, costMicroUsd(MODEL, response.usage));
+  await recordSpend(env, userId, costMicroUsd(MODEL, response.usage) - PARSE_RESERVE_MICRO_USD);
 
   const toolUse = response.content.find(
     (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'extract_plan'
