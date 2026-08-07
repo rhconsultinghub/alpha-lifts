@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { login, resendVerification, signup, type Account } from '../state/auth';
+import { login, requestPasswordReset, resendVerification, signup, type Account } from '../state/auth';
 
 /**
  * Sign-in / sign-up screen, shown by <AuthGate> when accounts are configured and no one is signed
@@ -37,8 +37,21 @@ export function LoginScreen({ onSuccess }: { onSuccess: (token: string, account:
   const [busy, setBusy] = useState(false);
   // When set, the account exists but its email needs confirming — show the check-your-email panel.
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  // 'idle' → link shown; 'sent' → neutral confirmation (the server never says if the email exists).
+  const [resetState, setResetState] = useState<'idle' | 'sent'>('idle');
 
   const isSignup = mode === 'signup';
+
+  async function forgotPassword() {
+    if (busy) return;
+    if (!email.trim()) {
+      setError('Enter your email above first, then tap "Forgot password?" again.');
+      return;
+    }
+    setError(null);
+    await requestPasswordReset(email.trim());
+    setResetState('sent');
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -154,6 +167,23 @@ export function LoginScreen({ onSuccess }: { onSuccess: (token: string, account:
               {busy ? 'Please wait…' : isSignup ? 'Create account' : 'Sign in'}
             </button>
           </form>
+
+          {!isSignup && (
+            <div style={{ textAlign: 'center', marginTop: 14 }}>
+              {resetState === 'sent' ? (
+                <div style={{ font: "400 12.5px 'Inter'", color: 'rgba(245,240,234,.55)', lineHeight: 1.5 }}>
+                  If an account exists for that email, a reset link is on its way. Check your inbox (and spam).
+                </div>
+              ) : (
+                <button
+                  onClick={forgotPassword}
+                  style={{ background: 'none', border: 'none', color: 'rgba(245,240,234,.55)', font: "500 12.5px 'Inter'", cursor: 'pointer', padding: 0 }}
+                >
+                  Forgot password?
+                </button>
+              )}
+            </div>
+          )}
 
           <div style={{ textAlign: 'center', marginTop: 22, font: "400 13px 'Inter'", color: 'rgba(245,240,234,.5)' }}>
             {isSignup ? 'Already have an account?' : 'New here?'}{' '}

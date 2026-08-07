@@ -12,10 +12,10 @@
  */
 
 import { COACH_API_URL, COACH_CONFIGURED } from './coach';
+import { getStoredToken, TOKEN_KEY } from './tokenStore';
 
 export const AUTH_CONFIGURED = COACH_CONFIGURED;
 
-const TOKEN_KEY = 'alpha-lifts-auth-token';
 const ACCOUNT_KEY = 'alpha-lifts-auth-account';
 
 export interface Account {
@@ -29,11 +29,7 @@ export interface Account {
 // --- token + account persistence ------------------------------------------------------------
 
 export function getToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
+  return getStoredToken();
 }
 
 /** Cached account, shown immediately on reload so an authed user isn't bounced to the login
@@ -171,6 +167,52 @@ export async function resendVerification(email: string): Promise<void> {
     });
   } catch {
     /* best-effort */
+  }
+}
+
+/** Ask the server to email a password-reset link. Same neutral contract as resendVerification —
+ *  always 200 server-side, no account-existence signal, so the UI just says "check your email". */
+export async function requestPasswordReset(email: string): Promise<void> {
+  if (!AUTH_CONFIGURED) return;
+  try {
+    await fetch(`${COACH_API_URL}/auth/request-reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * Change the signed-in account's password. On success the server has bumped token_version —
+ * revoking every other session — and returns a fresh token for THIS one, persisted here so the
+ * current device stays signed in.
+ */
+export async function changePassword(
+  token: string,
+  oldPassword: string,
+  newPassword: string
+): Promise<{ ok: true; token: string; account: Account } | { ok: false; error: string }> {
+  if (!AUTH_CONFIGURED) return { ok: false, error: authErrorMessage('accounts_not_configured') };
+  try {
+    const res = await fetch(`${COACH_API_URL}/auth/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ oldPassword, newPassword })
+    });
+    const data = (await res.json().catch(() => ({}))) as AuthBody;
+    if (res.ok && data.token && data.account) {
+      persistSession(data.token, data.account);
+      // Caller must also push the new pair into AuthContext (refreshSession) — the change bumped
+      // token_version server-side, so the token the React tree is holding is now revoked.
+      return { ok: true, token: data.token, account: data.account };
+    }
+    if (res.status === 401) return { ok: false, error: 'Current password is incorrect.' };
+    return { ok: false, error: authErrorMessage(data.error ?? '') };
+  } catch {
+    return { ok: false, error: 'Can’t reach the server. Check your connection and try again.' };
   }
 }
 

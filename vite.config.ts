@@ -15,11 +15,15 @@ export default defineConfig(({ command }) => ({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
-      registerType: 'autoUpdate',
+      // 'prompt' (not 'autoUpdate'): main.tsx decides WHEN a downloaded update applies. autoUpdate
+      // force-reloaded the page the instant a new SW took control — including mid-workout, e.g.
+      // returning from a rest notification right as a deploy landed, losing in-flight input. Now
+      // updates apply immediately when idle but wait out an active workout. See main.tsx + sw.ts.
+      registerType: 'prompt',
       // Register the SW ourselves in main.tsx (via virtual:pwa-register) instead of the plugin's
       // auto-injected script. The injected one only *registered* the worker and never reloaded the
       // page when a new version activated, so an installed PWA kept serving the old cached bundle
-      // until it was reinstalled. The manual registerSW() (autoUpdate) reloads on new-SW takeover
+      // until it was reinstalled. The manual registerSW() reloads on new-SW takeover
       // and lets us add a foreground update check. See main.tsx.
       injectRegister: false,
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
@@ -40,7 +44,13 @@ export default defineConfig(({ command }) => ({
         ]
       },
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,jpg}']
+        // No `jpg` here anymore: the 151 exercise photos were ~2.6 MB of a ~3.7 MB precache, all
+        // downloaded atomically on every install AND revalidated on every deploy — and Workbox
+        // precache is all-or-nothing, so one failed photo failed the whole SW install. They now
+        // cache on demand via a CacheFirst runtime route in sw.ts (a photo you've viewed once is
+        // still available offline; unvisited ones need one online view first). The pngs stay:
+        // body-diagram art + muscle masks + icons are core UI, ~350 KB total.
+        globPatterns: ['**/*.{js,css,html,svg,png,ico}']
       }
     })
   ],

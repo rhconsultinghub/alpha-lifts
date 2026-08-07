@@ -12,7 +12,8 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { authenticate } from './auth';
+import { authenticate, sessionTokenVersion } from './auth';
+import { findUserById, userTokenVersion } from './db';
 import { isEntitled } from './access';
 import { json } from './http';
 import { checkBudget, costMicroUsd, recordSpend } from './usage';
@@ -130,9 +131,16 @@ function describe(body: ParsePlanBody): string {
 export async function handleParsePlan(request: Request, env: ParsePlanEnv, cors: Record<string, string>): Promise<Response> {
   if (!env.ANTHROPIC_API_KEY) return json({ error: 'not_configured' }, 503, cors);
 
-  // Identity from the token, never the body — same discipline as onboard/coach.
+  // Identity from the token, never the body — same discipline as onboard/coach. Also honour
+  // per-user revocation (token_version) when the DB is bound.
   const session = env.SESSION_SECRET ? await authenticate(request, env.SESSION_SECRET) : null;
   if (!session) return json({ error: 'unauthorized' }, 401, cors);
+  if (env.DB) {
+    const user = await findUserById(env.DB, session.sub);
+    if (!user || userTokenVersion(user) !== sessionTokenVersion(session)) {
+      return json({ error: 'unauthorized' }, 401, cors);
+    }
+  }
   const userId = session.sub;
 
   // Premium gate — this is the Pro feature, unlike the free onboarding route. Identity here is

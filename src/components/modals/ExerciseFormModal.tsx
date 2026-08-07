@@ -1,4 +1,5 @@
 import type { ViewModel } from '../../state/viewModel';
+import { Sheet } from '../Sheet';
 
 function Chip({ o }: { o: { label: string; select?: () => void; toggle?: () => void; bg: string; color: string; border: string } }) {
   return (
@@ -10,8 +11,7 @@ export function ExerciseFormModal({ vm }: { vm: ViewModel }) {
   const f = vm.exerciseForm as any;
   if (!f.open) return null;
   return (
-    <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 30, display: 'flex', alignItems: 'flex-end' }}>
-      <div style={{ background: '#17140f', borderRadius: '24px 24px 0 0', width: '100%', maxHeight: '88%', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+    <Sheet maxHeight="88%" column scrollY>
         <div style={{ padding: '18px 20px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>{f.title}</div>
           <button onClick={f.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
@@ -77,7 +77,6 @@ export function ExerciseFormModal({ vm }: { vm: ViewModel }) {
           )}
           <button onClick={f.save} style={{ flex: 1, background: 'oklch(0.65 0.19 35)', color: '#0d0c0b', font: "700 14px 'Inter'", padding: 15, borderRadius: 14, border: 'none' }}>{f.saveLabel}</button>
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }

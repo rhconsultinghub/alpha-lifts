@@ -1,4 +1,5 @@
 import type { ViewModel } from '../../state/viewModel';
+import { Sheet } from '../Sheet';
 
 function OptionRow({ o }: { o: { label: string; muscle?: string; check: string; bg: string; border: string; stage: () => void } }) {
   return (
@@ -13,8 +14,7 @@ export function SwapModal({ vm }: { vm: ViewModel }) {
   const sw = vm.swap;
   if (!sw.open) return null;
   return (
-    <div onClick={sw.backdrop} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 30, display: 'flex', alignItems: 'flex-end' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#17140f', borderRadius: '24px 24px 0 0', width: '100%', maxHeight: '82%', display: 'flex', flexDirection: 'column' }}>
+    <Sheet maxHeight="82%" column onClose={sw.backdrop}>
         <div style={{ padding: '16px 20px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>{sw.title}</div>
           <button onClick={sw.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
@@ -73,7 +73,6 @@ export function SwapModal({ vm }: { vm: ViewModel }) {
         <div style={{ padding: '12px 20px calc(20px + var(--safe-b))', borderTop: '1px solid rgba(255,255,255,.08)' }}>
           <button onClick={sw.confirm} disabled={sw.confirmDisabled} style={{ width: '100%', background: sw.confirmBg, color: '#0d0c0b', font: "700 14px 'Inter'", padding: 15, borderRadius: 14, border: 'none' }}>{sw.confirmLabel}</button>
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }

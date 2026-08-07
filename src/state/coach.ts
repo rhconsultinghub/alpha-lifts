@@ -1,5 +1,6 @@
 import type { AppState, CoachProposal, CoachEntitlement, TrainingType, Screen, ExerciseDef, ProgramDays, ProgramExercise, Muscle, ParsedPlan } from '../data/types';
 import { EXLIB, EQUIP_CATALOG, MUSCLES } from '../data/exercises';
+import { getStoredToken } from './tokenStore';
 import { mkEx, slugify } from '../data/program';
 import {
   muscleBarsList, fmtWeight, completedWorkoutCount, bestEverStreak, totalPRCount,
@@ -34,19 +35,9 @@ export const COACH_CONFIGURED = COACH_API_URL !== '';
  */
 function coachHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = getAuthToken();
+  const token = getStoredToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
-}
-
-// Read the token without a static import cycle (auth.ts imports from this module). Kept tiny and
-// failure-tolerant — no token just means the request falls back to device-id identity.
-function getAuthToken(): string | null {
-  try {
-    return localStorage.getItem('alpha-lifts-auth-token');
-  } catch {
-    return null;
-  }
 }
 
 /** How many past sessions to summarise into the prompt. Every message re-sends this and is
@@ -267,6 +258,15 @@ function normalizeName(s: string): string {
 }
 
 let exactNameToId: Record<string, string> | null = null;
+
+/** Drop the memoized name→id map. Called whenever EXLIB's membership changes (custom exercise
+ *  created/edited/deleted) — the catalog sent to the model reads EXLIB live, so without this a
+ *  custom exercise created after the first resolve was advertised to the model but could never
+ *  be resolved back from its reply. */
+export function invalidateExerciseNameCache(): void {
+  exactNameToId = null;
+}
+
 function nameToIdMap(): Record<string, string> {
   if (!exactNameToId) {
     exactNameToId = {};

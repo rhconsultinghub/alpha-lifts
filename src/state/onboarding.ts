@@ -11,6 +11,7 @@
  */
 
 import { COACH_API_URL, COACH_CONFIGURED, buildCatalog, resolveExerciseId } from './coach';
+import { getStoredToken } from './tokenStore';
 import { mkEx } from '../data/program';
 import type { ProgramDays, TrainingType } from '../data/types';
 
@@ -50,20 +51,13 @@ export interface OnboardingPlan {
   source: 'ai' | 'fallback';
 }
 
-function getAuthToken(): string | null {
-  try {
-    return localStorage.getItem('alpha-lifts-auth-token');
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Ask the Worker to generate a tailored plan + welcome. Falls back to a local plan on any failure
  * so the caller never has to handle an error — it always gets a usable OnboardingPlan.
  */
 export async function generateOnboardingPlan(answers: OnboardingAnswers): Promise<OnboardingPlan> {
-  const token = getAuthToken();
+  const token = getStoredToken();
   if (COACH_CONFIGURED && token) {
     try {
       const res = await fetch(`${COACH_API_URL}/onboard`, {

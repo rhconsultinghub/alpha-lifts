@@ -43,6 +43,7 @@ export function createInitialState(): AppState {
     libraryDetailId: null,
     exerciseSearchQuery: '',
     confirmDeleteExId: null,
+    confirmRemoveBuilderIdx: null,
     exerciseForm: null,
     // pre-populated so the onboarding screen has a wizard to render immediately on first launch —
     // ignored once `onboarded` is true, since persisted state overrides this on subsequent loads.

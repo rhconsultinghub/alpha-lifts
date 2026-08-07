@@ -536,7 +536,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
         repText: lib.trackingMode === 'time' ? formatSetTime(lib.repLo) + '-' + formatSetTime(lib.repHi) + ' hold' : lib.repLo + '-' + lib.repHi + ' reps',
         decSets: () => actions.changeSets(dayKey, i, -1),
         incSets: () => actions.changeSets(dayKey, i, 1),
-        remove: () => actions.removeExercise(dayKey, i),
+        // Tap-twice: first ✕ arms the confirm (removePending flips the button to "Confirm?"),
+        // second executes. Permanent plan edit — see requestRemoveBuilderExercise.
+        remove: () => actions.requestRemoveBuilderExercise(dayKey, i),
+        removePending: s.confirmRemoveBuilderIdx === i,
         canMoveUp: i > 0,
         moveUp: () => actions.moveExercise(dayKey, i, 'up'),
         canMoveDown: i < day.exercises.length - 1,

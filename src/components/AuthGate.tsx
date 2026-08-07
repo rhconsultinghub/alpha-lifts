@@ -114,8 +114,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return <LoginScreen onSuccess={handleSuccess} />;
   }
 
+  function refreshSession(newToken: string, newAccount: Account) {
+    setToken(newToken);
+    setAccount(newAccount);
+  }
+
   return (
-    <AuthContext.Provider value={{ configured: AUTH_CONFIGURED, account, token, logout }}>
+    <AuthContext.Provider value={{ configured: AUTH_CONFIGURED, account, token, logout, refreshSession }}>
       <SyncBoundary token={token} account={account}>
         {children}
       </SyncBoundary>

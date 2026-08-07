@@ -1,12 +1,12 @@
 import type { ViewModel } from '../../state/viewModel';
 import { BodyDiagram } from '../BodyDiagram';
+import { Sheet } from '../Sheet';
 
 export function MusclesWorkedModal({ vm }: { vm: ViewModel }) {
   if (!vm.showBodyModal || !vm.currentDay) return null;
   const isFront = vm.bodyView === 'front';
   return (
-    <div onClick={vm.closeBodyModal} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#17140f', borderRadius: 22, padding: '18px 18px 20px', width: 240 }}>
+    <Sheet dim={0.6} radius={22} center width={240} padding="18px 18px 20px" onClose={vm.closeBodyModal}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em' }}>MUSCLES WORKED</div>
           <button onClick={vm.closeBodyModal} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 26, height: 26, borderRadius: '50%', fontSize: 12 }}>✕</button>
@@ -18,7 +18,6 @@ export function MusclesWorkedModal({ vm }: { vm: ViewModel }) {
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           <BodyDiagram view={vm.bodyView} ranks={vm.currentDay.diagramRanks} width={200} height={404} />
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }

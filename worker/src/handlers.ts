@@ -5,20 +5,35 @@
  * 401s on null.
  */
 
-import { authenticate, hashPassword, signSession, verifyPassword } from './auth';
 import {
+  authenticate,
+  hashIterations,
+  hashPassword,
+  sessionTokenVersion,
+  signSession,
+  verifyPassword,
+  PBKDF2_ITERATIONS
+} from './auth';
+import {
+  applyPasswordReset,
   createUser,
   findUserByEmail,
   findUserById,
+  findUserByResetToken,
   findUserByVerifyToken,
   getState,
   markEmailVerified,
   putState,
   putStateChecked,
+  rehashPassword,
+  setResetToken,
   setVerifyToken,
-  toAccountView
+  toAccountView,
+  updatePassword,
+  userTokenVersion,
+  type UserRow
 } from './db';
-import { newVerifyToken, sendVerificationEmail, verificationEnabled } from './email';
+import { newResetToken, newVerifyToken, sendResetEmail, sendVerificationEmail, verificationEnabled } from './email';
 import { json } from './http';
 import { readJsonCapped, MAX_AUTH_BODY_BYTES, MAX_STATE_BODY_BYTES } from './guard';
 
@@ -68,6 +83,24 @@ function requireConfig(env: RouteEnv, cors: Cors): { db: D1Database; secret: str
 async function readAuthBody<T>(request: Request): Promise<T | null> {
   const read = await readJsonCapped<T>(request, MAX_AUTH_BODY_BYTES);
   return read.ok ? read.value : null;
+}
+
+/**
+ * Authenticate AND load the user row, enforcing the token-version check: a token whose `tv`
+ * claim doesn't match users.token_version was issued before a password change/reset and is
+ * revoked. Every route that acts as the user goes through this, so revocation actually bites
+ * (a pure-JWT check couldn't — the whole point of the version is that it lives server-side).
+ */
+async function authedUser(
+  request: Request,
+  cfg: { db: D1Database; secret: string }
+): Promise<UserRow | null> {
+  const session = await authenticate(request, cfg.secret);
+  if (!session) return null;
+  const user = await findUserById(cfg.db, session.sub);
+  if (!user) return null;
+  if (sessionTokenVersion(session) !== userTokenVersion(user)) return null;
+  return user;
 }
 
 /**
@@ -173,7 +206,15 @@ export async function handleLogin(request: Request, env: RouteEnv, cors: Cors): 
     return json({ error: 'email_not_verified', email: user.email }, 403, cors);
   }
 
-  const token = await signSession(user.id, cfg.secret);
+  // Transparent hash upgrade: a row hashed below the current iteration count gets re-hashed with
+  // the password we just verified. Self-describing hash format makes this safe for old rows, and
+  // the login path is the only place the plaintext is legitimately in hand.
+  const iters = hashIterations(user.password_hash);
+  if (iters !== null && iters < PBKDF2_ITERATIONS) {
+    await rehashPassword(cfg.db, user.id, await hashPassword(password));
+  }
+
+  const token = await signSession(user.id, cfg.secret, userTokenVersion(user));
   return json({ token, account: toAccountView(user) }, 200, cors);
 }
 
@@ -257,12 +298,36 @@ export async function handleMe(request: Request, env: RouteEnv, cors: Cors): Pro
   const cfg = requireConfig(env, cors);
   if (cfg instanceof Response) return cfg;
 
-  const session = await authenticate(request, cfg.secret);
-  if (!session) return json({ error: 'unauthorized' }, 401, cors);
-
-  const user = await findUserById(cfg.db, session.sub);
+  const user = await authedUser(request, cfg);
   if (!user) return json({ error: 'unauthorized' }, 401, cors);
   return json({ account: toAccountView(user) }, 200, cors);
+}
+
+// --- POST /auth/change-password --------------------------------------------------------------
+
+export async function handleChangePassword(request: Request, env: RouteEnv, cors: Cors): Promise<Response> {
+  const cfg = requireConfig(env, cors);
+  if (cfg instanceof Response) return cfg;
+
+  const user = await authedUser(request, cfg);
+  if (!user) return json({ error: 'unauthorized' }, 401, cors);
+
+  const body = await readAuthBody<{ oldPassword?: unknown; newPassword?: unknown }>(request);
+  const oldPassword = typeof body?.oldPassword === 'string' ? body.oldPassword : '';
+  const newPassword = typeof body?.newPassword === 'string' ? body.newPassword : '';
+
+  if (!(await verifyPassword(oldPassword, user.password_hash))) {
+    return json({ error: 'invalid_credentials' }, 401, cors);
+  }
+  if (newPassword.length < MIN_PASSWORD_CHARS || newPassword.length > MAX_PASSWORD_CHARS) {
+    return json({ error: 'invalid_password' }, 400, cors);
+  }
+
+  // updatePassword bumps token_version, revoking every outstanding session (including the one
+  // that made this request) — so hand back a fresh token minted at the new version.
+  const newVersion = await updatePassword(cfg.db, user.id, await hashPassword(newPassword));
+  const token = await signSession(user.id, cfg.secret, newVersion);
+  return json({ token, account: toAccountView(user) }, 200, cors);
 }
 
 // --- GET /state -----------------------------------------------------------------------------
@@ -271,10 +336,10 @@ export async function handleGetState(request: Request, env: RouteEnv, cors: Cors
   const cfg = requireConfig(env, cors);
   if (cfg instanceof Response) return cfg;
 
-  const session = await authenticate(request, cfg.secret);
-  if (!session) return json({ error: 'unauthorized' }, 401, cors);
+  const user = await authedUser(request, cfg);
+  if (!user) return json({ error: 'unauthorized' }, 401, cors);
 
-  const row = await getState(cfg.db, session.sub);
+  const row = await getState(cfg.db, user.id);
   if (!row) return json({ state: null, version: 0, updatedAt: 0 }, 200, cors);
 
   // state_json is stored as an opaque string; parse it so the client gets JSON, not a
@@ -294,8 +359,8 @@ export async function handlePutState(request: Request, env: RouteEnv, cors: Cors
   const cfg = requireConfig(env, cors);
   if (cfg instanceof Response) return cfg;
 
-  const session = await authenticate(request, cfg.secret);
-  if (!session) return json({ error: 'unauthorized' }, 401, cors);
+  const user = await authedUser(request, cfg);
+  if (!user) return json({ error: 'unauthorized' }, 401, cors);
 
   const read = await readJsonCapped<{ state?: unknown; baseVersion?: unknown }>(request, MAX_STATE_BODY_BYTES);
   if (!read.ok && read.reason === 'too_large') return json({ error: 'state_too_large' }, 413, cors);
@@ -323,7 +388,7 @@ export async function handlePutState(request: Request, env: RouteEnv, cors: Cors
     typeof rawBase === 'number' && Number.isInteger(rawBase) && rawBase >= 0 ? rawBase : null;
 
   if (baseVersion != null) {
-    const result = await putStateChecked(cfg.db, session.sub, stateJson, baseVersion);
+    const result = await putStateChecked(cfg.db, user.id, stateJson, baseVersion);
     if (!result.ok) {
       let state: unknown = null;
       try {
@@ -345,6 +410,120 @@ export async function handlePutState(request: Request, env: RouteEnv, cors: Cors
     return json({ version: result.row.version, updatedAt: result.row.updated_at }, 200, cors);
   }
 
-  const row = await putState(cfg.db, session.sub, stateJson);
+  const row = await putState(cfg.db, user.id, stateJson);
   return json({ version: row.version, updatedAt: row.updated_at }, 200, cors);
+}
+
+// --- Forgot-password flow --------------------------------------------------------------------
+//
+// POST /auth/request-reset  (CORS route, called by the app's login screen; always 200 — no
+//                            account-existence oracle)
+// GET  /auth/reset?token=…  (top-level browser navigation from the email link, like
+//                            /auth/verify — bypasses the Origin gate, serves an HTML form)
+// POST /auth/reset          (the form's same-origin submit — also bypasses the Origin gate;
+//                            safe because the single-use token IS the authentication)
+
+export async function handleRequestReset(request: Request, env: RouteEnv, cors: Cors, ctx?: ExecutionContext): Promise<Response> {
+  const cfg = requireConfig(env, cors);
+  if (cfg instanceof Response) return cfg;
+
+  const body = await readAuthBody<{ email?: unknown }>(request);
+  const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+
+  // Only actually send when Resend is configured and the account exists — the response is
+  // identical either way, and the per-address cooldown stops loop-spamming a real inbox.
+  if (env.RESEND_API_KEY && email) {
+    const user = await findUserByEmail(cfg.db, email);
+    if (user && (await claimEmailSendSlot(env, email))) {
+      const { token, expires } = newResetToken();
+      await setResetToken(cfg.db, user.id, token, expires);
+      const resetUrl = `${new URL(request.url).origin}/auth/reset?token=${encodeURIComponent(token)}`;
+      const send = sendResetEmail(env, email, resetUrl);
+      if (ctx) ctx.waitUntil(send);
+      else void send;
+    }
+  }
+  return json({ ok: true }, 200, cors);
+}
+
+/** Tokens are our own base64url — anything else never matches and must not reach the HTML. */
+function safeTokenOrNull(raw: string | null): string | null {
+  return raw && /^[A-Za-z0-9_-]{1,64}$/.test(raw) ? raw : null;
+}
+
+function resetPage(inner: string, title: string): Response {
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} — Alpha Lifts</title></head>
+  <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f0e0d;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#f5f0ea">
+    <div style="max-width:360px;width:100%;padding:32px 24px;text-align:center">${inner}</div>
+  </body></html>`;
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+}
+
+function resetMessagePage(emoji: string, title: string, msg: string, appUrl: string): Response {
+  return resetPage(
+    `<div style="font-size:44px;margin-bottom:14px">${emoji}</div>
+     <div style="font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:10px">${title}</div>
+     <div style="font-size:14px;line-height:1.6;color:#c9c3ba;margin-bottom:26px">${msg}</div>
+     <a href="${appUrl}" style="display:inline-block;background:#f0752f;color:#1a1206;text-decoration:none;font-weight:700;font-size:15px;padding:13px 26px;border-radius:12px">Open Alpha Lifts</a>`,
+    title
+  );
+}
+
+function resetFormPage(token: string, error?: string): Response {
+  return resetPage(
+    `<div style="font-size:44px;margin-bottom:14px">🔑</div>
+     <div style="font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:10px">Set a new password</div>
+     ${error ? `<div style="font-size:13px;color:#e08a8a;margin-bottom:12px">${error}</div>` : ''}
+     <form method="POST" action="/auth/reset" style="text-align:left">
+       <input type="hidden" name="token" value="${token}">
+       <label style="display:block;font-size:11px;letter-spacing:.04em;color:#8a857d;margin-bottom:6px">NEW PASSWORD (AT LEAST 8 CHARACTERS)</label>
+       <input type="password" name="password" minlength="8" required autocomplete="new-password"
+         style="width:100%;box-sizing:border-box;background:#1c1915;border:1px solid rgba(255,255,255,.15);border-radius:12px;color:#f5f0ea;font-size:15px;padding:13px 14px;margin-bottom:14px">
+       <button type="submit" style="width:100%;background:#f0752f;color:#1a1206;border:none;font-weight:700;font-size:15px;padding:13px;border-radius:12px">Save new password</button>
+     </form>`,
+    'Reset password'
+  );
+}
+
+export async function handleResetPage(request: Request, env: RouteEnv): Promise<Response> {
+  const appUrl = env.APP_URL || DEFAULT_APP_URL;
+  const token = safeTokenOrNull(new URL(request.url).searchParams.get('token'));
+  if (!env.DB || !token) return resetMessagePage('⚠️', 'Invalid link', 'That reset link is invalid or has already been used.', appUrl);
+
+  const user = await findUserByResetToken(env.DB, token);
+  if (!user) return resetMessagePage('⚠️', 'Invalid link', 'That reset link is invalid or has already been used.', appUrl);
+  if (user.reset_expires != null && user.reset_expires < Date.now()) {
+    return resetMessagePage('⚠️', 'Link expired', 'That reset link has expired. Request a new one from the sign-in screen.', appUrl);
+  }
+  return resetFormPage(token);
+}
+
+export async function handleResetSubmit(request: Request, env: RouteEnv): Promise<Response> {
+  const appUrl = env.APP_URL || DEFAULT_APP_URL;
+  if (!env.DB) return resetMessagePage('⚠️', 'Not available', 'Password reset isn’t configured on this server.', appUrl);
+
+  let token: string | null = null;
+  let password = '';
+  try {
+    const form = await request.formData();
+    token = safeTokenOrNull(typeof form.get('token') === 'string' ? (form.get('token') as string) : null);
+    password = typeof form.get('password') === 'string' ? (form.get('password') as string) : '';
+  } catch {
+    return resetMessagePage('⚠️', 'Invalid request', 'That didn’t come from the reset form. Use the link from your email.', appUrl);
+  }
+  if (!token) return resetMessagePage('⚠️', 'Invalid link', 'That reset link is invalid or has already been used.', appUrl);
+
+  const user = await findUserByResetToken(env.DB, token);
+  if (!user) return resetMessagePage('⚠️', 'Invalid link', 'That reset link is invalid or has already been used.', appUrl);
+  if (user.reset_expires != null && user.reset_expires < Date.now()) {
+    return resetMessagePage('⚠️', 'Link expired', 'That reset link has expired. Request a new one from the sign-in screen.', appUrl);
+  }
+  if (password.length < MIN_PASSWORD_CHARS || password.length > MAX_PASSWORD_CHARS) {
+    return resetFormPage(token, 'Password must be 8–200 characters.');
+  }
+
+  // New hash + spent token cleared + token_version bump (revokes every outstanding session,
+  // which is exactly what "I lost control of my password" needs) + email marked verified.
+  await applyPasswordReset(env.DB, user.id, await hashPassword(password));
+  return resetMessagePage('✅', 'Password updated', 'Your new password is set. Sign in to Alpha Lifts with it now.', appUrl);
 }

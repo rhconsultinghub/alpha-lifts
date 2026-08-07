@@ -2206,3 +2206,75 @@ zero CSP violations). **Worker changes require `wrangler deploy` from
 `L:\Personal Projects\Alpha Lifts\alpha-lifts\worker`** — the client is backward-compatible with
 the old Worker (baseVersion is additive), but the deployed Worker won't enforce any of the new
 protections until deployed.
+
+(47) **second hardening round — the deferred medium/low findings**, requested immediately after
+phase 46 shipped. Five tracks:
+
+- **Password security & account recovery** (`worker/src/auth.ts`/`db.ts`/`handlers.ts`/`email.ts`,
+  `schema.sql` + `migrate-add-password-security.sql`): PBKDF2 raised 100k → **600k** iterations
+  (OWASP current), with **transparent rehash on login** (`hashIterations()` detects a
+  below-current row; `rehashPassword` upgrades it WITHOUT bumping token_version — verified the
+  old 100k row flipped to `pbkdf2$600000$` on next login, other sessions untouched); stored
+  iteration counts clamped to [50k, 2M] so a DB-write compromise can't plant 1 or 10^9; the
+  login dummy-hash is derived from the current constant so its timing tracks the real path. New
+  **`users.token_version`** column rides in every JWT (`tv` claim) and is checked by
+  `authedUser()` on every authenticated route (incl. coach/onboard/parse-plan when DB is bound):
+  bumping it revokes that user's outstanding sessions — per-user revocation without a session
+  table, at the cost of one indexed D1 read per request. **POST /auth/change-password**
+  (verify old → 600k hash → bump tv → return fresh token; client `changePassword()` +
+  `refreshSession` on AuthContext swap the React tree onto the new token, since the old one dies
+  server-side) with a collapsible form in Settings' ACCOUNT card. **Forgot-password flow**:
+  POST /auth/request-reset (uniform 200, no account oracle; 1h single-use 256-bit token; only
+  sends when RESEND_API_KEY is set; per-address cooldown) → emailed link to GET /auth/reset
+  (worker-served HTML form, bypasses the CORS-origin gate like /auth/verify, tokens
+  charset-validated before HTML embedding) → POST /auth/reset (form-encoded, also gate-bypassed
+  — the single-use token IS the auth; applies hash + clears token + bumps tv + marks email
+  verified). "Forgot password?" link on the login screen. Verified end-to-end against local
+  wrangler dev + D1 (20/20 checks: rehash, revocation on /auth/me AND /state, wrong-old-password
+  401, uniform request-reset, form page, single-use, expiry, tv/verified/cleared row state) —
+  including the live app getting signed out on reload because its token had been revoked by the
+  password change, which is the feature working. The **auth rate limiter tripped the first test
+  run** (>10 auth POSTs in 60s → 429) — expected behaviour, split the suite around the window.
+- **PWA install weight**: exercise photos are no longer precached — `jpg` dropped from
+  `globPatterns` (precache went **184 entries/3.8 MB → 33 entries/1.1 MB**, and one failed photo
+  can no longer fail the whole atomic SW install); `sw.ts` gained a CacheFirst runtime route for
+  `/exercise-photos/` (ExpirationPlugin, 200 entries/1y, purgeOnQuotaError) so a photo viewed
+  once stays available offline. workbox-routing/strategies/expiration added as real
+  dependencies; workbox-core/precaching moved out of devDependencies.
+- **No more force-reload mid-workout**: `registerType` 'autoUpdate' → **'prompt'**; `sw.ts` no
+  longer calls skipWaiting unconditionally (listens for a SKIP_WAITING message instead), and
+  main.tsx applies a downloaded update immediately when idle but **defers while
+  `state.workout != null`** (30s poll until the session ends). Update discovery is unchanged
+  (visibilitychange → registration.update()). Bootstrap caveat: devices on the old autoUpdate
+  registration behave the old way for exactly one more update cycle.
+- **Correctness papercuts**: deleting a library exercise mid-workout now remaps `exSets` to the
+  surviving indices (logged sets no longer shift onto the wrong exercise); editing an exercise's
+  equip list clamps out-of-range `equipIdx` across program/savedPrograms/workout (render crash);
+  un-skipping a day retracts the 'skipped' history entry it wrote (bestEverStreak/cleanWeekCount
+  monotonicity + no duplicate stacking); `addWizardCustomDay` enforces the same 7-day cap as
+  Edit Week (two-Mondays reminder bug); `avgRestSec` passes trainingType (was ~40% low for
+  Strength); loadInitial clears a restored `resting:true` with no `restEndAt` (pre-restEndAt
+  blob = permanently stuck rest); bodyweight log keys on LOCAL date (west-of-UTC evening logs
+  wrote tomorrow); history ids get a collision counter; token reads deduped into
+  `state/tokenStore.ts` (was hardcoded in 3 modules); `invalidateExerciseNameCache()` on custom
+  exercise save/delete (coach could advertise but never resolve a post-memo custom);
+  `defaultProgram`/`dumbbellProgram`/`DAY_ORDER` dead code deleted.
+- **`components/Sheet.tsx`** — the shared backdrop+sheet scaffold 11 modals used to hand-roll
+  (Settings, Swap, MuscleSwap, ExerciseForm, Wizard, WeekReview, WarmupDetail, MuscleDrill,
+  ExerciseHistory, ArchiveDetail, MusclesWorked-centered). Carries `role="dialog"`/aria-modal,
+  the stopPropagation, and documents the app's z-index ladder (15 chrome / 20 fullscreen pages /
+  30-33 sheets / 40-45 dialogs / 60 tutorial / 70 banner). Deliberately NO global Escape handler
+  (stacked sheets would all close at once; hardware-back popstate already closes topmost).
+  EditWeekModal stays bespoke (its delete-day confirm is a sibling overlay inside the backdrop).
+  The Day Builder's ✕ — which permanently deletes a plan slot and was the one unguarded
+  destructive action — is now tap-twice (`confirmRemoveBuilderIdx` in AppState, "Confirm?"
+  button state, cleared on builder close). Verified live: Settings/swap sheets render + close on
+  backdrop, change-password form opens, ✕ → Confirm? → row removed, zero console errors.
+
+Same deploy story as phase 46 (one combined push): frontend auto-deploys;
+**`wrangler deploy` from `worker/` required**, and the remote D1 migration should be applied
+around the same time: `npx wrangler d1 execute alpha-lifts-db --remote
+--file=migrate-add-password-security.sql` (safe in either order — the Worker reads the new
+columns defensively, treating missing as version 0 — but until BOTH are live, password
+change/reset and revocation aren't in effect). To actually SEND reset emails, RESEND_API_KEY
+must be configured (same gate as verification emails); without it request-reset is an inert 200.

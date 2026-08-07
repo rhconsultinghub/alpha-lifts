@@ -371,6 +371,9 @@ export interface AppState {
   libraryDetailId: string | null;
   exerciseSearchQuery: string;
   confirmDeleteExId: string | null;
+  /** Day Builder ✕ tap-twice confirm: index of the exercise whose permanent removal is pending.
+   *  (Optional/defaulted — added post-launch, loadInitial's shallow merge carries old blobs.) */
+  confirmRemoveBuilderIdx?: number | null;
   exerciseForm: ExerciseFormState | null;
   newProgramWizard: NewProgramWizardState | null;
 

@@ -10,7 +10,7 @@ import type {
   AppState, CoachChatMessage, CoachProposal, CoachProposalPayload, CoachVoice, ExerciseDef, ExerciseFormState, Muscle, ParsedPlan, ProgramDays, ProgramExercise, RestPacing, Screen,
   TrainingType, Units, WarmupStyle, WorkoutSetRow, WizardCustomDay
 } from '../data/types';
-import { askCoach, buildCoachContext, parseProposals, fetchCoachStatus, parsePlanText as parsePlanTextApi, COACH_CONFIGURED, COACH_HISTORY_CAP } from './coach';
+import { askCoach, buildCoachContext, parseProposals, fetchCoachStatus, parsePlanText as parsePlanTextApi, invalidateExerciseNameCache, COACH_CONFIGURED, COACH_HISTORY_CAP } from './coach';
 import { applyExerciseSwaps, type ExerciseSwap } from './onboarding';
 import {
   recommendation, restForExercise, dayMuscleRanks, isWeekComplete, fmtWeight,
@@ -114,6 +114,12 @@ function loadInitial(): AppState {
       // persisted `true` would restore a chat stuck showing the typing indicator forever, with
       // no request running to ever clear it.
       state.coachPending = false;
+      // Guard against the shallow-merge's blind spot for NESTED shapes: a workout persisted by a
+      // build before restEndAt existed restores as `resting: true` with no restEndAt, and the
+      // countdown has nothing to resume from — the rest was permanently stuck. Land it un-resting.
+      if (state.workout && state.workout.resting && state.workout.restEndAt == null) {
+        state.workout = { ...state.workout, resting: false, restRemaining: 0 };
+      }
     }
   } catch {
     // The persisted blob didn't parse (or a migration threw). Stash a copy under a recovery key
@@ -175,6 +181,15 @@ function blankSlotForEquip(ex: ProgramExercise, newEquipIdx: number, trainingTyp
 // If a workout is in progress and the user hasn't interacted with the app for this long, prompt to
 // confirm they're still training (they may have set the phone down and walked off). 30 minutes.
 const IDLE_WORKOUT_MS = 30 * 60 * 1000;
+
+// HistoryEntry ids were bare 'h' + Date.now() — two entries minted in the same millisecond
+// collided (duplicate React keys, ambiguous archive lookups). Same counter fix the coach message
+// ids already use. (Incremented inside setState updaters; StrictMode's double-invoke just burns
+// a value, uniqueness is unaffected.)
+let historyIdCounter = 0;
+function newHistoryId(now: number): string {
+  return 'h' + now + '_' + historyIdCounter++;
+}
 
 // A linked superset pair shares rest after a full round (both exercises' current-index set done)
 // rather than each exercise having its own rest — uses the longer of the two so neither lift gets
@@ -319,7 +334,7 @@ export function useApp() {
     });
   }, []);
   const openDayBuilder = useCallback(() => setState(s => ({ ...s, screen: 'dayBuilder' as Screen })), []);
-  const closeDayBuilder = useCallback(() => setState(s => ({ ...s, screen: 'dayView' as Screen })), []);
+  const closeDayBuilder = useCallback(() => setState(s => ({ ...s, screen: 'dayView' as Screen, confirmRemoveBuilderIdx: null })), []);
 
   const setTrainingType = useCallback((t: TrainingType) => setState(s => ({ ...s, trainingType: t })), []);
   const openSettings = useCallback(() => setState(s => ({ ...s, showSettings: true })), []);
@@ -489,7 +504,10 @@ export function useApp() {
       const displayVal = parseFloat(s.bodyWeightInput);
       if (!Number.isFinite(displayVal) || displayVal <= 0) return s;
       const weightKg = s.units === 'lb' ? displayVal / 2.20462 : displayVal;
-      const todayKey = new Date().toISOString().slice(0, 10);
+      // LOCAL calendar date, not toISOString (UTC) — anyone west of UTC logging in the evening
+      // was writing tomorrow's date.
+      const d = new Date();
+      const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const bodyWeightLog = [...s.bodyWeightLog.filter(e => e.date !== todayKey), { date: todayKey, weightKg }];
       return { ...s, bodyWeightLog, bodyWeightInput: '' };
     });
@@ -561,9 +579,15 @@ export function useApp() {
     });
   }, []);
   const addWizardCustomDay = useCallback(() => {
-    setState(s => (s.newProgramWizard ? {
-      ...s, newProgramWizard: { ...s.newProgramWizard, customDays: [...s.newProgramWizard.customDays, { label: 'Day ' + (s.newProgramWizard.customDays.length + 1), kind: 'training' as const }] }
-    } : s));
+    setState(s => {
+      // Same 7-day hard cap the Edit Week screen enforces: buildCustomProgram assigns weekdays via
+      // `WEEKDAYS[i % 7]`, so an 8th day would silently mint a second "Monday" — which breaks
+      // shouldFireReminder's find-today-by-weekday lookup, not just the display.
+      if (!s.newProgramWizard || s.newProgramWizard.customDays.length >= WEEKDAYS.length) return s;
+      return {
+        ...s, newProgramWizard: { ...s.newProgramWizard, customDays: [...s.newProgramWizard.customDays, { label: 'Day ' + (s.newProgramWizard.customDays.length + 1), kind: 'training' as const }] }
+      };
+    });
   }, []);
   const removeWizardCustomDay = useCallback((i: number) => {
     setState(s => (s.newProgramWizard ? { ...s, newProgramWizard: { ...s.newProgramWizard, customDays: s.newProgramWizard.customDays.filter((_, idx) => idx !== i) } } : s));
@@ -680,7 +704,7 @@ export function useApp() {
         const now = new Date();
         const dateStr = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
         const entry = {
-          id: 'h' + now.getTime(), day: day.label, program: s.programName, date: dateStr,
+          id: newHistoryId(now.getTime()), day: day.label, program: s.programName, date: dateStr,
           volumeKg: 0, durationMin: 0, avgRestSec: 0,
           weekNumber: s.weekNumber, status: 'skipped' as const, exercises: []
         };
@@ -696,7 +720,17 @@ export function useApp() {
         }
         return { ...s, program, history: [entry, ...s.history], weekNumber, weekStartedAt, ...(deloadFields || {}) };
       }
-      return { ...s, program };
+      // Turning skip OFF: also retract the 'skipped' history entry the ON toggle wrote for this
+      // day this week. Leaving it in permanently broke two monotonic achievement inputs —
+      // bestEverStreak treated the retracted skip as a streak break and cleanWeekCount marked the
+      // week unclean forever — and toggling on/off/on stacked duplicate entries.
+      const history = (() => {
+        const idx = s.history.findIndex(
+          h => h.status === 'skipped' && h.day === day.label && (h.weekNumber || 1) === s.weekNumber
+        );
+        return idx === -1 ? s.history : s.history.filter((_, i) => i !== idx);
+      })();
+      return { ...s, program, history };
     });
   }, []);
 
@@ -1153,8 +1187,39 @@ export function useApp() {
         secondary: f.secondary, trackingMode: f.trackingMode
       };
       EXLIB[id] = def;
+      invalidateExerciseNameCache();
+      // Editing can SHRINK the equip list, leaving program/workout slots pointing at an
+      // equipIdx that no longer exists — which crashed render on `lib.equip[ex.equipIdx].label`.
+      // Reset any now-out-of-range slot to variant 0 (same choice applyExerciseSwaps makes).
+      const clampSlots = (days: AppState['program'], dayOrder: string[]): AppState['program'] => {
+        const copy: AppState['program'] = {};
+        dayOrder.forEach(k => {
+          copy[k] = {
+            ...days[k],
+            exercises: days[k].exercises.map(ex =>
+              ex.id === id && ex.equipIdx >= def.equip.length ? { ...ex, equipIdx: 0 } : ex
+            )
+          };
+        });
+        return copy;
+      };
+      const program = f.editingId ? clampSlots(s.program, s.dayOrder) : s.program;
+      const savedPrograms = f.editingId
+        ? Object.fromEntries(
+            Object.entries(s.savedPrograms).map(([pid, sp]) => [pid, { ...sp, days: clampSlots(sp.days, sp.dayOrder) }])
+          )
+        : s.savedPrograms;
+      const workout =
+        f.editingId && s.workout
+          ? {
+              ...s.workout,
+              dayExercises: s.workout.dayExercises.map(ex =>
+                ex.id === id && ex.equipIdx >= def.equip.length ? { ...ex, equipIdx: 0 } : ex
+              )
+            }
+          : s.workout;
       return {
-        ...s,
+        ...s, program, savedPrograms, workout,
         customExercises: { ...s.customExercises, [id]: def },
         exerciseForm: null, libraryDetailId: null
       };
@@ -1162,6 +1227,7 @@ export function useApp() {
   }, []);
   const deleteExercise = useCallback((id: string) => {
     delete EXLIB[id];
+    invalidateExerciseNameCache();
     setState(s => {
       const scrub = (days: AppState['program'], dayOrder: string[]) => {
         const copy: AppState['program'] = {};
@@ -1176,8 +1242,17 @@ export function useApp() {
       });
       let workout = s.workout;
       if (workout && workout.dayExercises.some(ex => ex.id === id)) {
-        const dayExercises = workout.dayExercises.filter(ex => ex.id !== id);
-        workout = dayExercises.length ? { ...workout, dayExercises, exIndex: Math.min(workout.exIndex, dayExercises.length - 1) } : null;
+        // Remap exSets to the surviving exercises' NEW indices (same as removeWorkoutExercise) —
+        // filtering dayExercises alone left exSets keyed by the old positions, shifting every
+        // later exercise's logged sets onto its neighbour and logging them to the wrong history.
+        const keep: number[] = [];
+        workout.dayExercises.forEach((ex, i) => { if (ex.id !== id) keep.push(i); });
+        const dayExercises = keep.map(i => workout!.dayExercises[i]);
+        const exSets: typeof workout.exSets = {};
+        keep.forEach((oldIdx, newIdx) => { if (workout!.exSets[oldIdx]) exSets[newIdx] = workout!.exSets[oldIdx]; });
+        workout = dayExercises.length
+          ? { ...workout, dayExercises, exSets, exIndex: Math.min(workout.exIndex, dayExercises.length - 1) }
+          : null;
       }
       const customExercises = { ...s.customExercises };
       delete customExercises[id];
@@ -1423,6 +1498,17 @@ export function useApp() {
       return { ...s, program };
     });
   }, []);
+  // Tap-twice confirm for the Day Builder's ✕ — it permanently deletes the slot from the plan,
+  // which used to be a single unguarded tap while the *session-only* mid-workout remove had a
+  // full confirm dialog (the higher-stakes action was the unprotected one).
+  const requestRemoveBuilderExercise = useCallback((dayKey: string, idx: number) => {
+    if (stateRef.current.confirmRemoveBuilderIdx === idx) {
+      setState(s => ({ ...s, confirmRemoveBuilderIdx: null }));
+      removeExercise(dayKey, idx);
+    } else {
+      setState(s => ({ ...s, confirmRemoveBuilderIdx: idx }));
+    }
+  }, [removeExercise]);
   const changeSets = useCallback((dayKey: string, idx: number, delta: number) => {
     setState(s => {
       const program = JSON.parse(JSON.stringify(s.program));
@@ -1789,9 +1875,11 @@ export function useApp() {
       const now = new Date();
       const dateStr = now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
       const durationMin = Math.max(1, Math.round((Date.now() - (s.workout.startedAt || Date.now())) / 60000));
-      const avgRestSec = Math.round(s.workout.dayExercises.reduce((a, ex) => a + restForExercise(ex.id, s.restPacing), 0) / Math.max(1, s.workout.dayExercises.length));
+      // Pass the training type — without it restForExercise assumed factor-1.0 pacing, logging a
+      // Strength user's average rest ~40% low on every session (it feeds the Progress rest trend).
+      const avgRestSec = Math.round(s.workout.dayExercises.reduce((a, ex) => a + restForExercise(ex.id, s.restPacing, s.trainingType), 0) / Math.max(1, s.workout.dayExercises.length));
       const historyEntry = {
-        id: 'h' + now.getTime(), day: dayLabel, program: s.programName, date: dateStr, volumeKg: Math.round(totalVolume),
+        id: newHistoryId(now.getTime()), day: dayLabel, program: s.programName, date: dateStr, volumeKg: Math.round(totalVolume),
         durationMin, avgRestSec, setCount: totalSets, repCount: totalReps, weekNumber: s.weekNumber, status: 'completed' as const, exercises: summary!
       };
       const exerciseHistory = { ...s.exerciseHistory };
@@ -2041,7 +2129,7 @@ export function useApp() {
       openSwap, closeSwap, swapTab, swapToggleAll, swapStageEquip, swapStageEx, swapConfirm, removeWorkoutExercise, moveWorkoutExercise, setSwapQuery,
       requestRemoveWorkoutExercise, cancelRemoveWorkoutExercise, confirmRemoveWorkoutExercise,
       openMuscleSwap, closeMuscleSwap, toggleMuscleSwapDay, muscleSwapToggleAll, muscleSwapStageEx, muscleSwapConfirm, muscleSwapSetQuery,
-      removeExercise, changeSets, moveExercise, reorderExercise, setExerciseTarget, bumpExerciseTarget, toggleSuperset,
+      removeExercise, requestRemoveBuilderExercise, changeSets, moveExercise, reorderExercise, setExerciseTarget, bumpExerciseTarget, toggleSuperset,
       startWorkout, switchExercise, setSetField, setSetRir, bumpSetField, toggleSetDone, addSet, removeSet,
       restAdjust, restSkip, advance, applyPlanUpdate, discardPlanUpdate,
       exitWorkout, resumeWorkout, requestEndEarly, completeWorkout, stopRest,

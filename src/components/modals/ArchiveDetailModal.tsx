@@ -1,11 +1,11 @@
 import type { ViewModel } from '../../state/viewModel';
+import { Sheet } from '../Sheet';
 
 export function ArchiveDetailModal({ vm }: { vm: ViewModel }) {
   const d = vm.archiveDetail as any;
   if (!d.open) return null;
   return (
-    <div onClick={d.close} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 33, display: 'flex', alignItems: 'flex-end' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#17140f', borderRadius: '22px 22px 0 0', padding: '18px 20px calc(24px + var(--safe-b))', width: '100%', maxHeight: '80%', overflowY: 'auto' }}>
+    <Sheet z={33} dim={0.6} radius={22} maxHeight="80%" padding="18px 20px calc(24px + var(--safe-b))" scrollY onClose={d.close}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <div className="num" style={{ fontSize: 18, fontWeight: 700 }}>{d.day}</div>
           <button onClick={d.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
@@ -42,7 +42,6 @@ export function ArchiveDetailModal({ vm }: { vm: ViewModel }) {
             )}
           </>
         )}
-      </div>
-    </div>
+    </Sheet>
   );
 }

@@ -27,8 +27,20 @@ CREATE TABLE IF NOT EXISTS users (
   -- ALTER statements at the bottom of this file instead (D1 has no IF NOT EXISTS on ALTER).
   email_verified  INTEGER NOT NULL DEFAULT 0,          -- 0 = unverified, 1 = verified
   verify_token    TEXT,                                -- single-use token emailed at signup; NULL once used
-  verify_expires  INTEGER                              -- epoch ms the token expires
+  verify_expires  INTEGER,                             -- epoch ms the token expires
+
+  -- Session revocation + password reset (2026-08 hardening round). token_version is embedded in
+  -- every issued JWT (`tv` claim) and checked on authenticated routes; bumping it (password
+  -- change/reset) revokes every earlier token for just that user. reset_token/expires back the
+  -- forgot-password email flow. Adding to an existing DB: migrate-add-password-security.sql.
+  token_version  INTEGER NOT NULL DEFAULT 0,
+  reset_token    TEXT,                                 -- single-use forgot-password token; NULL once used
+  reset_expires  INTEGER                               -- epoch ms the reset token expires
 );
+
+-- Token lookups on the verify/reset paths would otherwise full-scan users.
+CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token);
+CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users(reset_token);
 
 -- One row per user: their entire AppState as a JSON blob. The app already persists its whole
 -- state as a single localStorage value, so cloud sync is just that same blob, server-side and

@@ -337,8 +337,6 @@ export function incrementForEquip(v: string, units: 'kg' | 'lb' = 'kg'): number 
   return v === 'barbell' || v === 'smith' || v === 'trapbar' ? 2.5 : 1;
 }
 
-export const DAY_ORDER = ['push', 'pull', 'legs', 'upper', 'lower'];
-
 // which muscles fit each day's theme — replacement suggestions stay within this set
 // so a Push day never gets offered a Glutes exercise, etc.
 export const DAY_THEMES: Record<string, Muscle[]> = {

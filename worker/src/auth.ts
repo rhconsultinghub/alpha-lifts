@@ -46,8 +46,25 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 // --- password hashing -----------------------------------------------------------------------
 
-const PBKDF2_ITERATIONS = 100_000;
+/** Current OWASP guidance for PBKDF2-HMAC-SHA256. Raised from 100k (2026-08 audit); existing
+ *  rows keep working because the count travels inside the stored hash, and handleLogin
+ *  transparently re-hashes any below-current row on its next successful login. */
+export const PBKDF2_ITERATIONS = 600_000;
 const PBKDF2_HASH_BITS = 256;
+
+/** Bounds on the iteration count accepted from a STORED hash. Without this, a DB-write
+ *  compromise could plant `1` (instant cracking) or `10^9` (CPU-exhaustion DoS on every login). */
+const PBKDF2_MIN_ITERATIONS = 50_000;
+const PBKDF2_MAX_ITERATIONS = 2_000_000;
+
+/** The iteration count a stored hash was created with, or null if it isn't one of ours. Lets
+ *  handleLogin detect below-current rows and upgrade them. */
+export function hashIterations(stored: string): number | null {
+  const parts = stored.split('$');
+  if (parts.length !== 4 || parts[0] !== 'pbkdf2') return null;
+  const n = parseInt(parts[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 async function deriveBits(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
@@ -69,7 +86,9 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const parts = stored.split('$');
   if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
   const iterations = parseInt(parts[1], 10);
-  if (!Number.isFinite(iterations) || iterations <= 0) return false;
+  if (!Number.isFinite(iterations) || iterations < PBKDF2_MIN_ITERATIONS || iterations > PBKDF2_MAX_ITERATIONS) {
+    return false;
+  }
   const salt = b64urlDecode(parts[2]);
   const hash = await deriveBits(password, salt, iterations);
   return timingSafeEqual(b64urlEncode(hash), parts[3]);
@@ -84,6 +103,16 @@ export interface SessionPayload {
   iat: number;
   /** expiry, epoch seconds */
   exp: number;
+  /** token version — must match users.token_version for the token to be honoured. Bumping the
+   *  column (password change/reset) revokes every token issued before the bump, giving per-user
+   *  revocation without a session table. Absent on pre-upgrade tokens = version 0. */
+  tv?: number;
+}
+
+/** The token version a session claims (0 for tokens minted before versioning existed). Compare
+ *  against the user row's token_version wherever a user row is already in hand. */
+export function sessionTokenVersion(session: SessionPayload): number {
+  return typeof session.tv === 'number' ? session.tv : 0;
 }
 
 /** Token lifetime. Long enough that a daily user rarely re-logs in; short enough that a leaked
@@ -97,10 +126,10 @@ async function hmacKey(secret: string): Promise<CryptoKey> {
   ]);
 }
 
-export async function signSession(userId: string, secret: string): Promise<string> {
+export async function signSession(userId: string, secret: string, tokenVersion = 0): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header = b64urlEncode(enc.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
-  const payload: SessionPayload = { sub: userId, iat: now, exp: now + SESSION_TTL_SECONDS };
+  const payload: SessionPayload = { sub: userId, iat: now, exp: now + SESSION_TTL_SECONDS, tv: tokenVersion };
   const body = b64urlEncode(enc.encode(JSON.stringify(payload)));
   const signingInput = `${header}.${body}`;
   const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(signingInput));

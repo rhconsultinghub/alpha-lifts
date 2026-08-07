@@ -1,11 +1,11 @@
 import type { ViewModel } from '../../state/viewModel';
+import { Sheet } from '../Sheet';
 
 export function MuscleDrillModal({ vm }: { vm: ViewModel }) {
   const md = vm.muscleDrill as any;
   if (!md.open) return null;
   return (
-    <div onClick={vm.closeMuscleDrill} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 30, display: 'flex', alignItems: 'flex-end' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#17140f', borderRadius: '22px 22px 0 0', padding: '18px 20px calc(22px + var(--safe-b))', width: '100%', maxHeight: '80%', overflowY: 'auto' }}>
+    <Sheet dim={0.6} radius={22} maxHeight="80%" padding="18px 20px calc(22px + var(--safe-b))" scrollY onClose={vm.closeMuscleDrill}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <div className="num" style={{ fontSize: 18, fontWeight: 700 }}>{md.name}</div>
           <button onClick={vm.closeMuscleDrill} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
@@ -41,7 +41,6 @@ export function MuscleDrillModal({ vm }: { vm: ViewModel }) {
           <span style={{ fontSize: 15 }}>💡</span>
           <div style={{ font: "400 12px/1.4 'Inter'", color: 'rgba(245,240,234,.8)' }}>{md.rec}</div>
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }

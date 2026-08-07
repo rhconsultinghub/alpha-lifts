@@ -16,6 +16,16 @@ export interface UserRow {
   email_verified: number; // 0 | 1
   verify_token: string | null;
   verify_expires: number | null;
+  // Nullable in type (not schema) so code reads them defensively with `?? 0` / `?? null` — a
+  // Worker deployed against a not-yet-migrated DB then behaves like version 0 instead of crashing.
+  token_version?: number | null;
+  reset_token?: string | null;
+  reset_expires?: number | null;
+}
+
+/** The row's token version, treating a pre-migration DB (column absent → undefined) as 0. */
+export function userTokenVersion(u: UserRow): number {
+  return u.token_version ?? 0;
 }
 
 /** The subscription slice we expose to the client — never the password hash. */
@@ -100,6 +110,50 @@ export async function setVerifyToken(db: D1Database, userId: string, token: stri
   await db
     .prepare('UPDATE users SET verify_token = ?, verify_expires = ? WHERE id = ?')
     .bind(token, expires, userId)
+    .run();
+}
+
+/**
+ * Replace the password hash and bump token_version in one statement — the bump is what revokes
+ * every session issued before the change (their `tv` claim no longer matches). Returns the new
+ * token_version so the caller can mint the user's replacement session.
+ */
+export async function updatePassword(db: D1Database, userId: string, passwordHash: string): Promise<number> {
+  await db
+    .prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?')
+    .bind(passwordHash, userId)
+    .run();
+  const row = await findUserById(db, userId);
+  return row ? userTokenVersion(row) : 1;
+}
+
+/** Replace ONLY the hash (transparent iteration upgrade on login) — deliberately no
+ *  token_version bump, or every login after an iteration raise would revoke the user's other
+ *  sessions. Revocation belongs to updatePassword/applyPasswordReset. */
+export async function rehashPassword(db: D1Database, userId: string, passwordHash: string): Promise<void> {
+  await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(passwordHash, userId).run();
+}
+
+/** Stage a forgot-password token on the account (replaces any earlier pending one). */
+export async function setResetToken(db: D1Database, userId: string, token: string, expires: number): Promise<void> {
+  await db.prepare('UPDATE users SET reset_token = ?, reset_expires = ? WHERE id = ?').bind(token, expires, userId).run();
+}
+
+export async function findUserByResetToken(db: D1Database, token: string): Promise<UserRow | null> {
+  return db.prepare('SELECT * FROM users WHERE reset_token = ?').bind(token).first<UserRow>();
+}
+
+/**
+ * Complete a forgot-password reset: new hash, clear the spent token, revoke outstanding
+ * sessions (token_version bump), and mark the email verified — completing a reset proves
+ * control of the mailbox at least as strongly as the verification link does.
+ */
+export async function applyPasswordReset(db: D1Database, userId: string, passwordHash: string): Promise<void> {
+  await db
+    .prepare(
+      'UPDATE users SET password_hash = ?, reset_token = NULL, reset_expires = NULL, token_version = token_version + 1, email_verified = 1, verify_token = NULL, verify_expires = NULL WHERE id = ?'
+    )
+    .bind(passwordHash, userId)
     .run();
 }
 

@@ -18,7 +18,8 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { authenticate } from './auth';
+import { authenticate, sessionTokenVersion } from './auth';
+import { findUserById, userTokenVersion } from './db';
 import { json } from './http';
 import { checkBudget, costMicroUsd, recordSpend } from './usage';
 import { capNum, capStr, readJsonCapped, sanitizeCatalog, MAX_AI_BODY_BYTES } from './guard';
@@ -37,6 +38,7 @@ export interface OnboardEnv {
   ANTHROPIC_API_KEY: string;
   SESSION_SECRET?: string;
   USAGE?: KVNamespace;
+  DB?: D1Database;
 }
 
 interface OnboardAnswers {
@@ -183,9 +185,16 @@ function describeAnswers(a: OnboardAnswers): string {
 export async function handleOnboard(request: Request, env: OnboardEnv, cors: Record<string, string>): Promise<Response> {
   if (!env.ANTHROPIC_API_KEY) return json({ error: 'not_configured' }, 503, cors);
 
-  // Must be a real signed-in account (identity from the token, never the body).
+  // Must be a real signed-in account (identity from the token, never the body). Also honour
+  // per-user revocation (token_version) when the DB is bound.
   const session = env.SESSION_SECRET ? await authenticate(request, env.SESSION_SECRET) : null;
   if (!session) return json({ error: 'unauthorized' }, 401, cors);
+  if (env.DB) {
+    const user = await findUserById(env.DB, session.sub);
+    if (!user || userTokenVersion(user) !== sessionTokenVersion(session)) {
+      return json({ error: 'unauthorized' }, 401, cors);
+    }
+  }
   const userId = session.sub;
 
   // One AI onboarding per account. The flag has no expiry — onboarding is genuinely once-per-account

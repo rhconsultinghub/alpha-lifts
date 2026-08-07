@@ -13,7 +13,8 @@ import { COACH_TOOLS, isCompleteToolInput } from './tools';
 import { isEntitled } from './access';
 import { checkBudget, costMicroUsd, recordSpend } from './usage';
 import { corsHeaders, json } from './http';
-import { authenticate } from './auth';
+import { authenticate, sessionTokenVersion } from './auth';
+import { findUserById, userTokenVersion } from './db';
 import {
   allowRate,
   clientIp,
@@ -25,11 +26,15 @@ import {
 import { handleOnboard } from './onboard';
 import { handleParsePlan } from './parsePlan';
 import {
+  handleChangePassword,
   handleGetState,
   handleLogin,
   handleMe,
   handlePutState,
+  handleRequestReset,
   handleResendVerification,
+  handleResetPage,
+  handleResetSubmit,
   handleSignup,
   handleVerify
 } from './handlers';
@@ -111,9 +116,18 @@ export default {
       const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
       const method = request.method;
 
-      // /auth/verify is a top-level browser navigation from an email link — it carries no Origin
-      // header, so it must bypass the CORS-origin gate below and returns an HTML page, not JSON.
+      // /auth/verify and /auth/reset are top-level browser navigations from email links (the
+      // reset POST is that page's own same-origin form submit) — no allowlisted Origin header,
+      // so they bypass the CORS-origin gate below and return HTML pages, not JSON. They still
+      // get the auth rate limiter, applied here since they route before the shared block below.
       if (path === '/auth/verify' && method === 'GET') return await handleVerify(request, env);
+      if (path === '/auth/reset') {
+        if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) {
+          return new Response('Too many attempts — try again in a minute.', { status: 429 });
+        }
+        if (method === 'GET') return await handleResetPage(request, env);
+        if (method === 'POST') return await handleResetSubmit(request, env);
+      }
 
       // An empty `cors` map means the Origin wasn't on the allowlist. Reject outright rather
       // than serving the request with no CORS header — the browser would block the *response*,
@@ -141,6 +155,8 @@ export default {
       if (path === '/auth/login' && method === 'POST') return await handleLogin(request, env, cors);
       if (path === '/auth/me' && method === 'GET') return await handleMe(request, env, cors);
       if (path === '/auth/resend-verification' && method === 'POST') return await handleResendVerification(request, env, cors, ctx);
+      if (path === '/auth/change-password' && method === 'POST') return await handleChangePassword(request, env, cors);
+      if (path === '/auth/request-reset' && method === 'POST') return await handleRequestReset(request, env, cors, ctx);
       if (path === '/state' && method === 'GET') return await handleGetState(request, env, cors);
       if (path === '/state' && method === 'PUT') return await handlePutState(request, env, cors);
       if (path === '/onboard' && method === 'POST') return await handleOnboard(request, env, cors);
@@ -184,6 +200,14 @@ async function handleCoach(request: Request, env: Env, cors: Record<string, stri
     const session = env.SESSION_SECRET ? await authenticate(request, env.SESSION_SECRET) : null;
     if (env.SESSION_SECRET && !session) {
       return json({ error: 'unauthorized' }, 401, cors);
+    }
+    // Honour per-user revocation (token_version bump on password change/reset) when the DB is
+    // available to check it against.
+    if (session && env.DB) {
+      const user = await findUserById(env.DB, session.sub);
+      if (!user || userTokenVersion(user) !== sessionTokenVersion(session)) {
+        return json({ error: 'unauthorized' }, 401, cors);
+      }
     }
     const userId = session ? session.sub : sanitizeId(body.userId);
 

@@ -58,28 +58,18 @@ function emailHtml(verifyUrl: string): string {
   </div></body></html>`;
 }
 
-/**
- * Send the verification email. Returns true on a successful hand-off to Resend, false on any
- * failure (missing key, network, Resend error). Callers decide how to handle a false — signup
- * still creates the (unverified) account so the user can trigger a resend.
- */
-export async function sendVerificationEmail(env: EmailEnv, to: string, verifyUrl: string): Promise<boolean> {
+/** Shared Resend send with the 8s abort bound — a slow/unreachable Resend must never stall the
+ *  response (sends are fire-and-forget behind ctx.waitUntil at every call site). */
+async function sendViaResend(env: EmailEnv, to: string, subject: string, html: string): Promise<boolean> {
   if (!env.RESEND_API_KEY) return false;
   const from = env.RESEND_FROM || 'Alpha Lifts <onboarding@resend.dev>';
-  // Bound the request so a slow/unreachable Resend can never stall the signup response — the account
-  // is created regardless and the user can resend if the mail didn't go out.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from,
-        to,
-        subject: 'Verify your email for Alpha Lifts',
-        html: emailHtml(verifyUrl)
-      }),
+      body: JSON.stringify({ from, to, subject, html }),
       signal: ctrl.signal
     });
     if (!res.ok) {
@@ -93,4 +83,44 @@ export async function sendVerificationEmail(env: EmailEnv, to: string, verifyUrl
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Send the verification email. Returns true on a successful hand-off to Resend, false on any
+ * failure (missing key, network, Resend error). Callers decide how to handle a false — signup
+ * still creates the (unverified) account so the user can trigger a resend.
+ */
+export async function sendVerificationEmail(env: EmailEnv, to: string, verifyUrl: string): Promise<boolean> {
+  return sendViaResend(env, to, 'Verify your email for Alpha Lifts', emailHtml(verifyUrl));
+}
+
+function resetEmailHtml(resetUrl: string): string {
+  return `<!doctype html><html><body style="margin:0;background:#0f0e0d;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <div style="max-width:480px;margin:0 auto;padding:40px 24px;color:#f5f0ea">
+    <div style="font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:8px">Alpha Lifts</div>
+    <div style="font-size:15px;line-height:1.6;color:#c9c3ba;margin-bottom:28px">
+      Someone asked to reset the password for this account. If that was you, set a new one below.
+    </div>
+    <a href="${resetUrl}" style="display:inline-block;background:#f0752f;color:#1a1206;text-decoration:none;font-weight:700;font-size:15px;padding:13px 26px;border-radius:12px">Reset my password</a>
+    <div style="font-size:12px;line-height:1.6;color:#8a857d;margin-top:28px">
+      If the button doesn't work, paste this link into your browser:<br>
+      <span style="color:#c9c3ba;word-break:break-all">${resetUrl}</span>
+    </div>
+    <div style="font-size:12px;color:#6b665f;margin-top:24px">
+      This link expires in 1 hour. If you didn't ask for a reset, you can ignore this email — your
+      password is unchanged.
+    </div>
+  </div></body></html>`;
+}
+
+/** Send the forgot-password email. Same contract as sendVerificationEmail. */
+export async function sendResetEmail(env: EmailEnv, to: string, resetUrl: string): Promise<boolean> {
+  return sendViaResend(env, to, 'Reset your Alpha Lifts password', resetEmailHtml(resetUrl));
+}
+
+const RESET_TOKEN_TTL_MS = 1000 * 60 * 60; // 1h — shorter than verify; it grants account takeover
+
+/** A fresh single-use password-reset token + its expiry (epoch ms). */
+export function newResetToken(): { token: string; expires: number } {
+  return { token: base64url(crypto.getRandomValues(new Uint8Array(32))), expires: Date.now() + RESET_TOKEN_TTL_MS };
 }

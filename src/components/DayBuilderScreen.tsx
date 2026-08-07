@@ -34,7 +34,11 @@ export function DayBuilderScreen({ vm }: { vm: ViewModel }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 'none' }}>
                 <button onClick={ex.moveUp} disabled={!ex.canMoveUp} style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: ex.canMoveUp ? 'rgba(245,240,234,.75)' : 'rgba(245,240,234,.25)', fontSize: 12 }}>↑</button>
                 <button onClick={ex.moveDown} disabled={!ex.canMoveDown} style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: ex.canMoveDown ? 'rgba(245,240,234,.75)' : 'rgba(245,240,234,.25)', fontSize: 12 }}>↓</button>
-                <button onClick={ex.remove} style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.6)', fontSize: 12 }}>✕</button>
+                <button onClick={ex.remove} style={ex.removePending
+                  ? { height: 24, padding: '0 10px', borderRadius: 100, border: 'none', background: 'oklch(0.65 0.19 35)', color: '#0d0c0b', font: "700 10px 'Inter'" }
+                  : { width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.6)', fontSize: 12 }}>
+                  {ex.removePending ? 'Confirm?' : '✕'}
+                </button>
               </div>
             </div>
             <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', margin: '2px 0 10px' }}>{ex.muscle} · {ex.repText}</div>

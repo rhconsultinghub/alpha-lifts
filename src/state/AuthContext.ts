@@ -14,13 +14,17 @@ export interface AuthContextValue {
   account: Account | null;
   token: string | null;
   logout: () => void;
+  /** Swap in a re-issued session (password change rotates the token server-side — the old one is
+   *  revoked, so the React tree must start using the new one without waiting for a reload). */
+  refreshSession: (token: string, account: Account) => void;
 }
 
 export const AuthContext = createContext<AuthContextValue>({
   configured: false,
   account: null,
   token: null,
-  logout: () => {}
+  logout: () => {},
+  refreshSession: () => {}
 });
 
 export function useAuth(): AuthContextValue {

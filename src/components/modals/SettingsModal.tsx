@@ -3,6 +3,8 @@ import type { ViewModel } from '../../state/viewModel';
 import { useAuth } from '../../state/AuthContext';
 import { parsePlanFile } from '../../data/planIO';
 import { validateBackup } from '../../data/backup';
+import { changePassword } from '../../state/auth';
+import { Sheet } from '../Sheet';
 
 /** Friendly one-liner for the account's subscription. Kept trivial on purpose — real billing
  *  (and a Manage/Upgrade button) is a later phase; today accounts are 'free'/'none' by default,
@@ -12,6 +14,83 @@ function subscriptionLabel(plan: string, subStatus: string): string {
   if (subStatus === 'past_due') return 'Subscription past due';
   if (subStatus === 'canceled') return 'Subscription canceled';
   return 'Free plan';
+}
+
+/** Collapsible change-password form inside the ACCOUNT card. Success rotates the session token
+ *  server-side (revoking every other device's session), so it must push the re-issued pair into
+ *  AuthContext via refreshSession — persisting alone would leave the React tree holding a token
+ *  the server no longer honours. */
+function ChangePasswordSection() {
+  const auth = useAuth();
+  const [open, setOpen] = useState(false);
+  const [oldPw, setOldPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,.06)',
+    border: '1px solid rgba(255,255,255,.12)', color: '#f5f0ea', font: "400 13px 'Inter'",
+    padding: '11px 12px', borderRadius: 10, marginBottom: 8
+  };
+
+  async function submit() {
+    if (busy || !auth.token) return;
+    setMsg(null);
+    setBusy(true);
+    const res = await changePassword(auth.token, oldPw, newPw);
+    setBusy(false);
+    if (res.ok) {
+      auth.refreshSession(res.token, res.account);
+      setOldPw('');
+      setNewPw('');
+      setOpen(false);
+      setMsg({ ok: true, text: 'Password changed. Other signed-in devices were signed out.' });
+    } else {
+      setMsg({ ok: false, text: res.error });
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 12 }}>
+      {!open ? (
+        <>
+          <button
+            onClick={() => { setOpen(true); setMsg(null); }}
+            style={{ background: 'none', border: 'none', color: 'rgba(245,240,234,.6)', font: "600 12px 'Inter'", padding: 0, cursor: 'pointer' }}
+          >
+            Change password ›
+          </button>
+          {msg && (
+            <div style={{ font: "400 11.5px 'Inter'", color: msg.ok ? 'oklch(0.75 0.15 145)' : '#ff8a6b', marginTop: 8, lineHeight: 1.4 }}>{msg.text}</div>
+          )}
+        </>
+      ) : (
+        <div>
+          <input type="password" autoComplete="current-password" placeholder="Current password" value={oldPw} onChange={e => setOldPw(e.target.value)} style={inputStyle} />
+          <input type="password" autoComplete="new-password" placeholder="New password (8+ characters)" value={newPw} onChange={e => setNewPw(e.target.value)} style={inputStyle} />
+          {msg && !msg.ok && (
+            <div style={{ font: "400 11.5px 'Inter'", color: '#ff8a6b', margin: '0 0 8px', lineHeight: 1.4 }}>{msg.text}</div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={submit}
+              disabled={busy || newPw.length < 8 || !oldPw}
+              style={{ flex: 1, font: "700 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: busy || newPw.length < 8 || !oldPw ? 'rgba(240,117,47,.4)' : '#f0752f', color: '#1a1206' }}
+            >
+              {busy ? 'Saving…' : 'Save password'}
+            </button>
+            <button
+              onClick={() => { setOpen(false); setMsg(null); setOldPw(''); setNewPw(''); }}
+              style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.7)' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function SettingsModal({ vm }: { vm: ViewModel }) {
@@ -75,8 +154,7 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
   };
 
   return (
-    <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 30, display: 'flex', alignItems: 'flex-end' }}>
-      <div style={{ background: '#17140f', borderRadius: '24px 24px 0 0', width: '100%', maxHeight: '86%', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+    <Sheet column scrollY>
         <div style={{ padding: '18px 20px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>Settings</div>
           <button onClick={st.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
@@ -105,6 +183,7 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
                 <div style={{ font: "400 10.5px 'Inter'", color: 'rgba(245,240,234,.35)', marginTop: 10, lineHeight: 1.5 }}>
                   Your training is synced to this account across devices.
                 </div>
+                <ChangePasswordSection />
               </div>
             </>
           )}
@@ -356,7 +435,6 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }

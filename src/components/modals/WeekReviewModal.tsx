@@ -1,11 +1,11 @@
 import type { ViewModel } from '../../state/viewModel';
+import { Sheet } from '../Sheet';
 
 export function WeekReviewModal({ vm }: { vm: ViewModel }) {
   const wr = vm.weekReview;
   if (!wr.open) return null;
   return (
-    <div onClick={wr.close} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 30, display: 'flex', alignItems: 'flex-end' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#17140f', borderRadius: '22px 22px 0 0', padding: '18px 20px calc(22px + var(--safe-b))', width: '100%', maxHeight: '80%', overflowY: 'auto' }}>
+    <Sheet dim={0.6} radius={22} maxHeight="80%" padding="18px 20px calc(22px + var(--safe-b))" scrollY onClose={wr.close}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {wr.selected != null && (
@@ -54,7 +54,6 @@ export function WeekReviewModal({ vm }: { vm: ViewModel }) {
             ))}
           </div>
         )}
-      </div>
-    </div>
+    </Sheet>
   );
 }
