@@ -107,7 +107,41 @@ function loadInitial(): AppState {
   // custom exercises live in persisted state but the exercise library itself is a module-level
   // singleton (mutated everywhere, like the original prototype) — merge them back in on load.
   Object.entries(state.customExercises || {}).forEach(([id, def]) => { EXLIB[id] = def; });
+  // back-compat: progress is now tracked per equipment variant, but pre-existing history entries have
+  // no `equip` tag. Attribute each to the equipment that exercise's current program slot uses (per the
+  // upgrade choice), falling back to the library's default equip. One-time; only fills missing tags.
+  if (state.exerciseHistory && Object.keys(state.exerciseHistory).length) {
+    const slotEquip: Record<string, string> = {};
+    (state.dayOrder || []).forEach(k => {
+      state.program?.[k]?.exercises?.forEach(ex => {
+        if (slotEquip[ex.id] === undefined) {
+          const v = EXLIB[ex.id]?.equip[ex.equipIdx]?.v;
+          if (v) slotEquip[ex.id] = v;
+        }
+      });
+    });
+    let changed = false;
+    const migrated: AppState['exerciseHistory'] = {};
+    for (const [id, entries] of Object.entries(state.exerciseHistory)) {
+      migrated[id] = (entries || []).map(e => {
+        if (e.equip) return e;
+        changed = true;
+        return { ...e, equip: slotEquip[id] || EXLIB[id]?.equip?.[0]?.v || 'other' };
+      });
+    }
+    if (changed) state.exerciseHistory = migrated;
+  }
   return state;
+}
+
+// On an equipment change a slot's stored last/baseline belong to the OLD tool, so blank them to a
+// first-time state: progress is tracked per tool, effectiveLast() prefers the new tool's own history
+// when it exists (so a variant you've trained still shows its numbers), and a tool you haven't touched
+// then correctly reads as a first time instead of inheriting the old tool's weight.
+function blankSlotForEquip(ex: ProgramExercise, newEquipIdx: number, trainingType: TrainingType): ProgramExercise {
+  const lib = EXLIB[ex.id];
+  const reps = lib ? planRepDefault(trainingType, lib) : ex.last.reps;
+  return { ...ex, equipIdx: newEquipIdx, manualTarget: null, last: { weight: 0, reps, hitTop: true }, lastSets: undefined, baseline: { weight: 0, reps } };
 }
 
 // If a workout is in progress and the user hasn't interacted with the app for this long, prompt to
@@ -1182,7 +1216,7 @@ export function useApp() {
         const idx = swap.exIndex;
         const oldEx = s.workout.dayExercises[idx];
         let newEx = oldEx;
-        if (swap.tab === 'equip' && swap.stagedEquipIdx != null) newEx = { ...oldEx, equipIdx: swap.stagedEquipIdx };
+        if (swap.tab === 'equip' && swap.stagedEquipIdx != null) newEx = blankSlotForEquip(oldEx, swap.stagedEquipIdx, s.trainingType);
         else if (swap.tab === 'replace' && swap.stagedExId) {
           // a swapped-in exercise is a different exercise — the old superset link doesn't carry
           // over automatically (the user can re-link it if they want the new one paired too).
@@ -1207,7 +1241,7 @@ export function useApp() {
           day.exercises.push(mkEx(swap.stagedExId, 3, 0, { weight: 0, reps: lib.repHi, hitTop: true }));
         }
       } else if (swap.tab === 'equip' && swap.stagedEquipIdx != null) {
-        day.exercises[swap.exIndex].equipIdx = swap.stagedEquipIdx;
+        day.exercises[swap.exIndex] = blankSlotForEquip(day.exercises[swap.exIndex], swap.stagedEquipIdx, s.trainingType);
       } else if (swap.tab === 'replace' && swap.stagedExId) {
         const lib = EXLIB[swap.stagedExId];
         const oldGroup = day.exercises[swap.exIndex].supersetGroup;
@@ -1666,7 +1700,9 @@ export function useApp() {
           // a time exercise stores seconds in the reps slot (a plank isn't 45 reps).
           totalSets += doneSets.length;
           if (!isTime) totalReps += doneSets.reduce((a, r) => a + (r.reps || 0), 0);
-          const prior = s.exerciseHistory[ex.id] || [];
+          // PRs are per equipment variant — a dumbbell set is judged only against dumbbell history,
+          // never the (heavier) barbell numbers of the same lift.
+          const prior = (s.exerciseHistory[ex.id] || []).filter(p => p.equip === equip.v);
           // a first-ever log has nothing to beat, so it's a PR by default — otherwise compare
           // against the best prior session the same way bestSetScore is used for the e1RM metric.
           if (deloading) {
@@ -1698,14 +1734,19 @@ export function useApp() {
         durationMin, avgRestSec, setCount: totalSets, repCount: totalReps, weekNumber: s.weekNumber, status: 'completed' as const, exercises: summary!
       };
       const exerciseHistory = { ...s.exerciseHistory };
-      const loggedIds = new Set<string>();
+      const loggedVariants = new Set<string>();
       s.workout.dayExercises.forEach((ex, idx) => {
         const doneSets = (s.workout!.exSets[idx] || []).filter(r => r.done);
         if (!doneSets.length) return;
-        loggedIds.add(ex.id);
-        const prior = exerciseHistory[ex.id] || [];
-        const entry = { date: dateStr, weight: doneSets[0].weight, reps: doneSets[0].reps, day: dayLabel, sets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })), ...(deloading ? { deload: true } : {}) };
-        exerciseHistory[ex.id] = [...prior, entry].slice(-8);
+        const eV = EXLIB[ex.id]?.equip[ex.equipIdx]?.v;
+        loggedVariants.add(ex.id + '@' + eV);
+        const entry = { date: dateStr, weight: doneSets[0].weight, reps: doneSets[0].reps, day: dayLabel, equip: eV, sets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })), ...(deloading ? { deload: true } : {}) };
+        // Cap history at the last 8 sessions PER equipment variant — dropping the oldest same-tool
+        // entry — so logging on one tool never ages out the other tool's history.
+        const list = [...(exerciseHistory[ex.id] || []), entry];
+        let sameCount = list.filter(e => e.equip === eV).length;
+        while (sameCount > 8) { const i = list.findIndex(e => e.equip === eV); if (i < 0) break; list.splice(i, 1); sameCount--; }
+        exerciseHistory[ex.id] = list;
       });
       const hasChanges = s.workout.changesMade > 0;
       const program = JSON.parse(JSON.stringify(s.program));
@@ -1715,11 +1756,11 @@ export function useApp() {
       // real log is fresher than any manual guess, on whichever day it was set) — clear it wherever
       // it appears, not just on the day just played, so effectiveLast() doesn't resurrect a months-
       // old correction the next time that other day is opened.
-      if (loggedIds.size && !deloading) {
+      if (loggedVariants.size && !deloading) {
         s.dayOrder.forEach(k => {
           const exercises = program[k]?.exercises;
           if (!exercises) return;
-          exercises.forEach((ex: ProgramExercise) => { if (loggedIds.has(ex.id)) ex.manualTarget = null; });
+          exercises.forEach((ex: ProgramExercise) => { if (loggedVariants.has(ex.id + '@' + (EXLIB[ex.id]?.equip[ex.equipIdx]?.v))) ex.manualTarget = null; });
         });
       }
       if (!hasChanges) program[dayKey].exercises = updatedDayExercises;

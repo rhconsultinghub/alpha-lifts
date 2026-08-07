@@ -12,7 +12,8 @@ import {
   warmupInfo, dayMuscleRanks, formatElapsed, fmtWeight, weightStep, formatSetTime,
   volumeChartData, weeklyHeatmapData, exerciseProgressData, compareLiftsData, consistencyData,
   volumeDonutData, durationTrendData, warmupForDay, bodyWeightChartData, platesBreakdown, deloadSuggestion,
-  effectiveLast, lifetimeVolumeKg, totalTrainingMinutes, completedWorkoutCount, lifetimeReps, lifetimeSets
+  effectiveLast, lifetimeVolumeKg, totalTrainingMinutes, completedWorkoutCount, lifetimeReps, lifetimeSets,
+  equipVOf, variantHistory
 } from './logic';
 import { weightFactoid, timeFactoid } from '../data/factoids';
 import { seededFrac } from '../data/program';
@@ -526,7 +527,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
     const ex = dayExercises[exIndex];
     const lib = EXLIB[ex.id];
     const equip = lib.equip[ex.equipIdx];
-    const exHistory = s.exerciseHistory[ex.id];
+    // Scope "last time" set breakdown to the tool this slot is set to, matching effectiveLast()/
+    // recommendation() — a barbell session isn't the reference for a dumbbell slot.
+    const exHistory = variantHistory(s.exerciseHistory[ex.id], equipVOf(ex));
     const rec = recommendation(ex, s.units, s.coachVoice, exHistory, s.exerciseHistory, deloadPct, s.trainingType);
     const currentSets = s.workout.exSets[exIndex] || [];
     // Warm-ups ramp to the heaviest set the user is actually about to do this session (their edited
@@ -1259,8 +1262,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
         open: true, name: EXLIB[id].name,
         entries: entries.map(e => {
           const sets = e.sets && e.sets.length ? e.sets : [{ weight: e.weight, reps: e.reps }];
+          const equipLabel = e.equip ? (EXLIB[id].equip.find(o => o.v === e.equip)?.label || '') : '';
           return {
-            date: e.date, day: e.day || '',
+            date: e.date, day: e.day || '', equipLabel,
             sets: sets.map((st, i) => ({ num: i + 1, text: (isTime ? formatSetTime(st.reps) : fmtWeight(st.weight, s.units) + ' × ' + st.reps + ' reps') + (st.rir != null ? ' · RIR ' + st.rir : '') }))
           };
         }),

@@ -144,22 +144,29 @@ function buildStats(s: AppState): CoachContext['stats'] {
     .filter(b => b.sets > 0)
     .map(b => ({ muscle: b.name, sets: Math.round(b.sets * 10) / 10, range: b.rangeText, status: b.status }));
 
-  // Strongest logged lifts by estimated 1RM. Only weighted lifts qualify — a 1RM estimate is
-  // meaningless for bodyweight/timed work, and history carries no equip to tell them apart, so
-  // gate on a real logged weight instead.
+  // Strongest logged lifts by estimated 1RM, split per equipment variant (progress is tracked per
+  // tool), so a dumbbell best and a barbell best of the same lift read as distinct. Only weighted
+  // lifts qualify — a 1RM estimate is meaningless for bodyweight/timed work — so gate on a real
+  // logged weight.
   const lifts: { name: string; best: string; e1rm: string; score: number }[] = [];
   for (const [id, entries] of Object.entries(s.exerciseHistory || {})) {
     const real = (entries || []).filter(e => e.deload !== true && e.weight > 0 && e.reps > 0);
     if (!real.length) continue;
-    let top = real[0];
-    for (const e of real) if (estimatedOneRepMax(e.weight, e.reps) > estimatedOneRepMax(top.weight, top.reps)) top = e;
-    const e1rmKg = estimatedOneRepMax(top.weight, top.reps);
-    lifts.push({
-      name: exName(id),
-      best: `${fmtWeight(top.weight, s.units)} × ${top.reps}`,
-      e1rm: fmtWeight(e1rmKg, s.units),
-      score: e1rmKg
-    });
+    const byV = new Map<string, typeof real>();
+    for (const e of real) { const v = e.equip || ''; (byV.get(v) || byV.set(v, []).get(v)!).push(e); }
+    const multi = byV.size > 1;
+    for (const [v, arr] of byV) {
+      let top = arr[0];
+      for (const e of arr) if (estimatedOneRepMax(e.weight, e.reps) > estimatedOneRepMax(top.weight, top.reps)) top = e;
+      const e1rmKg = estimatedOneRepMax(top.weight, top.reps);
+      const label = multi && v ? `${exName(id)} (${EXLIB[id]?.equip.find(o => o.v === v)?.label || v})` : exName(id);
+      lifts.push({
+        name: label,
+        best: `${fmtWeight(top.weight, s.units)} × ${top.reps}`,
+        e1rm: fmtWeight(e1rmKg, s.units),
+        score: e1rmKg
+      });
+    }
   }
   lifts.sort((a, b) => b.score - a.score);
   if (lifts.length) stats.topLifts = lifts.slice(0, TOP_LIFTS_LIMIT).map(({ name, best, e1rm }) => ({ name, best, e1rm }));

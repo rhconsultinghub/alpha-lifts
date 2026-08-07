@@ -18,7 +18,10 @@ export function ExerciseHistoryModal({ vm }: { vm: ViewModel }) {
             <div key={i} style={{ background: 'rgba(255,255,255,.04)', borderRadius: 14, padding: '12px 14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
                 <div style={{ font: "600 13px 'Inter'" }}>{entry.date}</div>
-                <div style={{ font: "500 11px 'Inter'", padding: '3px 9px', borderRadius: 100, background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.6)' }}>{entry.day}</div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                  {entry.equipLabel && <div style={{ font: "500 11px 'Inter'", padding: '3px 9px', borderRadius: 100, background: 'oklch(0.65 0.19 35 / 0.16)', color: 'oklch(0.78 0.16 35)' }}>{entry.equipLabel}</div>}
+                  <div style={{ font: "500 11px 'Inter'", padding: '3px 9px', borderRadius: 100, background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.6)' }}>{entry.day}</div>
+                </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {entry.sets.map((st: any, k: number) => (

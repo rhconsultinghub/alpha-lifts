@@ -199,6 +199,17 @@ export type WarmupStyle = 'Minimal' | 'Standard' | 'Cautious';
 // recommendation would only reflect whichever day-specific copy of the exercise you last opened,
 // even when you did the same exercise on a *different* day more recently (e.g. an exercise that
 // appears on both a Push and an Upper day tracks two independent ex.last fields, one per slot).
+// The equipment variant a program slot is currently set to (EquipOption.v). Progress is tracked
+// per variant, so this is the key that scopes an exercise's history down to "the tool you're using".
+export function equipVOf(ex: ProgramExercise): string | undefined {
+  return EXLIB[ex.id]?.equip[ex.equipIdx]?.v;
+}
+// The subset of an exercise's history logged on a given equipment variant.
+export function variantHistory(entries: ExerciseHistoryEntry[] | undefined, equipV: string | undefined): ExerciseHistoryEntry[] | undefined {
+  if (!entries) return entries;
+  return entries.filter(e => e.equip === equipV);
+}
+
 export function effectiveLast(ex: ProgramExercise, history?: ExerciseHistoryEntry[]): ExerciseLast {
   // A manual correction from the Day View quick-edit modal outranks even cross-day history — it's
   // a deliberate, explicit statement of "start here next time," not just whatever happened to get
@@ -210,8 +221,12 @@ export function effectiveLast(ex: ProgramExercise, history?: ExerciseHistoryEntr
   // deload (i.e. the exercise has never been logged outside one) does a deload entry get used.
   // The `deload` flag is checked inline rather than via state/deload.ts's isDeloadEntry() because
   // that module imports deloadSuggestion() from this one — importing back would be circular.
-  const real = history ? history.filter(e => e.deload !== true) : undefined;
-  const usable = real && real.length ? real : history;
+  // Scope to the tool this slot is set to — a barbell session shouldn't be the "last time" for a
+  // dumbbell slot of the same exercise (see equipVOf/variantHistory). Callers pass the exercise's
+  // full per-id history; the filter here is what keeps each variant's progress separate.
+  const scoped = variantHistory(history, equipVOf(ex));
+  const real = scoped ? scoped.filter(e => e.deload !== true) : undefined;
+  const usable = real && real.length ? real : scoped;
   if (usable && usable.length) {
     const lib = EXLIB[ex.id];
     const latest = usable[usable.length - 1];
@@ -262,6 +277,9 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
   const equip = lib.equip[ex.equipIdx];
   const last = effectiveLast(ex, history);
   const w1 = fmtWeight(last.weight, units);
+  // Progress is per-equipment: "have I done this before / is this a deload" is asked of THIS tool's
+  // history only, so switching a slot to a new tool correctly reads as a first time on it.
+  const scoped = variantHistory(history, equip.v);
   const isTime = lib.trackingMode === 'time';
   const unitWord = isTime ? '' : ' reps';
   const fmtVal = (v: number) => (isTime ? formatSetTime(v) : String(v) + unitWord);
@@ -273,8 +291,23 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
   // nothing, and it reads as if the user has done this lift before. Instead surface a first-time
   // message, seeded with the closest logged variant as a reference point when one exists. A manual
   // target from the quick-edit modal counts as a deliberate starting point, so it's left alone.
-  if (!ex.manualTarget && (!history || history.length === 0)) {
+  if (!ex.manualTarget && (!scoped || scoped.length === 0)) {
     const bodyweight = equip.v === 'bodyweight' || equip.v === 'assisted';
+    // Best reference for a first time on a new tool is the SAME lift on another tool the user has
+    // done (e.g. switched Barbell Bench → Dumbbell: point at their barbell number), before falling
+    // back to a different, similar exercise.
+    const otherVariant = (allHistory?.[ex.id] || []).filter(e => e.equip && e.equip !== equip.v && e.deload !== true);
+    if (otherVariant.length && !bodyweight) {
+      const le = otherVariant[otherVariant.length - 1];
+      const vlabel = lib.equip.find(o => o.v === le.equip)?.label || le.equip;
+      const lsets = le.sets && le.sets.length ? le.sets : [{ weight: le.weight, reps: le.reps }];
+      const ltop = lsets[lsets.length - 1];
+      return {
+        weight: ltop.weight, reps: lib.repHi,
+        title: phrase('First time on ' + equip.label, 'First time on ' + equip.label, 'New tool — dial it in! 💪'),
+        note: 'No ' + equip.label + ' history yet. Your ' + vlabel + ' ' + lib.name + ' is at ' + fmtWeight(ltop.weight, units) + ' × ' + ltop.reps + ' reps — expect a different number here and adjust to feel.'
+      };
+    }
     const ref = similarExerciseReference(ex.id, allHistory);
     if (ref && !bodyweight) {
       const refVal = ref.isTime ? formatSetTime(ref.reps) : ref.reps + ' reps';
@@ -297,7 +330,7 @@ export function recommendation(ex: ProgramExercise, units: Units, voice: CoachVo
   // branch above (a lift you've never done has no working weight to take a percentage of, so it
   // gets normal first-time baseline advice even during a deload) but before every progression rule
   // below, since none of them should run while deloading — the point of the week is to *not* add.
-  if (deloadPct && (history?.length || ex.manualTarget)) {
+  if (deloadPct && (scoped?.length || ex.manualTarget)) {
     const pctText = Math.round(deloadPct * 100) + '%';
     const title = phrase('Deload week — go light', 'Deload week — keep it easy', 'Deload week — bank the recovery! 🌱');
     if (equip.v === 'bodyweight' || equip.v === 'assisted') {
@@ -651,29 +684,50 @@ export function weeklyHeatmapData(state: AppState, bars: MuscleBar[]) {
   return { cols, rows };
 }
 
+// Progress is tracked per equipment variant, so a lift shows up in the chart pickers as a distinct
+// selectable "series" per tool the user has actually logged it on (Bench Press · Barbell vs. ·
+// Dumbbell). An exercise logged on 0-or-1 tools is a single series keyed by its bare id; one logged
+// on 2+ tools splits into one series per tool, keyed `id@equipV`. This keeps each tool's line clean.
+export interface ProgressVariant { key: string; id: string; equipV: string | null; name: string; entries: ExerciseHistoryEntry[]; }
+function equipLabelFor(id: string, v: string): string { return EXLIB[id]?.equip.find(o => o.v === v)?.label || v; }
+export function progressVariantsForId(state: AppState, id: string): ProgressVariant[] {
+  const entries = state.exerciseHistory[id] || [];
+  const vs = [...new Set(entries.map(e => e.equip).filter((x): x is string => !!x))];
+  if (vs.length <= 1) return [{ key: id, id, equipV: vs[0] ?? null, name: EXLIB[id].name, entries }];
+  return vs.map(v => ({ key: id + '@' + v, id, equipV: v, name: EXLIB[id].name + ' · ' + equipLabelFor(id, v), entries: entries.filter(e => e.equip === v) }));
+}
+function resolveProgressKey(state: AppState, key: string): ProgressVariant | null {
+  const id = key.split('@')[0];
+  if (!EXLIB[id]) return null;
+  const variants = progressVariantsForId(state, id);
+  return variants.find(pv => pv.key === key) || variants.find(pv => pv.id === id) || variants[0] || null;
+}
+
 // every exercise in the library (including custom ones) is selectable here, not just ones in
 // the active program — grouped by muscle for an expandable picker rather than one long chip row.
 export function exerciseProgressData(state: AppState, selectId: (id: string) => void, metric: 'weight' | 'e1rm' = 'weight') {
   const allIds = Object.keys(EXLIB).sort((a, b) => EXLIB[a].name.localeCompare(EXLIB[b].name));
   if (!allIds.length) return { hasData: false, empty: true, pickerGroups: [], selectedName: '', deltaText: '' };
-  const selectedId = allIds.includes(state.selectedProgressEx || '') ? (state.selectedProgressEx as string) : allIds[0];
+  const allVariants = allIds.flatMap(id => progressVariantsForId(state, id));
+  const selected = resolveProgressKey(state, state.selectedProgressEx || '') || allVariants.find(v => v.entries.length) || allVariants[0];
+  const selectedKey = selected.key;
 
   const byMuscle: Record<string, string[]> = {};
   allIds.forEach(id => { const m = EXLIB[id].muscle; (byMuscle[m] = byMuscle[m] || []).push(id); });
   const pickerGroups = Object.keys(byMuscle).sort().map(muscle => ({
     muscle,
-    items: byMuscle[muscle].map(id => ({
-      id, name: EXLIB[id].name,
-      isSelected: id === selectedId,
-      hasHistory: !!(state.exerciseHistory[id] || []).length,
-      select: () => selectId(id)
-    }))
+    items: byMuscle[muscle].flatMap(id => progressVariantsForId(state, id).map(pv => ({
+      id: pv.key, name: pv.name,
+      isSelected: pv.key === selectedKey,
+      hasHistory: !!pv.entries.length,
+      select: () => selectId(pv.key)
+    })))
   }));
 
-  const isTime = EXLIB[selectedId].trackingMode === 'time';
+  const isTime = EXLIB[selected.id].trackingMode === 'time';
   const usingE1rm = metric === 'e1rm' && !isTime;
-  const selectedName = EXLIB[selectedId].name;
-  const entries = state.exerciseHistory[selectedId] || [];
+  const selectedName = selected.name;
+  const entries = selected.entries;
   if (!entries.length) return { hasData: false, empty: true, pickerGroups, selectedName, deltaText: '', isTime, usingE1rm };
   // e1RM only makes sense for weighted sets — a bodyweight-equipment entry logs weight 0, so fall
   // back to reps for that entry even while the e1RM metric is toggled on.
@@ -700,44 +754,48 @@ export function exerciseProgressData(state: AppState, selectId: (id: string) => 
 // selects/deselects something. Shared with the toggle action so the very first click acts on the
 // same list the user is looking at, instead of an empty underlying selection.
 export function defaultCompareLiftIds(state: AppState): string[] {
-  const allIds = Object.keys(EXLIB);
-  const withHistory = allIds.filter(id => (state.exerciseHistory[id] || []).length > 1);
-  return withHistory.slice(0, 3);
+  const keys: string[] = [];
+  for (const id of Object.keys(EXLIB)) for (const pv of progressVariantsForId(state, id)) if (pv.entries.length > 1) keys.push(pv.key);
+  return keys.slice(0, 3);
 }
 
 // every exercise in the library is selectable (not just ones with logged history) — grouped by
-// muscle for an expandable picker, capped at 3 selected at once.
+// muscle for an expandable picker, capped at 3 selected at once. Selection keys are per-variant
+// (`id` or `id@equipV`), so two tools for one lift can be compared as separate lines.
 export function compareLiftsData(state: AppState, toggle: (id: string) => void, metric: 'weight' | 'e1rm' = 'weight') {
   const allIds = Object.keys(EXLIB).sort((a, b) => EXLIB[a].name.localeCompare(EXLIB[b].name));
   const colors = ['oklch(0.65 0.19 35)', 'oklch(0.7 0.13 230)', 'oklch(0.7 0.15 145)'];
-  const selected = (state.compareLiftIds && state.compareLiftIds.length ? state.compareLiftIds : defaultCompareLiftIds(state)).filter(id => allIds.includes(id));
+  const allVariants = allIds.flatMap(id => progressVariantsForId(state, id));
+  const vmap = new Map(allVariants.map(v => [v.key, v]));
+  const selected = (state.compareLiftIds && state.compareLiftIds.length ? state.compareLiftIds : defaultCompareLiftIds(state)).filter(k => vmap.has(k));
 
   const byMuscle: Record<string, string[]> = {};
   allIds.forEach(id => { const m = EXLIB[id].muscle; (byMuscle[m] = byMuscle[m] || []).push(id); });
   const pickerGroups = Object.keys(byMuscle).sort().map(muscle => ({
     muscle,
-    items: byMuscle[muscle].map(id => {
-      const idx = selected.indexOf(id);
+    items: byMuscle[muscle].flatMap(id => progressVariantsForId(state, id).map(pv => {
+      const idx = selected.indexOf(pv.key);
       const isSelected = idx !== -1;
       return {
-        id, name: EXLIB[id].name, isSelected,
+        id: pv.key, name: pv.name, isSelected,
         color: isSelected ? colors[idx % colors.length] : null,
-        hasHistory: (state.exerciseHistory[id] || []).length > 1,
-        toggle: () => toggle(id)
+        hasHistory: pv.entries.length > 1,
+        toggle: () => toggle(pv.key)
       };
-    })
+    }))
   }));
 
-  const series = selected.map((id, i) => {
-    const entries = state.exerciseHistory[id] || [];
-    if (entries.length < 2) return null;
-    const isTime = EXLIB[id].trackingMode === 'time';
+  const series = selected.map((key, i) => {
+    const pv = vmap.get(key);
+    const entries = pv ? pv.entries : [];
+    if (!pv || entries.length < 2) return null;
+    const isTime = EXLIB[pv.id].trackingMode === 'time';
     const usingE1rm = metric === 'e1rm' && !isTime;
     const valueOf = (e: ExerciseHistoryEntry) => (isTime ? e.reps : usingE1rm ? (e.weight > 0 ? estimatedOneRepMax(e.weight, e.reps) : e.reps) : e.weight);
     const first = valueOf(entries[0]) || 1;
     const n = entries.length;
     const pts = entries.map((e, k) => ({ x: n > 1 ? Math.round((k / (n - 1)) * 260 + 10) : 140, pctChange: Math.round(((valueOf(e) - first) / first) * 100) }));
-    return { id, name: EXLIB[id].name, color: colors[i % colors.length], pts };
+    return { id: pv.key, name: pv.name, color: colors[i % colors.length], pts };
   }).filter((sr): sr is NonNullable<typeof sr> => sr !== null);
 
   const allPct = series.flatMap(sr => sr.pts.map(p => p.pctChange));
@@ -750,7 +808,7 @@ export function compareLiftsData(state: AppState, toggle: (id: string) => void, 
       deltaText: (last.pctChange >= 0 ? '+' : '') + last.pctChange + '%'
     };
   });
-  const pendingNames = selected.filter(id => (state.exerciseHistory[id] || []).length < 2).map(id => EXLIB[id].name);
+  const pendingNames = selected.map(k => vmap.get(k)).filter((pv): pv is ProgressVariant => !!pv && pv.entries.length < 2).map(pv => pv.name);
   return {
     pickerGroups, lines, hasData: lines.length > 0, selectedCount: selected.length,
     limitHit: !!state.compareLiftLimitHit, pendingNames

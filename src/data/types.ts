@@ -131,6 +131,12 @@ export interface ExerciseHistoryEntry {
   reps: number;
   day: string;
   sets?: SetHistoryRow[];
+  // Which equipment variant (EquipOption.v — 'barbell'/'dumbbell'/'machine'/…) this session was
+  // logged on. Progress is tracked separately per tool, since a lifter progresses differently on
+  // each: reads that ask "last time / recommend next / is this a PR" filter to the slot's current
+  // equipment. Optional for back-compat — loadInitial() tags pre-existing entries with the slot's
+  // current equipment (see the migration there).
+  equip?: string;
   // Logged during a scheduled deload week. Light by design, so every read that
   // asks "how strong are you / are you still progressing" skips these entries —
   // otherwise a deload would register as a plateau or a regression, and the next
