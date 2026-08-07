@@ -25,6 +25,13 @@ export function corsHeaders(origin: string | null, env: CorsEnv): Record<string,
 export function json(body: unknown, status: number, cors: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json', ...cors }
+    headers: {
+      'Content-Type': 'application/json',
+      // API responses carry account data and full user state — never cacheable, and never
+      // content-sniffable. Applied here so every route gets both without remembering to.
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      ...cors
+    }
   });
 }

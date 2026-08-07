@@ -1,15 +1,15 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 import { ExercisePhoto } from '../ExercisePhoto';
 import { VideoEmbed } from '../VideoEmbed';
 
 export function LibraryExerciseDetailModal({ vm }: { vm: ViewModel }) {
-  const d = vm.libraryDetail as any;
+  const d = vm.libraryDetail;
   if (!d.open) return null;
   return (
     <div style={{ position: 'absolute', inset: 0, background: '#0f0e0d', zIndex: 20, overflowY: 'auto' }} className="scr">
       <div style={{ padding: '18px 20px 40px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <button onClick={d.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14 }}>✕</button>
+          <button aria-label="Close" onClick={d.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14 }}>✕</button>
           {d.isCustom && (
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={d.edit} style={{ font: "600 11px 'Inter'", padding: '7px 12px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.75)' }}>Edit</button>
@@ -22,7 +22,7 @@ export function LibraryExerciseDetailModal({ vm }: { vm: ViewModel }) {
         </div>
         <div className="num" style={{ fontSize: 24, fontWeight: 700 }}>{d.name}</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '10px 0 16px' }}>
-          {d.equipChips.map((e: any, i: number) => (
+          {d.equipChips.map((e, i) => (
             <span key={i} style={{ font: "600 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'rgba(255,255,255,.08)' }}>{e.label}</span>
           ))}
         </div>

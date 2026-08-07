@@ -1,4 +1,4 @@
-import type { ViewModel } from '../state/viewModel';
+﻿import type { ViewModel } from '../state/viewModel';
 import { useElapsedText, useRestClock } from '../state/useClock';
 import { ExercisePhoto } from './ExercisePhoto';
 import { SetTimeControl } from './SetTimeControl';
@@ -13,7 +13,7 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
   return (
     <>
       <div style={{ padding: '18px 20px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
-        <button onClick={vm.exitWorkout} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14 }}>‹</button>
+        <button aria-label="Back" onClick={vm.exitWorkout} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14 }}>‹</button>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
           <div style={{ font: "600 12px 'Inter'", color: 'rgba(245,240,234,.6)' }}>{w.progressText}</div>
           <div className="num" style={{ font: "700 12px 'Space Grotesk'", color: 'oklch(0.72 0.17 35)' }}>⏱ {elapsedText}</div>
@@ -26,8 +26,8 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
       )}
 
       <div style={{ display: 'flex', gap: 8, overflowX: 'auto', padding: '12px 20px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
-        {w.navList.map((n: any, i: number) => (
-          <button key={i} onClick={n.go} style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 7, background: n.bg, border: `1px solid ${n.border}`, color: n.color, font: "600 11px 'Inter'", padding: '6px 12px 6px 6px', borderRadius: 100, whiteSpace: 'nowrap' }}>
+        {w.navList.map((n, i) => (
+          <button key={`${n.id}_${i}`} onClick={n.go} style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 7, background: n.bg, border: `1px solid ${n.border}`, color: n.color, font: "600 11px 'Inter'", padding: '6px 12px 6px 6px', borderRadius: 100, whiteSpace: 'nowrap' }}>
             <span style={{ width: 22, height: 22, borderRadius: '50%', flex: 'none', overflow: 'hidden', background: 'rgba(0,0,0,.15)', display: 'flex' }}><ExercisePhoto id={n.id} pattern={n.pattern} size={22} radius={0} /></span>
             {n.name}<span style={{ opacity: 0.7 }}>{n.statusText}</span>
           </button>
@@ -83,7 +83,7 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
 
         <div style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>WORKING SETS</div>
 
-        {w.sets.map((s: any, i: number) => (
+        {w.sets.map((s, i) => (
           <div key={i} style={{ borderRadius: 18, background: s.cardBg, border: `1px solid ${s.cardBorder}`, padding: 14, marginBottom: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
@@ -95,7 +95,7 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {w.canRemoveSet && (
-                  <button onClick={s.remove} style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.06)', color: 'rgba(245,240,234,.45)', fontSize: 13 }}>✕</button>
+                  <button aria-label="Close" onClick={s.remove} style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.06)', color: 'rgba(245,240,234,.45)', fontSize: 13 }}>✕</button>
                 )}
                 <button onClick={s.toggleDone} aria-pressed={s.done} style={{ width: 40, height: 40, flex: 'none', borderRadius: '50%', border: 'none', background: s.doneBg, color: s.doneColor, fontSize: 17 }}>✓</button>
               </div>
@@ -104,9 +104,9 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
               <div style={{ flex: 1 }}>
                 <div style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 6, textAlign: 'center' }}>WEIGHT ({w.unitsLabel})</div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,.07)', borderRadius: 14, padding: 6 }}>
-                  <button onClick={s.decWeight} style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea', fontSize: 17 }}>–</button>
+                  <button aria-label="Decrease" onClick={s.decWeight} style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea', fontSize: 17 }}>–</button>
                   <input type="number" value={s.weight} onChange={e => s.setWeight(parseFloat(e.target.value) || 0)} style={{ width: 56, fontSize: 17 }} />
-                  <button onClick={s.incWeight} style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea', fontSize: 17 }}>+</button>
+                  <button aria-label="Increase" onClick={s.incWeight} style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea', fontSize: 17 }}>+</button>
                 </div>
                 {s.platesText && (
                   <div style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)', textAlign: 'center', marginTop: 4 }}>🏋 {s.platesText}</div>
@@ -118,23 +118,23 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <SetTimeControl seconds={s.reps} onCapture={(sec) => s.setReps(sec)} />
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                      <button onClick={s.decReps} style={{ width: 26, height: 26, flex: 'none', borderRadius: 8, border: 'none', background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.7)', fontSize: 13 }}>–</button>
+                      <button aria-label="Decrease" onClick={s.decReps} style={{ width: 26, height: 26, flex: 'none', borderRadius: 8, border: 'none', background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.7)', fontSize: 13 }}>–</button>
                       <span style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)' }}>adjust 5s</span>
-                      <button onClick={s.incReps} style={{ width: 26, height: 26, flex: 'none', borderRadius: 8, border: 'none', background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.7)', fontSize: 13 }}>+</button>
+                      <button aria-label="Increase" onClick={s.incReps} style={{ width: 26, height: 26, flex: 'none', borderRadius: 8, border: 'none', background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.7)', fontSize: 13 }}>+</button>
                     </div>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,.07)', borderRadius: 14, padding: 6 }}>
-                    <button onClick={s.decReps} style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea', fontSize: 17 }}>–</button>
+                    <button aria-label="Decrease" onClick={s.decReps} style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea', fontSize: 17 }}>–</button>
                     <input type="number" value={s.reps} onChange={e => s.setReps(parseInt(e.target.value) || 0)} style={{ width: 56, fontSize: 17 }} />
-                    <button onClick={s.incReps} style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea', fontSize: 17 }}>+</button>
+                    <button aria-label="Increase" onClick={s.incReps} style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea', fontSize: 17 }}>+</button>
                   </div>
                 )}
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
               <span style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em' }}>RIR</span>
-              {s.rirOptions.map((o: any) => (
+              {s.rirOptions.map((o) => (
                 <button key={o.v} onClick={o.select} style={{ width: 26, height: 26, borderRadius: '50%', border: 'none', background: o.bg, color: o.color, font: "700 10px 'Inter'" }}>{o.label}</button>
               ))}
             </div>

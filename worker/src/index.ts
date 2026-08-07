@@ -36,7 +36,8 @@ import {
   handleResetPage,
   handleResetSubmit,
   handleSignup,
-  handleVerify
+  handleVerify,
+  handleVerifySubmit
 } from './handlers';
 
 export interface Env {
@@ -58,6 +59,8 @@ export interface Env {
   // requires email confirmation before login. Absent = verification off (signup verifies instantly).
   RESEND_API_KEY?: string;
   RESEND_FROM?: string;
+  // "true" = keep blocking unverified logins even without the Resend key (see email.ts).
+  REQUIRE_EMAIL_VERIFICATION?: string;
   // Where the /auth/verify landing page links back to. Set in wrangler.toml; defaults to the app.
   APP_URL?: string;
   // Per-IP rate limiters ([[ratelimits]] in wrangler.toml). Optional — absent bindings fail open
@@ -66,7 +69,7 @@ export interface Env {
   AI_LIMITER?: RateLimiter;
 }
 
-const MODEL = 'claude-opus-4-8';
+import { MODEL } from './usage';
 
 /**
  * Fitness answers are short. This is a hard ceiling on cost-per-message, not a target.
@@ -116,17 +119,20 @@ export default {
       const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
       const method = request.method;
 
-      // /auth/verify and /auth/reset are top-level browser navigations from email links (the
-      // reset POST is that page's own same-origin form submit) — no allowlisted Origin header,
-      // so they bypass the CORS-origin gate below and return HTML pages, not JSON. They still
-      // get the auth rate limiter, applied here since they route before the shared block below.
-      if (path === '/auth/verify' && method === 'GET') return await handleVerify(request, env);
-      if (path === '/auth/reset') {
+      // /auth/verify and /auth/reset are top-level browser navigations from email links (their
+      // POSTs are those pages' own same-origin form submits) — no allowlisted Origin header, so
+      // they bypass the CORS-origin gate below and return HTML pages, not JSON. Both flows are
+      // GET-shows-a-confirm-button / POST-does-the-work, so a mail scanner prefetching the GET
+      // can't consume the single-use token. They still get the auth rate limiter, applied here
+      // since they route before the shared block below.
+      if (path === '/auth/verify' || path === '/auth/reset') {
         if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) {
           return new Response('Too many attempts — try again in a minute.', { status: 429 });
         }
-        if (method === 'GET') return await handleResetPage(request, env);
-        if (method === 'POST') return await handleResetSubmit(request, env);
+        if (path === '/auth/verify' && method === 'GET') return await handleVerify(request, env);
+        if (path === '/auth/verify' && method === 'POST') return await handleVerifySubmit(request, env);
+        if (path === '/auth/reset' && method === 'GET') return await handleResetPage(request, env);
+        if (path === '/auth/reset' && method === 'POST') return await handleResetSubmit(request, env);
       }
 
       // An empty `cors` map means the Origin wasn't on the allowlist. Reject outright rather
@@ -293,7 +299,10 @@ async function handleCoach(request: Request, env: Env, cors: Record<string, stri
     await recordSpend(env, userId, microUsd - COACH_RESERVE_MICRO_USD);
 
     if (response.stop_reason === 'refusal') {
-      return json({ error: 'refused' }, 200, cors);
+      // 502, not the 200 it used to be — every other error in this file is a non-2xx, and a
+      // client checking res.ok saw "success" with no reply. (The app's copy keys off the error
+      // code, so its message is unchanged.)
+      return json({ error: 'refused' }, 502, cors);
     }
 
     const reply = response.content

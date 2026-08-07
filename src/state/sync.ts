@@ -21,6 +21,7 @@ import { createInitialState } from '../data/initialState';
 import { STORAGE_KEY } from './useApp';
 import { COACH_API_URL, COACH_CONFIGURED } from './coach';
 import { readMeta, writeMeta } from './syncMeta';
+import { mergeDeviceSession, projectDurable } from './durable';
 import type { Account } from './auth';
 import type { AppState } from '../data/types';
 
@@ -128,9 +129,11 @@ export async function pushServerState(
 }
 
 /** Adopt a server copy locally: write the blob + clean meta. The page must be reloaded (or be
- *  about to mount) for the running app to pick it up — callers own that choice. */
+ *  about to mount) for the running app to pick it up — callers own that choice. The server blob
+ *  is a durable projection (no live session), so this device's in-progress workout — if any —
+ *  is grafted back on rather than erased (see durable.ts). */
 export function adoptServerState(accountId: string, server: ServerState): void {
-  writeLocal(server.state);
+  writeLocal(mergeDeviceSession(server.state, readLocalRaw()));
   writeMeta({ accountId, serverVersion: server.version, dirtyAt: null });
 }
 
@@ -146,7 +149,9 @@ export async function flushBeforeLogout(token: string, accountId: string): Promi
   if (!raw) return true;
   let state: unknown;
   try {
-    state = JSON.parse(raw);
+    // Project like every other push — the raw blob carries transient/session fields the server
+    // must never store.
+    state = projectDurable(JSON.parse(raw) as AppState);
   } catch {
     return true; // unreadable local blob — nothing meaningful to flush
   }
@@ -239,15 +244,19 @@ export async function reconcileOnSignIn(token: string, account: Account): Promis
       // Keep local, re-push it. Leave dirtyAt set so the push hook sends it.
       writeMeta({ accountId: account.id, serverVersion: server.version, dirtyAt: meta!.dirtyAt });
     } else {
-      writeLocal(server.state);
+      // Server wins — but a live workout on THIS device isn't on the server (sync pushes only
+      // the durable projection), so graft it back rather than erasing a session in progress.
+      writeLocal(mergeDeviceSession(server.state, localRaw));
       writeMeta({ accountId: account.id, serverVersion: server.version, dirtyAt: null });
     }
   } else if (dirty) {
     // Local has unpushed changes and the server hasn't moved — keep local, push it.
     writeMeta({ accountId: account.id, serverVersion: serverHasState ? server.version : 0, dirtyAt: meta!.dirtyAt });
   } else if (serverHasState) {
-    // Clean local, server is source of truth (may have changed on another device).
-    writeLocal(server.state);
+    // Clean local, server is source of truth (may have changed on another device). Same live-
+    // session graft as above — "clean" refers to durable data; a mid-workout device is clean
+    // the moment its last durable change pushed, yet still owns an unfinished session.
+    writeLocal(mergeDeviceSession(server.state, localRaw));
     writeMeta({ accountId: account.id, serverVersion: server.version, dirtyAt: null });
   } else {
     // Ours per meta but the server has no row (e.g. reset server-side). Keep and re-push local.

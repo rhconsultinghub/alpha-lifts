@@ -1,4 +1,4 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 import { Sheet } from '../Sheet';
 
 function OptionRow({ o }: { o: { label: string; muscle?: string; check: string; bg: string; border: string; stage: () => void } }) {
@@ -11,20 +11,20 @@ function OptionRow({ o }: { o: { label: string; muscle?: string; check: string; 
 }
 
 export function MuscleSwapModal({ vm }: { vm: ViewModel }) {
-  const ms = vm.muscleSwap as any;
+  const ms = vm.muscleSwap;
   if (!ms.open) return null;
   return (
     <Sheet maxHeight="82%" column onClose={ms.backdrop}>
         <div style={{ padding: '16px 20px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>{ms.title}</div>
-          <button onClick={ms.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
+          <button aria-label="Close" onClick={ms.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
         <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.45)', padding: '0 20px 4px' }}>Replacing {ms.exName}.</div>
 
         <div style={{ overflowY: 'auto', flex: 1, padding: '8px 20px 12px' }}>
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>APPLY TO WHICH DAY(S)</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-            {ms.dayOptions.map((d: any, i: number) => (
+            {ms.dayOptions.map((d, i) => (
               <button key={i} onClick={d.toggle} style={{ font: "600 12px 'Inter'", padding: '9px 14px', borderRadius: 10, background: d.bg, border: `1px solid ${d.border}`, color: '#f5f0ea', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {d.label}<span style={{ color: 'oklch(0.72 0.17 35)' }}>{d.check}</span>
               </button>
@@ -44,13 +44,13 @@ export function MuscleSwapModal({ vm }: { vm: ViewModel }) {
               {ms.hasVariants && (
                 <>
                   <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>SAME MOVEMENT, DIFFERENT EQUIPMENT</div>
-                  {ms.variantOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+                  {ms.variantOptions.map((o, i) => <OptionRow key={i} o={o} />)}
                 </>
               )}
               {ms.sameMuscleOptions.length > 0 && (
                 <>
                   <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>SAME MUSCLE GROUP</div>
-                  {ms.sameMuscleOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+                  {ms.sameMuscleOptions.map((o, i) => <OptionRow key={i} o={o} />)}
                 </>
               )}
               {!ms.query && (
@@ -59,7 +59,7 @@ export function MuscleSwapModal({ vm }: { vm: ViewModel }) {
               {ms.showAll && ms.otherMuscleOptions.length > 0 && (
                 <>
                   <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>OTHER MUSCLE GROUPS</div>
-                  {ms.otherMuscleOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+                  {ms.otherMuscleOptions.map((o, i) => <OptionRow key={i} o={o} />)}
                 </>
               )}
             </>

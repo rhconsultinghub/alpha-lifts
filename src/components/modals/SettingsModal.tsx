@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+﻿import { useRef, useState } from 'react';
 import type { ViewModel } from '../../state/viewModel';
 import { useAuth } from '../../state/AuthContext';
 import { parsePlanFile } from '../../data/planIO';
@@ -157,7 +157,7 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
     <Sheet column scrollY>
         <div style={{ padding: '18px 20px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>Settings</div>
-          <button onClick={st.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
+          <button aria-label="Close" onClick={st.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
         <div style={{ padding: '16px 20px calc(24px + var(--safe-b))' }}>
           {auth.configured && auth.account && (

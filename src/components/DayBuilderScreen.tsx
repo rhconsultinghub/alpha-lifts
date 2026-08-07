@@ -1,4 +1,4 @@
-import type { ViewModel } from '../state/viewModel';
+﻿import type { ViewModel } from '../state/viewModel';
 
 export function DayBuilderScreen({ vm }: { vm: ViewModel }) {
   const dayLabel = vm.currentDay ? vm.currentDay.label : '';
@@ -6,7 +6,7 @@ export function DayBuilderScreen({ vm }: { vm: ViewModel }) {
     <>
       <div style={{ padding: '22px 20px 16px', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <button onClick={vm.closeDayBuilder} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14 }}>‹</button>
+          <button aria-label="Back" onClick={vm.closeDayBuilder} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14 }}>‹</button>
           <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>Edit {dayLabel}</div>
           <button onClick={vm.closeDayBuilder} style={{ background: 'oklch(0.65 0.19 35)', border: 'none', color: '#0d0c0b', font: "700 12px 'Inter'", padding: '8px 14px', borderRadius: 100 }}>Done</button>
         </div>
@@ -27,13 +27,15 @@ export function DayBuilderScreen({ vm }: { vm: ViewModel }) {
           ))}
         </div>
 
-        {vm.builderExercises.map((ex: any, i: number) => (
-          <div key={i} style={{ background: 'rgba(255,255,255,.04)', borderRadius: 16, padding: 14, marginBottom: 10 }}>
+        {vm.builderExercises.map((ex, i) => (
+          // id in the key so a removed/replaced row doesn't hand its DOM to a neighbour; the
+          // index stays as a tiebreaker because the same exercise CAN legally appear twice.
+          <div key={`${ex.id}_${i}`} style={{ background: 'rgba(255,255,255,.04)', borderRadius: 16, padding: 14, marginBottom: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
               <button onClick={ex.openDetail} style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', font: "600 16px 'Inter'", color: '#f5f0ea' }}>{ex.name}</button>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 'none' }}>
-                <button onClick={ex.moveUp} disabled={!ex.canMoveUp} style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: ex.canMoveUp ? 'rgba(245,240,234,.75)' : 'rgba(245,240,234,.25)', fontSize: 12 }}>↑</button>
-                <button onClick={ex.moveDown} disabled={!ex.canMoveDown} style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: ex.canMoveDown ? 'rgba(245,240,234,.75)' : 'rgba(245,240,234,.25)', fontSize: 12 }}>↓</button>
+                <button aria-label="Move up" onClick={ex.moveUp} disabled={!ex.canMoveUp} style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: ex.canMoveUp ? 'rgba(245,240,234,.75)' : 'rgba(245,240,234,.25)', fontSize: 12 }}>↑</button>
+                <button aria-label="Move down" onClick={ex.moveDown} disabled={!ex.canMoveDown} style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: ex.canMoveDown ? 'rgba(245,240,234,.75)' : 'rgba(245,240,234,.25)', fontSize: 12 }}>↓</button>
                 <button onClick={ex.remove} style={ex.removePending
                   ? { height: 24, padding: '0 10px', borderRadius: 100, border: 'none', background: 'oklch(0.65 0.19 35)', color: '#0d0c0b', font: "700 10px 'Inter'" }
                   : { width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.6)', fontSize: 12 }}>
@@ -44,9 +46,9 @@ export function DayBuilderScreen({ vm }: { vm: ViewModel }) {
             <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', margin: '2px 0 10px' }}>{ex.muscle} · {ex.repText}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,.06)', borderRadius: 100, padding: '4px 6px' }}>
-                <button onClick={ex.decSets} style={{ width: 22, height: 22, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea' }}>–</button>
+                <button aria-label="Decrease" onClick={ex.decSets} style={{ width: 22, height: 22, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea' }}>–</button>
                 <div className="num" style={{ fontSize: 12, fontWeight: 700, width: 44, textAlign: 'center' }}>{ex.sets} sets</div>
-                <button onClick={ex.incSets} style={{ width: 22, height: 22, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea' }}>+</button>
+                <button aria-label="Increase" onClick={ex.incSets} style={{ width: 22, height: 22, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.1)', color: '#f5f0ea' }}>+</button>
               </div>
               <button onClick={ex.openEquip} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.75)' }}>{ex.equipLabel} ▾</button>
               <button onClick={ex.openReplace} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: 'none', background: 'none', color: 'oklch(0.72 0.15 35)' }}>⇄ Replace</button>

@@ -1,4 +1,4 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 import { Sheet } from '../Sheet';
 
 export function WeekReviewModal({ vm }: { vm: ViewModel }) {
@@ -9,11 +9,11 @@ export function WeekReviewModal({ vm }: { vm: ViewModel }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {wr.selected != null && (
-              <button onClick={wr.back} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 14 }}>‹</button>
+              <button aria-label="Back" onClick={wr.back} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 14 }}>‹</button>
             )}
             <div className="num" style={{ fontSize: 18, fontWeight: 700 }}>{wr.selected != null ? wr.selectedLabel : 'Program History'}</div>
           </div>
-          <button onClick={wr.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
+          <button aria-label="Close" onClick={wr.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
 
         {wr.selected == null ? (

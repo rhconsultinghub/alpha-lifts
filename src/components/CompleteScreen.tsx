@@ -1,8 +1,8 @@
-import type { ViewModel } from '../state/viewModel';
+﻿import type { ViewModel } from '../state/viewModel';
 
 export function CompleteScreen({ vm }: { vm: ViewModel }) {
   const prCount = vm.completeSummary.filter(c => c.isPR).length;
-  const earned = (vm.achievements as any).newlyUnlocked as any[];
+  const earned = vm.achievements.newlyUnlocked;
   return (
     <div style={{ padding: '60px 24px 40px', textAlign: 'center' }}>
       <div style={{ fontSize: 44, marginBottom: 12 }}>🏁</div>

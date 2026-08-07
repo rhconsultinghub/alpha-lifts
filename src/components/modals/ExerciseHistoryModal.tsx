@@ -1,20 +1,20 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 import { Sheet } from '../Sheet';
 
 export function ExerciseHistoryModal({ vm }: { vm: ViewModel }) {
-  const h = vm.exerciseHistoryModal as any;
+  const h = vm.exerciseHistoryModal;
   if (!h.open) return null;
   return (
     <Sheet z={32} dim={0.6} radius={22} maxHeight="80%" padding="18px 20px calc(24px + var(--safe-b))" scrollY onClose={h.close}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div className="num" style={{ fontSize: 18, fontWeight: 700 }}>{h.name}</div>
-          <button onClick={h.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
+          <button aria-label="Close" onClick={h.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
         {h.empty && (
           <div style={{ padding: 16, borderRadius: 14, background: 'rgba(255,255,255,.04)', textAlign: 'center', font: "500 13px 'Inter'", color: 'rgba(245,240,234,.5)' }}>No history logged yet for this exercise.</div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {h.entries.map((entry: any, i: number) => (
+          {h.entries.map((entry, i) => (
             <div key={i} style={{ background: 'rgba(255,255,255,.04)', borderRadius: 14, padding: '12px 14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
                 <div style={{ font: "600 13px 'Inter'" }}>{entry.date}</div>
@@ -24,7 +24,7 @@ export function ExerciseHistoryModal({ vm }: { vm: ViewModel }) {
                 </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {entry.sets.map((st: any, k: number) => (
+                {entry.sets.map((st, k) => (
                   <div key={k} style={{ display: 'flex', gap: 8, font: "400 12px 'Inter'", color: 'rgba(245,240,234,.7)' }}>
                     <span style={{ color: 'rgba(245,240,234,.4)', width: 44 }}>Set {st.num}</span>{st.text}
                   </div>

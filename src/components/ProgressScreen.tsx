@@ -1,19 +1,19 @@
-import { Fragment, type CSSProperties } from 'react';
+﻿import { Fragment, type CSSProperties } from 'react';
 import type { ViewModel } from '../state/viewModel';
 
 const SECTION_LABEL: CSSProperties = { font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em' };
 const CARD: CSSProperties = { background: 'rgba(255,255,255,.03)', borderRadius: 14, padding: 14, marginBottom: 26 };
 
 export function ProgressScreen({ vm }: { vm: ViewModel }) {
-  const bw = vm.bodyWeight as any;
-  const vc = vm.volumeChart as any;
-  const heat = vm.weeklyHeatmap as any;
-  const ep = vm.exerciseProgress as any;
-  const cl = vm.compareLifts as any;
-  const cons = vm.consistency as any;
-  const donut = vm.volumeDonut as any;
-  const dur = vm.durationTrend as any;
-  const fun = vm.funStats as any;
+  const bw = vm.bodyWeight;
+  const vc = vm.volumeChart;
+  const heat = vm.weeklyHeatmap;
+  const ep = vm.exerciseProgress;
+  const cl = vm.compareLifts;
+  const cons = vm.consistency;
+  const donut = vm.volumeDonut;
+  const dur = vm.durationTrend;
+  const fun = vm.funStats;
 
   return (
     <>
@@ -67,7 +67,7 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
             <>
               <svg viewBox="0 0 280 110" style={{ width: '100%', height: 90, display: 'block' }}>
                 <polyline points={bw.linePoints} fill="none" stroke="oklch(0.65 0.19 35)" strokeWidth={2} />
-                {bw.points.map((pt: any, i: number) => <circle key={i} cx={pt.x} cy={pt.y} r={3.5} fill="oklch(0.65 0.19 35)" />)}
+                {bw.points.map((pt, i) => <circle key={i} cx={pt.x} cy={pt.y} r={3.5} fill="oklch(0.65 0.19 35)" />)}
               </svg>
               <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.45)', marginTop: 4 }}>{bw.deltaText}</div>
             </>
@@ -83,7 +83,7 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
         <div style={CARD}>
           <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: 10, height: 100 }}>
             <div style={{ position: 'absolute', left: 0, right: 0, bottom: `${vc.avgLinePct}%`, borderTop: '1px dashed rgba(245,240,234,.3)' }} />
-            {vc.bars.map((v: any, i: number) => (
+            {vc.bars.map((v, i) => (
               <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%', gap: 6, position: 'relative' }}>
                 <div style={{ font: "600 9px 'Inter'", color: v.deltaColor }}>{v.deltaText}</div>
                 <div style={{ width: '100%', maxWidth: 28, borderRadius: '6px 6px 2px 2px', background: 'oklch(0.65 0.19 35)', height: `${v.pct}%` }} />
@@ -97,13 +97,13 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
         <div style={{ ...CARD, overflowX: 'auto', marginTop: 8 }}>
           <div style={{ display: 'grid', gridTemplateColumns: `70px repeat(${heat.cols.length},1fr)`, gap: 4, minWidth: 280 }}>
             <div />
-            {heat.cols.map((c: any, i: number) => (
+            {heat.cols.map((c, i) => (
               <div key={i} style={{ font: "500 8px 'Inter'", color: 'rgba(245,240,234,.35)', textAlign: 'center' }}>{c.label}</div>
             ))}
-            {heat.rows.map((row: any, ri: number) => (
+            {heat.rows.map((row, ri) => (
               <Fragment key={ri}>
                 <div style={{ font: "500 9px 'Inter'", color: 'rgba(245,240,234,.6)', display: 'flex', alignItems: 'center' }}>{row.muscle}</div>
-                {row.cells.map((cell: any, ci: number) => (
+                {row.cells.map((cell, ci) => (
                   <div key={ri + '-' + ci} style={{ aspectRatio: '1', borderRadius: 4, background: cell.bg }} />
                 ))}
               </Fragment>
@@ -129,11 +129,11 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
         </button>
         {vm.progressPickerOpen && (
           <div style={{ maxHeight: 260, overflowY: 'auto', background: 'rgba(255,255,255,.03)', borderRadius: 12, padding: 10, marginBottom: 12 }}>
-            {ep.pickerGroups.map((g: any) => (
+            {ep.pickerGroups.map((g) => (
               <div key={g.muscle} style={{ marginBottom: 10 }}>
                 <div style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.35)', letterSpacing: '.04em', marginBottom: 6 }}>{g.muscle.toUpperCase()}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {g.items.map((it: any) => (
+                  {g.items.map((it) => (
                     <button key={it.id} onClick={it.select} style={{ font: "600 11px 'Inter'", padding: '6px 10px', borderRadius: 100, border: 'none', background: it.isSelected ? 'oklch(0.65 0.19 35)' : it.hasHistory ? 'rgba(255,255,255,.09)' : 'rgba(255,255,255,.04)', color: it.isSelected ? '#0d0c0b' : it.hasHistory ? 'rgba(245,240,234,.85)' : 'rgba(245,240,234,.45)' }}>{it.name}</button>
                   ))}
                 </div>
@@ -150,10 +150,10 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
             <>
               <svg viewBox="0 0 280 110" style={{ width: '100%', height: 110, display: 'block' }}>
                 <polyline points={ep.linePoints} fill="none" stroke="oklch(0.65 0.19 35)" strokeWidth={2} />
-                {ep.points.map((pt: any, i: number) => <circle key={i} cx={pt.x} cy={pt.y} r={3.5} fill="oklch(0.65 0.19 35)" />)}
+                {(ep.points ?? []).map((pt, i) => <circle key={i} cx={pt.x} cy={pt.y} r={3.5} fill="oklch(0.65 0.19 35)" />)}
               </svg>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                {ep.points.map((pt: any, i: number) => <div key={i} style={{ flex: 1, textAlign: 'center', font: "500 9px 'Inter'", color: 'rgba(245,240,234,.4)' }}>{pt.date}</div>)}
+                {(ep.points ?? []).map((pt, i) => <div key={i} style={{ flex: 1, textAlign: 'center', font: "500 9px 'Inter'", color: 'rgba(245,240,234,.4)' }}>{pt.date}</div>)}
               </div>
             </>
           )}
@@ -175,12 +175,12 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
         )}
         {vm.compareLiftPickerOpen && (
           <div style={{ maxHeight: 260, overflowY: 'auto', background: 'rgba(255,255,255,.03)', borderRadius: 12, padding: 10, marginBottom: 12 }}>
-            {cl.pickerGroups.map((g: any) => (
+            {cl.pickerGroups.map((g) => (
               <div key={g.muscle} style={{ marginBottom: 10 }}>
                 <div style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.35)', letterSpacing: '.04em', marginBottom: 6 }}>{g.muscle.toUpperCase()}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {g.items.map((it: any) => (
-                    <button key={it.id} onClick={it.toggle} style={{ font: "600 11px 'Inter'", padding: '6px 10px', borderRadius: 100, border: 'none', background: it.isSelected ? it.color : it.hasHistory ? 'rgba(255,255,255,.09)' : 'rgba(255,255,255,.04)', color: it.isSelected ? '#0d0c0b' : it.hasHistory ? 'rgba(245,240,234,.85)' : 'rgba(245,240,234,.45)' }}>{it.name}</button>
+                  {g.items.map((it) => (
+                    <button key={it.id} onClick={it.toggle} style={{ font: "600 11px 'Inter'", padding: '6px 10px', borderRadius: 100, border: 'none', background: it.isSelected ? (it.color ?? 'oklch(0.65 0.19 35)') : it.hasHistory ? 'rgba(255,255,255,.09)' : 'rgba(255,255,255,.04)', color: it.isSelected ? '#0d0c0b' : it.hasHistory ? 'rgba(245,240,234,.85)' : 'rgba(245,240,234,.45)' }}>{it.name}</button>
                   ))}
                 </div>
               </div>
@@ -192,10 +192,10 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
             <>
               <svg viewBox="0 0 280 110" style={{ width: '100%', height: 110, display: 'block' }}>
                 <line x1={10} y1={55} x2={270} y2={55} stroke="rgba(245,240,234,.2)" strokeDasharray="3,3" />
-                {cl.lines.map((ln: any, i: number) => <polyline key={i} points={ln.linePoints} fill="none" stroke={ln.color} strokeWidth={2} />)}
+                {cl.lines.map((ln, i) => <polyline key={i} points={ln.linePoints} fill="none" stroke={ln.color} strokeWidth={2} />)}
               </svg>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 8 }}>
-                {cl.lines.map((ln: any, i: number) => (
+                {cl.lines.map((ln, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, font: "600 11px 'Inter'" }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: ln.color }} />{ln.name}
                     <span style={{ color: ln.color }}>{ln.deltaText}</span>
@@ -222,7 +222,7 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
             ))}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 5, marginBottom: 10 }}>
-            {cons.cells.map((c: any, i: number) => (
+            {cons.cells.map((c, i) => (
               <div key={i} style={{ aspectRatio: '1', borderRadius: 5, background: c.bg, opacity: c.status === 'future' ? 0.35 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', font: "600 8px 'Inter'", color: 'rgba(245,240,234,.5)' }}>{c.dayNum}</div>
             ))}
           </div>
@@ -237,7 +237,7 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
             <div style={{ position: 'absolute', inset: 22, borderRadius: '50%', background: '#17140f' }} />
           </div>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-            {donut.segments.map((sg: any, i: number) => (
+            {donut.segments.map((sg, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, font: "500 11px 'Inter'", color: 'rgba(245,240,234,.7)' }}>
                 <span style={{ flex: 'none', width: 8, height: 8, borderRadius: '50%', background: sg.color }} />
                 <span style={{ flex: 1, minWidth: 0 }}>{sg.muscle}</span>
@@ -253,7 +253,7 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
         </div>
         <div style={CARD}>
           <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: 10, height: 90, marginBottom: 8 }}>
-            {dur.bars.map((b: any, i: number) => (
+            {dur.bars.map((b, i) => (
               <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%', gap: 4 }}>
                 <div style={{ font: "600 8px 'Inter'", color: 'rgba(245,240,234,.4)' }}>{b.durText}</div>
                 <div style={{ width: '100%', maxWidth: 24, borderRadius: '6px 6px 2px 2px', background: 'oklch(0.7 0.13 230)', height: `${b.durPct}%` }} />

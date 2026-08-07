@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
+﻿import { useEffect } from 'react';
 import type { ViewModel } from '../state/viewModel';
 
 export function AchievementsScreen({ vm }: { vm: ViewModel }) {
-  const a = vm.achievements as any;
+  const a = vm.achievements;
 
   // Marks the currently-earned tier of each unlocked badge as "seen" once this screen has actually
   // rendered (and shown any NEW badges) rather than bundling it into the nav action itself — doing
@@ -28,11 +28,11 @@ export function AchievementsScreen({ vm }: { vm: ViewModel }) {
         </div>
       </div>
 
-      {a.categories.map((cat: any) => (
+      {a.categories.map((cat) => (
         <div key={cat.key} style={{ marginBottom: 24 }}>
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>{cat.label.toUpperCase()}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {cat.items.map((it: any) => (
+            {cat.items.map((it) => (
               <div key={it.id} style={{
                 display: 'flex', gap: 12, alignItems: 'flex-start', padding: '13px 14px', borderRadius: 16,
                 background: it.unlocked ? 'oklch(0.65 0.19 35 / 0.1)' : 'rgba(255,255,255,.03)',

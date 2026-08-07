@@ -16,6 +16,7 @@ import {
 } from './auth';
 import {
   applyPasswordReset,
+  clearVerifyToken,
   createUser,
   findUserByEmail,
   findUserById,
@@ -33,7 +34,7 @@ import {
   userTokenVersion,
   type UserRow
 } from './db';
-import { newResetToken, newVerifyToken, sendResetEmail, sendVerificationEmail, verificationEnabled } from './email';
+import { newResetToken, newVerifyToken, sendResetEmail, sendVerificationEmail, verificationEnabled, verificationRequired } from './email';
 import { json } from './http';
 import { readJsonCapped, MAX_AUTH_BODY_BYTES, MAX_STATE_BODY_BYTES } from './guard';
 
@@ -44,6 +45,8 @@ export interface RouteEnv {
   // before login; when it's absent the whole flow is inert (signup verifies instantly).
   RESEND_API_KEY?: string;
   RESEND_FROM?: string;
+  // "true" = keep blocking unverified logins even without the Resend key (see email.ts).
+  REQUIRE_EMAIL_VERIFICATION?: string;
   // Where the /auth/verify page sends the user back to after confirming. Defaults to the live app.
   APP_URL?: string;
   // Shared KV namespace (same binding the budget/allowlist use) — here it backs the per-email
@@ -200,9 +203,10 @@ export async function handleLogin(request: Request, env: RouteEnv, cors: Cors): 
     : (await verifyPassword(password, DUMMY_HASH), false);
   if (!user || !ok) return json({ error: 'invalid_credentials' }, 401, cors);
 
-  // Correct password but email not confirmed (only enforced when verification is on). Surface it
-  // distinctly so the client can offer a "resend link" instead of a generic failure.
-  if (verificationEnabled(env) && user.email_verified !== 1) {
+  // Correct password but email not confirmed. verificationRequired (not Enabled): enforcement
+  // holds even if the Resend key is rotated out, instead of failing open. Surface it distinctly
+  // so the client can offer a "resend link" instead of a generic failure.
+  if (verificationRequired(env) && user.email_verified !== 1) {
     return json({ error: 'email_not_verified', email: user.email }, 403, cors);
   }
 
@@ -218,12 +222,26 @@ export async function handleLogin(request: Request, env: RouteEnv, cors: Cors): 
   return json({ token, account: toAccountView(user) }, 200, cors);
 }
 
-// A fixed PBKDF2 hash of a random string, used only to burn ~equivalent CPU on the
-// user-not-found path (see handleLogin). Value is irrelevant; it never matches a real password.
-const DUMMY_HASH =
-  'pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+// A fixed PBKDF2 hash shape, used only to burn ~equivalent CPU on the user-not-found path (see
+// handleLogin). Value is irrelevant (it never matches a real password) but the iteration count
+// is DERIVED from the live constant — a hardcoded count silently diverged from real-row timing
+// when the constant was raised, re-opening the timing side-channel the dummy exists to close.
+const DUMMY_HASH = `pbkdf2$${PBKDF2_ITERATIONS}$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`;
 
-// --- GET /auth/verify (browser navigation from the email link) ------------------------------
+// --- /auth/verify (browser navigation from the email link) ----------------------------------
+//
+// GET shows a CONFIRM BUTTON page; the actual verification happens on the button's same-origin
+// POST. It used to happen directly on the GET — but mail scanners and link-prefetchers follow
+// GETs, so the single-use token was routinely consumed before the human ever clicked, and their
+// own click then landed on "already used".
+
+/** Only ever link back to an operator-controlled https URL — APP_URL is config today, but this
+ *  is the one place a config value is interpolated into HTML, so validate + escape anyway. */
+function safeAppUrl(env: RouteEnv): string {
+  const url = env.APP_URL || DEFAULT_APP_URL;
+  if (!/^https:\/\/[A-Za-z0-9./_-]+$/.test(url)) return DEFAULT_APP_URL;
+  return url;
+}
 
 /** A small dark-themed HTML page for the email-link landing. No CORS/JSON — it's a top-level
  *  navigation, so it returns a human page with a button back into the app. */
@@ -247,13 +265,52 @@ function verifyPage(success: boolean, appUrl: string, reason?: string): Response
   return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
+function verifyConfirmPage(token: string): Response {
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verify email — Alpha Lifts</title></head>
+  <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f0e0d;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#f5f0ea">
+    <div style="max-width:360px;padding:32px 24px;text-align:center">
+      <div style="font-size:44px;margin-bottom:14px">📧</div>
+      <div style="font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:10px">Confirm your email</div>
+      <div style="font-size:14px;line-height:1.6;color:#c9c3ba;margin-bottom:26px">One tap to activate your Alpha Lifts account.</div>
+      <form method="POST" action="/auth/verify">
+        <input type="hidden" name="token" value="${token}">
+        <button type="submit" style="background:#f0752f;color:#1a1206;border:none;font-weight:700;font-size:15px;padding:13px 26px;border-radius:12px">Verify my email</button>
+      </form>
+    </div>
+  </body></html>`;
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+}
+
 export async function handleVerify(request: Request, env: RouteEnv): Promise<Response> {
-  const appUrl = env.APP_URL || DEFAULT_APP_URL;
-  const token = new URL(request.url).searchParams.get('token') || '';
+  const appUrl = safeAppUrl(env);
+  const token = safeTokenOrNull(new URL(request.url).searchParams.get('token'));
   if (!env.DB || !token) return verifyPage(false, appUrl);
 
+  // Deliberately no DB write here — just enough validation to show the right page.
   const user = await findUserByVerifyToken(env.DB, token);
   if (!user) return verifyPage(false, appUrl); // token not found (already used / invalid)
+  if (user.verify_expires != null && user.verify_expires < Date.now()) {
+    // Spent anyway — clear it so expired tokens don't accumulate on the row forever.
+    await clearVerifyToken(env.DB, user.id).catch(() => {});
+    return verifyPage(false, appUrl, 'expired');
+  }
+  return verifyConfirmPage(token);
+}
+
+export async function handleVerifySubmit(request: Request, env: RouteEnv): Promise<Response> {
+  const appUrl = safeAppUrl(env);
+  if (!env.DB) return verifyPage(false, appUrl);
+  let token: string | null = null;
+  try {
+    const form = await request.formData();
+    token = safeTokenOrNull(typeof form.get('token') === 'string' ? (form.get('token') as string) : null);
+  } catch {
+    return verifyPage(false, appUrl);
+  }
+  if (!token) return verifyPage(false, appUrl);
+
+  const user = await findUserByVerifyToken(env.DB, token);
+  if (!user) return verifyPage(false, appUrl);
   if (user.verify_expires != null && user.verify_expires < Date.now()) return verifyPage(false, appUrl, 'expired');
 
   await markEmailVerified(env.DB, user.id);
@@ -376,7 +433,10 @@ export async function handlePutState(request: Request, env: RouteEnv, cors: Cors
   } catch {
     return json({ error: 'invalid_state' }, 400, cors);
   }
-  if (stateJson.length > MAX_STATE_BYTES) return json({ error: 'state_too_large' }, 413, cors);
+  // Real byte length, not UTF-16 code units — String.length undercounts multi-byte text ~3x.
+  if (new TextEncoder().encode(stateJson).byteLength > MAX_STATE_BYTES) {
+    return json({ error: 'state_too_large' }, 413, cors);
+  }
 
   // Optimistic concurrency: when the client says which server version its blob was based on,
   // the write only lands if the row is still at that version — otherwise 409 with the current
@@ -486,7 +546,7 @@ function resetFormPage(token: string, error?: string): Response {
 }
 
 export async function handleResetPage(request: Request, env: RouteEnv): Promise<Response> {
-  const appUrl = env.APP_URL || DEFAULT_APP_URL;
+  const appUrl = safeAppUrl(env);
   const token = safeTokenOrNull(new URL(request.url).searchParams.get('token'));
   if (!env.DB || !token) return resetMessagePage('⚠️', 'Invalid link', 'That reset link is invalid or has already been used.', appUrl);
 
@@ -499,7 +559,7 @@ export async function handleResetPage(request: Request, env: RouteEnv): Promise<
 }
 
 export async function handleResetSubmit(request: Request, env: RouteEnv): Promise<Response> {
-  const appUrl = env.APP_URL || DEFAULT_APP_URL;
+  const appUrl = safeAppUrl(env);
   if (!env.DB) return resetMessagePage('⚠️', 'Not available', 'Password reset isn’t configured on this server.', appUrl);
 
   let token: string | null = null;

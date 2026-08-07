@@ -41,12 +41,21 @@ function periodKey(userId: string): string {
   return `spend:${userId}:${month}`;
 }
 
+/** The one model id every AI route uses. Lives here — next to PRICING — because the two must
+ *  move together: it used to be duplicated across index/onboard/parsePlan, where a one-file swap
+ *  to an unpriced id silently made every request cost $0 and the cap unenforceable. */
+export const MODEL = 'claude-opus-4-8';
+
 /** Per-million-token USD pricing, keyed by model id. Update when you change MODEL. */
 const PRICING: Record<string, { input: number; output: number }> = {
   'claude-opus-4-8': { input: 5, output: 25 },
   'claude-sonnet-5': { input: 3, output: 15 },
   'claude-haiku-4-5': { input: 1, output: 5 }
 };
+
+/** Rate used when the model id isn't in PRICING: the most expensive known one, so a forgotten
+ *  pricing entry OVER-counts against the cap instead of silently metering nothing. */
+const FALLBACK_RATE = PRICING['claude-opus-4-8'];
 
 export interface ApiUsage {
   input_tokens: number;
@@ -57,8 +66,13 @@ export interface ApiUsage {
 
 /** Cost of one API call in micro-dollars (millionths of a dollar), as an integer. */
 export function costMicroUsd(model: string, usage: ApiUsage): number {
-  const rate = PRICING[model];
-  if (!rate) return 0; // unknown model: record zero rather than guess a wrong number
+  let rate = PRICING[model];
+  if (!rate) {
+    // Unknown model: meter at the priciest known rate rather than 0 — under-counting here used
+    // to mean a model swap could disable the spend cap entirely, with nothing erroring anywhere.
+    console.error(`costMicroUsd: no pricing for model "${model}" — metering at the fallback (opus) rate; add it to PRICING`);
+    rate = FALLBACK_RATE;
+  }
 
   // Cache writes bill at ~1.25x input, cache reads at ~0.1x. Both are zero today (we don't
   // set cache_control yet) but the terms are here so the number stays right if that changes.

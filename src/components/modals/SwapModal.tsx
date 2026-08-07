@@ -1,4 +1,4 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 import { Sheet } from '../Sheet';
 
 function OptionRow({ o }: { o: { label: string; muscle?: string; check: string; bg: string; border: string; stage: () => void } }) {
@@ -17,7 +17,7 @@ export function SwapModal({ vm }: { vm: ViewModel }) {
     <Sheet maxHeight="82%" column onClose={sw.backdrop}>
         <div style={{ padding: '16px 20px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>{sw.title}</div>
-          <button onClick={sw.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
+          <button aria-label="Close" onClick={sw.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
         <div style={{ display: 'flex', gap: 6, padding: '10px 20px' }}>
           <button onClick={sw.tabEquip} style={{ flex: 1, font: "600 12px 'Inter'", padding: 10, borderRadius: 10, border: 'none', background: sw.equipTabBg, color: sw.equipTabColor }}>Change Equipment</button>
@@ -28,7 +28,7 @@ export function SwapModal({ vm }: { vm: ViewModel }) {
           {sw.showEquip && (
             <>
               <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.45)', marginBottom: 10 }}>Same exercise, different equipment. Only affects {sw.exName}.</div>
-              {sw.equipOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+              {sw.equipOptions.map((o, i) => <OptionRow key={i} o={o} />)}
             </>
           )}
           {sw.showReplace && (
@@ -46,13 +46,13 @@ export function SwapModal({ vm }: { vm: ViewModel }) {
                   {sw.hasVariants && (
                     <>
                       <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>SAME MOVEMENT, DIFFERENT EQUIPMENT</div>
-                      {sw.variantOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+                      {sw.variantOptions.map((o, i) => <OptionRow key={i} o={o} />)}
                     </>
                   )}
                   {sw.sameMuscleOptions.length > 0 && (
                     <>
                       <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>SAME MUSCLE GROUP</div>
-                      {sw.sameMuscleOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+                      {sw.sameMuscleOptions.map((o, i) => <OptionRow key={i} o={o} />)}
                     </>
                   )}
                   {!sw.query && (
@@ -61,7 +61,7 @@ export function SwapModal({ vm }: { vm: ViewModel }) {
                   {sw.showAll && sw.otherMuscleOptions.length > 0 && (
                     <>
                       <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', margin: '6px 0 8px' }}>OTHER MUSCLE GROUPS</div>
-                      {sw.otherMuscleOptions.map((o: any, i: number) => <OptionRow key={i} o={o} />)}
+                      {sw.otherMuscleOptions.map((o, i) => <OptionRow key={i} o={o} />)}
                     </>
                   )}
                 </>

@@ -1,4 +1,4 @@
-import { EXLIB, DAY_THEMES, MUSCLES, TRAINING_LABELS, TRAINING_TYPE_DESCS, EQUIP_CATALOG } from '../data/exercises';
+﻿import { EXLIB, DAY_THEMES, MUSCLES, TRAINING_LABELS, TRAINING_TYPE_DESCS, EQUIP_CATALOG } from '../data/exercises';
 import { SPLIT_PRESETS, DAY_TYPE_LABELS, WEEKDAYS } from '../data/wizard';
 import { WARMUP_LIBRARY } from '../data/warmups';
 import { ACHIEVEMENT_FAMILIES, CATEGORY_LABELS, TOTAL_POSSIBLE_POINTS, TOTAL_TIERS, type AchievementCategory } from '../data/achievements';
@@ -322,7 +322,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
 
   const newProgramWizard = (() => {
     const w = s.newProgramWizard;
-    if (!w) return { open: false };
+    if (!w) return { open: false as const };
     const planOptions = (Object.keys(TRAINING_LABELS) as TrainingType[]).map(k => {
       const sel = k === w.trainingType;
       return { label: TRAINING_LABELS[k], select: () => actions.setWizardField('trainingType', k), bg: sel ? ACCENT : 'rgba(255,255,255,.06)', color: sel ? '#0d0c0b' : 'rgba(245,240,234,.7)', border: sel ? ACCENT : 'rgba(255,255,255,.12)' };
@@ -360,7 +360,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       canRemove: w.customDays.length > 1
     }));
     return {
-      open: true, name: w.name, setName: (v: string) => actions.setWizardField('name', v),
+      open: true as const, name: w.name, setName: (v: string) => actions.setWizardField('name', v),
       planOptions, splitOptions, isCustom: customSel, customDays,
       addDay: actions.addWizardCustomDay,
       showPrefill: !customSel,
@@ -461,13 +461,15 @@ export function buildViewModel(state: AppState, actions: Actions) {
   })();
 
   // ---------- day view ----------
-  let currentDay: any = null;
-  if (s.activeDayKey) {
+  // Named builder + inferred return type (was `let currentDay: any` assigned in an if-block —
+  // the single biggest source of the `as any` casts components used to need).
+  const buildCurrentDay = () => {
+    if (!s.activeDayKey) return null;
     const dayKey = s.activeDayKey;
     const day = s.program[dayKey];
     const w = dayWarning(s, dayKey, bars);
     const ranks = dayMuscleRanks(s, dayKey);
-    let balanceTip: any = { show: false };
+    let balanceTip: { show: boolean; text?: string; ctaLabel?: string; swap?: () => void } = { show: false };
     const daySums: Record<string, number[]> = {};
     day.exercises.forEach((ex, i) => { const m = EXLIB[ex.id].muscle; (daySums[m] = daySums[m] || []).push(i); });
     const dominantEntry = Object.entries(daySums).find(([, idxs]) => idxs.length >= 2);
@@ -486,7 +488,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
       }
     }
 
-    currentDay = {
+    return {
       label: day.label, dow: day.dow, skipped: day.skipped, balanceTip,
       skipLabel: day.skipped ? 'Skipped ✓' : 'Skip this week',
       skipColor: day.skipped ? ACCENT_TEXT : 'rgba(245,240,234,.6)',
@@ -511,14 +513,15 @@ export function buildViewModel(state: AppState, actions: Actions) {
         } as ExerciseRowVM;
       })
     };
-  }
+  };
+  const currentDay = buildCurrentDay();
 
   // ---------- day builder ----------
-  let builderExercises: any[] = [];
-  if (s.activeDayKey) {
+  const buildBuilderExercises = () => {
+    if (!s.activeDayKey) return [];
     const dayKey = s.activeDayKey;
     const day = s.program[dayKey];
-    builderExercises = day.exercises.map((ex, i) => {
+    return day.exercises.map((ex, i) => {
       const lib = EXLIB[ex.id];
       const equip = lib.equip[ex.equipIdx];
       const prev = day.exercises[i - 1];
@@ -556,11 +559,12 @@ export function buildViewModel(state: AppState, actions: Actions) {
         linkedElsewhereName: elsewherePartner ? EXLIB[elsewherePartner.id].name : null
       };
     });
-  }
+  };
+  const builderExercises = buildBuilderExercises();
 
   // ---------- workout ----------
-  let workout: any = null;
-  if (s.workout) {
+  const buildWorkout = () => {
+    if (!s.workout) return null;
     const dayKey = s.workout.dayKey;
     const dayExercises = s.workout.dayExercises;
     const exIndex = s.workout.exIndex;
@@ -600,7 +604,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     const supersetPartner = ex.supersetGroup ? dayExercises.find((e2, i2) => i2 !== exIndex && e2.supersetGroup === ex.supersetGroup) : null;
     const supersetPartnerName = supersetPartner ? EXLIB[supersetPartner.id].name : null;
 
-    workout = {
+    return {
       progressText: 'Exercise ' + (exIndex + 1) + ' of ' + dayExercises.length,
       // Raw timestamp — the live elapsed clock is derived in the component via useElapsedText,
       // so ticking it re-renders only that leaf instead of rebuilding this whole view model.
@@ -687,36 +691,38 @@ export function buildViewModel(state: AppState, actions: Actions) {
         });
       })()
     };
-  }
+  };
+  const workout = buildWorkout();
 
   // ---------- detail overlay ----------
-  let detail: any = { open: false };
-  if (s.detail) {
+  const buildDetail = () => {
+    if (!s.detail) return { open: false as const };
     const dayKey = s.detail.dayKey;
     const inSession = s.workout && s.workout.dayKey === dayKey;
     const ex = inSession ? s.workout!.dayExercises[s.detail.exIndex] : s.program[dayKey].exercises[s.detail.exIndex];
-    if (ex) {
-      const lib = EXLIB[ex.id];
-      const equip = lib.equip[ex.equipIdx];
-      detail = {
-        open: true, id: ex.id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label, cue: lib.cue,
-        videoId: lib.videoId,
-        secondaryText: lib.secondary.length ? lib.secondary.join(', ') : 'None',
-        close: actions.closeDetail,
-        openSwap: () => { actions.closeDetail(); actions.openSwap(dayKey, s.detail!.exIndex, 'equip', false); }
-      };
-    }
-  }
+    if (!ex) return { open: false as const };
+    const lib = EXLIB[ex.id];
+    const equip = lib.equip[ex.equipIdx];
+    return {
+      open: true as const, id: ex.id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern, equipLabel: equip.label, cue: lib.cue,
+      videoId: lib.videoId,
+      secondaryText: lib.secondary.length ? lib.secondary.join(', ') : 'None',
+      close: actions.closeDetail,
+      openSwap: () => { actions.closeDetail(); actions.openSwap(dayKey, s.detail!.exIndex, 'equip', false); }
+    };
+  };
+  const detail = buildDetail();
 
   // ---------- Day View quick-edit modal (weight/reps/sets/equip) ----------
   // Program-plan-only (not usable mid-workout, where the same fields are already editable per-set
   // via the working-set steppers on WorkoutScreen) — so this always reads/writes s.program
   // directly, unlike `detail` above which also has an in-session variant.
-  let quickEdit: any = { open: false };
-  if (s.quickEdit) {
+  const buildQuickEdit = () => {
+    if (!s.quickEdit) return { open: false as const };
     const { dayKey, exIndex } = s.quickEdit;
     const ex = s.program[dayKey]?.exercises[exIndex];
-    if (ex) {
+    if (!ex) return { open: false as const };
+    {
       const lib = EXLIB[ex.id];
       const equip = lib.equip[ex.equipIdx];
       const isTime = lib.trackingMode === 'time';
@@ -725,8 +731,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
       const step = weightStep(s.units);
       const dispWeight = s.units === 'lb' ? Math.round((last.weight * 2.20462) / 5) * 5 : Math.round(last.weight * 2) / 2;
       const plates = equip.v === 'barbell' ? platesBreakdown(dispWeight, s.units) : null;
-      quickEdit = {
-        open: true, id: ex.id, name: lib.name, muscle: lib.muscle, equipLabel: equip.label,
+      return {
+        open: true as const, id: ex.id, name: lib.name, muscle: lib.muscle, equipLabel: equip.label,
         sets: ex.sets, isTime, isBodyweight,
         decSets: () => actions.changeSets(dayKey, exIndex, -1),
         incSets: () => actions.changeSets(dayKey, exIndex, 1),
@@ -744,11 +750,12 @@ export function buildViewModel(state: AppState, actions: Actions) {
         close: actions.closeQuickEdit
       };
     }
-  }
+  };
+  const quickEdit = buildQuickEdit();
 
   // ---------- swap modal ----------
-  let swap: any = { open: false };
-  if (s.swap) {
+  const buildSwap = () => {
+    if (!s.swap) return { open: false as const };
     const dayKey = s.swap.dayKey;
     const inSession = !!s.workout && s.workout.dayKey === dayKey && !s.swap.isAdd;
     const exercisesArr = inSession ? s.workout!.dayExercises : s.program[dayKey].exercises;
@@ -795,8 +802,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
 
     const confirmDisabled = isAdd ? !staged : (tab === 'equip' ? s.swap.stagedEquipIdx == null : !staged);
 
-    swap = {
-      open: true,
+    return {
+      open: true as const,
       title: isAdd ? 'Add Exercise' : (tab === 'equip' ? 'Change Equipment' : 'Replace Exercise'),
       exName: currentLib ? currentLib.name : '',
       close: actions.closeSwap, backdrop: actions.closeSwap,
@@ -822,11 +829,12 @@ export function buildViewModel(state: AppState, actions: Actions) {
       confirmBg: confirmDisabled ? 'rgba(255,255,255,.15)' : ACCENT,
       confirmLabel: isAdd ? 'Add to Day' : (tab === 'equip' ? 'Confirm Equipment Change' : 'Confirm Exercise Swap')
     };
-  }
+  };
+  const swap = buildSwap();
 
   // ---------- muscle drill-down quick "switch exercise" (can span multiple days) ----------
-  let muscleSwap: any = { open: false };
-  if (s.muscleSwap) {
+  const buildMuscleSwap = () => {
+    if (!s.muscleSwap) return { open: false as const };
     const ms = s.muscleSwap;
     const currentLib = EXLIB[ms.exId];
     // union of every applicable day's theme, so the replacement list stays valid no matter which
@@ -864,8 +872,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
     const sameMuscleOptions = nonVariantIds.filter(id => EXLIB[id].muscle === currentLib.muscle).map(mkOpt);
     const otherMuscleOptions = nonVariantIds.filter(id => EXLIB[id].muscle !== currentLib.muscle).map(mkOpt);
 
-    muscleSwap = {
-      open: true,
+    return {
+      open: true as const,
       title: 'Switch Exercise',
       exName: currentLib.name,
       close: actions.closeMuscleSwap, backdrop: actions.closeMuscleSwap,
@@ -884,15 +892,16 @@ export function buildViewModel(state: AppState, actions: Actions) {
       confirmBg: !staged ? 'rgba(255,255,255,.15)' : ACCENT,
       confirmLabel: 'Confirm Exercise Swap'
     };
-  }
+  };
+  const muscleSwap = buildMuscleSwap();
 
   // ---------- muscle drill ----------
   const muscleDrill = (() => {
     const name = s.muscleDrill;
-    if (!name) return { open: false };
+    if (!name) return { open: false as const };
     const bar = bars.find(b => b.name === name);
-    if (!bar) return { open: false };
-    const rows: any[] = [];
+    if (!bar) return { open: false as const };
+    const rows: { day: string; name: string; sets: number; equip: string; switchExercise: () => void }[] = [];
     const secondaryCounts: Record<string, number> = {};
     s.dayOrder.forEach(k => {
       s.program[k].exercises.forEach(ex => {
@@ -918,7 +927,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     }
     const statusLabel = bar.status === 'over' ? 'above range' : bar.status === 'under' ? 'below range' : 'in range';
     return {
-      open: true, name, color: bar.color, rows, alsoTargets, rec,
+      open: true as const, name, color: bar.color, rows, alsoTargets, rec,
       setsText: String(Math.round(bar.sets * 10) / 10), rangeText: bar.rangeText, aim: bar.aim, statusLabel,
     };
   })();
@@ -926,11 +935,11 @@ export function buildViewModel(state: AppState, actions: Actions) {
   // ---------- warm-up detail ----------
   const warmupDetail = (() => {
     const id = s.warmupDetailId;
-    if (!id) return { open: false };
+    if (!id) return { open: false as const };
     const move = WARMUP_LIBRARY.find(m => m.id === id);
-    if (!move) return { open: false };
+    if (!move) return { open: false as const };
     return {
-      open: true, name: move.name, cue: move.cue, howTo: move.howTo, videoId: move.videoId,
+      open: true as const, name: move.name, cue: move.cue, howTo: move.howTo, videoId: move.videoId,
       close: actions.closeWarmupDetail
     };
   })();
@@ -1223,11 +1232,11 @@ export function buildViewModel(state: AppState, actions: Actions) {
     })(),
     libraryDetail: (() => {
       const id = s.libraryDetailId;
-      if (!id || !EXLIB[id]) return { open: false };
+      if (!id || !EXLIB[id]) return { open: false as const };
       const lib = EXLIB[id];
       const isCustom = id in s.customExercises;
       return {
-        open: true, id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern,
+        open: true as const, id, name: lib.name, muscle: lib.muscle, pattern: lib.pattern,
         videoId: lib.videoId,
         secondaryText: lib.secondary.length ? lib.secondary.join(', ') : 'None',
         equipChips: lib.equip,
@@ -1245,7 +1254,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     })(),
     exerciseForm: (() => {
       const f = s.exerciseForm;
-      if (!f) return { open: false };
+      if (!f) return { open: false as const };
       const muscleOptions = (MUSCLES).map(m => {
         const sel = m === f.muscle;
         return { label: m, select: () => actions.toggleFormMuscle(m), bg: sel ? ACCENT : 'rgba(255,255,255,.06)', color: sel ? '#0d0c0b' : 'rgba(245,240,234,.7)', border: sel ? ACCENT : 'rgba(255,255,255,.12)' };
@@ -1259,7 +1268,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
         return { label: e.label, toggle: () => actions.toggleFormEquip(e.v), bg: sel ? 'oklch(0.65 0.19 35 / 0.2)' : 'rgba(255,255,255,.06)', color: sel ? '#f5f0ea' : 'rgba(245,240,234,.6)', border: sel ? 'oklch(0.65 0.19 35 / 0.6)' : 'rgba(255,255,255,.12)' };
       });
       return {
-        open: true,
+        open: true as const,
         title: f.editingId ? 'Edit Exercise' : 'Add Exercise',
         name: f.name, setName: (v: string) => actions.setExerciseFormField('name', v),
         muscleOptions, secondaryOptions, equipOptions,
@@ -1300,11 +1309,11 @@ export function buildViewModel(state: AppState, actions: Actions) {
     // ---------- exercise history modal (grouped by session date + program day) ----------
     exerciseHistoryModal: (() => {
       const id = s.exerciseHistoryModalId;
-      if (!id || !EXLIB[id]) return { open: false };
+      if (!id || !EXLIB[id]) return { open: false as const };
       const isTime = EXLIB[id].trackingMode === 'time';
       const entries = (s.exerciseHistory[id] || []).slice().reverse();
       return {
-        open: true, name: EXLIB[id].name,
+        open: true as const, name: EXLIB[id].name,
         entries: entries.map(e => {
           const sets = e.sets && e.sets.length ? e.sets : [{ weight: e.weight, reps: e.reps }];
           const equipLabel = e.equip ? (EXLIB[id].equip.find(o => o.v === e.equip)?.label || '') : '';
@@ -1381,9 +1390,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
     archiveDetail: (() => {
       const id = s.archiveDetailId;
       const entry = id ? s.history.find(h => h.id === id) : null;
-      if (!entry) return { open: false };
+      if (!entry) return { open: false as const };
       return {
-        open: true, day: entry.day, date: entry.date, weekLabel: 'Week ' + (entry.weekNumber || 1),
+        open: true as const, day: entry.day, date: entry.date, weekLabel: 'Week ' + (entry.weekNumber || 1),
         isSkipped: entry.status === 'skipped',
         volume: fmtWeight(entry.volumeKg, s.units), durationText: (entry.durationMin || 0) + ' min',
         exercises: entry.exercises || [],

@@ -1,10 +1,10 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 
 // Guards the mid-workout "✕ Remove" action. Removing an exercise from a live session drops it from
 // the day and discards anything already logged against it, with no undo — too destructive to sit
 // one mis-tap away from the set-logging controls it lives next to.
 export function ConfirmRemoveExerciseModal({ vm }: { vm: ViewModel }) {
-  const c = vm.confirmRemoveExercise as any;
+  const c = vm.confirmRemoveExercise;
   if (!c.show) return null;
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 45, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'rgba(6,6,5,.6)', backdropFilter: 'blur(2px)' }}>

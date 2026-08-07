@@ -19,11 +19,25 @@ export interface EmailEnv {
   RESEND_API_KEY?: string;
   /** Verified sender, e.g. "Alpha Lifts <noreply@yourdomain.com>". */
   RESEND_FROM?: string;
+  /** "true" = keep ENFORCING verification (blocking unverified logins) even if the Resend key
+   *  goes missing. See verificationRequired below. */
+  REQUIRE_EMAIL_VERIFICATION?: string;
 }
 
-/** Verification is active only when a Resend key is configured. */
+/** Can we SEND verification/reset emails? Gates the flows that create tokens and fire mail —
+ *  without a key, signup must not create an unverified account it can never send a link for. */
 export function verificationEnabled(env: EmailEnv): boolean {
   return !!env.RESEND_API_KEY;
+}
+
+/**
+ * Must an unverified account be BLOCKED from logging in? Sending and enforcing used to share one
+ * gate (key presence), which failed open: rotating the key out for an afternoon silently let
+ * every unverified account log in. With REQUIRE_EMAIL_VERIFICATION="true", enforcement survives
+ * a missing key (fail closed); grandfathered/verified accounts are unaffected either way.
+ */
+export function verificationRequired(env: EmailEnv): boolean {
+  return verificationEnabled(env) || (env.REQUIRE_EMAIL_VERIFICATION ?? '').toLowerCase() === 'true';
 }
 
 function base64url(bytes: Uint8Array): string {

@@ -1,4 +1,4 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 import { Sheet } from '../Sheet';
 
 function Chip({ o }: { o: { label: string; select?: () => void; toggle?: () => void; bg: string; color: string; border: string } }) {
@@ -8,13 +8,13 @@ function Chip({ o }: { o: { label: string; select?: () => void; toggle?: () => v
 }
 
 export function ExerciseFormModal({ vm }: { vm: ViewModel }) {
-  const f = vm.exerciseForm as any;
+  const f = vm.exerciseForm;
   if (!f.open) return null;
   return (
     <Sheet maxHeight="88%" column scrollY>
         <div style={{ padding: '18px 20px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>{f.title}</div>
-          <button onClick={f.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
+          <button aria-label="Close" onClick={f.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
         <div style={{ padding: '14px 20px 4px' }}>
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 8 }}>NAME</div>
@@ -22,17 +22,17 @@ export function ExerciseFormModal({ vm }: { vm: ViewModel }) {
 
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 8 }}>PRIMARY MUSCLE</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
-            {f.muscleOptions.map((m: any, i: number) => <Chip key={i} o={m} />)}
+            {f.muscleOptions.map((m, i) => <Chip key={i} o={m} />)}
           </div>
 
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 8 }}>SECONDARY MUSCLES</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
-            {f.secondaryOptions.map((m: any, i: number) => <Chip key={i} o={m} />)}
+            {f.secondaryOptions.map((m, i) => <Chip key={i} o={m} />)}
           </div>
 
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 8 }}>EQUIPMENT</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
-            {f.equipOptions.map((e: any, i: number) => <Chip key={i} o={e} />)}
+            {f.equipOptions.map((e, i) => <Chip key={i} o={e} />)}
           </div>
 
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 8 }}>MOVEMENT PATTERN</div>

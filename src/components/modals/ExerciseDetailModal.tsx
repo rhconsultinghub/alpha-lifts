@@ -1,4 +1,4 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 import { ExercisePhoto } from '../ExercisePhoto';
 import { VideoEmbed } from '../VideoEmbed';
 
@@ -8,7 +8,7 @@ export function ExerciseDetailModal({ vm }: { vm: ViewModel }) {
   return (
     <div style={{ position: 'absolute', inset: 0, background: '#0f0e0d', zIndex: 20, overflowY: 'auto' }} className="scr">
       <div style={{ padding: '18px 20px 40px' }}>
-        <button onClick={d.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14, marginBottom: 16 }}>✕</button>
+        <button aria-label="Close" onClick={d.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14, marginBottom: 16 }}>✕</button>
         <div style={{ width: '100%', height: 180, borderRadius: 18, marginBottom: 16, overflow: 'hidden' }}>
           <ExercisePhoto id={d.id} pattern={d.pattern} size={180} radius={18} />
         </div>

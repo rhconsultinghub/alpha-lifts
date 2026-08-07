@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { isDirty, markDirty, markPushed, pushServerState, adoptServerState } from './sync';
 import { readMeta, writeMeta } from './syncMeta';
+import { projectDurable } from './durable';
 import type { AppState } from '../data/types';
 
 /**
@@ -48,16 +49,18 @@ export function useCloudSync(state: AppState): void {
     if (!token || !account || pushing.current) return;
     pushing.current = true;
     try {
-      const snapshot = stateRef.current;
-      const serialized = JSON.stringify(snapshot);
+      // Push the durable projection only — the server never stores this device's open modals,
+      // in-flight inputs, or live workout session (see durable.ts).
+      const payload = projectDurable(stateRef.current);
+      const serialized = JSON.stringify(payload);
       const base = readMeta()?.serverVersion ?? 0;
 
-      let res = await pushServerState(token, snapshot, base);
+      let res = await pushServerState(token, payload, base);
       if (res.status === 'conflict') {
         const dirtyAt = readMeta()?.dirtyAt ?? 0;
         if (dirtyAt >= res.server.updatedAt) {
           // Local is newer (LWW) — retry the same blob on top of the server's current version.
-          res = await pushServerState(token, snapshot, res.server.version);
+          res = await pushServerState(token, payload, res.server.version);
         } else {
           // Server is newer — this device's blob loses. Adopt the server copy and reload so the
           // running app actually shows it; everything local worth keeping was, by LWW, older.
@@ -68,13 +71,15 @@ export function useCloudSync(state: AppState): void {
       }
 
       if (res.status === 'ok') {
-        // Only mark clean if no edit landed while the PUT was in flight — state identity changes
-        // on every setState, so `snapshot === current` is an exact "nothing newer" check.
-        if (stateRef.current === snapshot) {
+        // Only mark clean if no DURABLE edit landed while the PUT was in flight. Content-based on
+        // the projection (not object identity): a transient-only change (keystroke, modal open)
+        // creates a new state object but an identical projection, and must not hold the dirty
+        // flag hostage.
+        if (JSON.stringify(projectDurable(stateRef.current)) === serialized) {
           markPushed(account.id, res.version);
         } else {
-          // Newer edits are pending (their debounce timer is running): record the advanced
-          // server version but stay dirty so they push.
+          // Newer durable edits are pending (their debounce timer is running): record the
+          // advanced server version but stay dirty so they push.
           const meta = readMeta();
           writeMeta({ accountId: account.id, serverVersion: res.version, dirtyAt: meta?.dirtyAt ?? Date.now() });
         }
@@ -89,7 +94,9 @@ export function useCloudSync(state: AppState): void {
   useEffect(() => {
     if (!configured || !token || !account) return;
 
-    const serialized = JSON.stringify(state);
+    // Compare projections: a change to transient/UI state (every keystroke used to land here)
+    // serializes identically and returns early below — no dirty-marking, no scheduled push.
+    const serialized = JSON.stringify(projectDurable(state));
 
     // First run for this session: establish the baseline. If sync-meta says we're clean, the
     // current blob equals the server's and there's nothing to push. If it's dirty (a carry-up or
@@ -126,7 +133,7 @@ export function useCloudSync(state: AppState): void {
       // Fire-and-forget: no awaiting in pagehide. Deliberately does NOT touch sync-meta — if the
       // send lands, the next boot's reconcile sees server.updatedAt >= dirtyAt and adopts the
       // (identical) server copy; if it doesn't, the blob is still marked dirty for a real retry.
-      void pushServerState(token, stateRef.current, readMeta()?.serverVersion ?? 0, true);
+      void pushServerState(token, projectDurable(stateRef.current), readMeta()?.serverVersion ?? 0, true);
     };
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') onPagehide();

@@ -1,4 +1,24 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+/* Self-hosted variable fonts (latin subsets, downloaded once from Google Fonts' own woff2 CDN).
+   Replaces the render-blocking fonts.googleapis.com @import — a third-party origin in an app
+   that advertises full offline capability: the import wasn't precached, so offline installs
+   silently fell back to system fonts. Referenced RELATIVELY from src/assets so Vite hashes them
+   and rebases for the /alpha-lifts/ production base (absolute /public paths in CSS are not
+   rebased); the hashed .woff2 output is in the service-worker precache via globPatterns, and
+   the CSP's font-src 'self' covers them. ~70 KB total for both. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./assets/fonts/inter-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url('./assets/fonts/space-grotesk-latin.woff2') format('woff2');
+}
 
 :root {
   /* Measured height of TabBar.tsx (border + padding + icon + label). Single source of truth for

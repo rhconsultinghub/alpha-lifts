@@ -374,6 +374,9 @@ export interface AppState {
   /** Day Builder ✕ tap-twice confirm: index of the exercise whose permanent removal is pending.
    *  (Optional/defaulted — added post-launch, loadInitial's shallow merge carries old blobs.) */
   confirmRemoveBuilderIdx?: number | null;
+  /** Which one-time migrations this blob has been through (see MIGRATIONS in useApp.ts). Blobs
+   *  written before versioning existed have no field and read as 0. */
+  schemaVersion?: number;
   exerciseForm: ExerciseFormState | null;
   newProgramWizard: NewProgramWizardState | null;
 

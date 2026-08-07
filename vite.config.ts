@@ -28,6 +28,9 @@ export default defineConfig(({ command }) => ({
       injectRegister: false,
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
+        // Explicit stable identity: without `id` Chromium derives app identity from start_url,
+        // so changing `base`/start_url later would orphan existing installs.
+        id: '/alpha-lifts/',
         name: 'Alpha Lifts',
         short_name: 'Alpha Lifts',
         description: 'Mobile fitness progress tracker — plan workouts, log sets, and track muscle-group volume over time.',
@@ -50,7 +53,8 @@ export default defineConfig(({ command }) => ({
         // cache on demand via a CacheFirst runtime route in sw.ts (a photo you've viewed once is
         // still available offline; unvisited ones need one online view first). The pngs stay:
         // body-diagram art + muscle masks + icons are core UI, ~350 KB total.
-        globPatterns: ['**/*.{js,css,html,svg,png,ico}']
+        // woff2: the two self-hosted font files (~70 KB) — they must work offline.
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}']
       }
     })
   ],

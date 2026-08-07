@@ -1,14 +1,14 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 import { Sheet } from '../Sheet';
 
 export function MuscleDrillModal({ vm }: { vm: ViewModel }) {
-  const md = vm.muscleDrill as any;
+  const md = vm.muscleDrill;
   if (!md.open) return null;
   return (
     <Sheet dim={0.6} radius={22} maxHeight="80%" padding="18px 20px calc(22px + var(--safe-b))" scrollY onClose={vm.closeMuscleDrill}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <div className="num" style={{ fontSize: 18, fontWeight: 700 }}>{md.name}</div>
-          <button onClick={vm.closeMuscleDrill} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
+          <button aria-label="Close" onClick={vm.closeMuscleDrill} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
         <div className="num" style={{ fontSize: 13, fontWeight: 700, color: md.color, marginBottom: 14 }}>{md.setsText} sets/week · range {md.rangeText} · {md.statusLabel}</div>
         {md.alsoTargets.length > 0 && (
@@ -24,7 +24,7 @@ export function MuscleDrillModal({ vm }: { vm: ViewModel }) {
         )}
         <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 8 }}>CONTRIBUTING EXERCISES</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
-          {md.rows.map((r: any, i: number) => (
+          {md.rows.map((r, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 12, padding: '10px 12px' }}>
               <div>
                 <div style={{ font: "600 13px 'Inter'" }}>{r.name}</div>

@@ -21,18 +21,16 @@ import Anthropic from '@anthropic-ai/sdk';
 import { authenticate, sessionTokenVersion } from './auth';
 import { findUserById, userTokenVersion } from './db';
 import { json } from './http';
-import { checkBudget, costMicroUsd, recordSpend } from './usage';
+import { checkBudget, costMicroUsd, recordSpend, MODEL } from './usage';
+import { SPLIT_IDS, TRAINING_TYPES } from './tools';
 import { capNum, capStr, readJsonCapped, sanitizeCatalog, MAX_AI_BODY_BYTES } from './guard';
 
-const MODEL = 'claude-opus-4-8';
 
 /** Pre-charged cost estimate, settled to the real cost after the call (see usage.ts). */
 const ONBOARD_RESERVE_MICRO_USD = 30_000; // $0.03
 
 // Kept in sync with the client's SPLIT_PRESETS ids (src/data/wizard.ts) and TrainingType — same
 // enums the coach's propose_build_program tool uses.
-const SPLIT_IDS = ['ppl6', 'upper_lower', 'full_body', 'bro_split', 'ppl_rest', 'ppl_ul_hybrid'] as const;
-const TRAINING_TYPES = ['progressive_overload', 'strength', 'hit', 'endurance', 'general'] as const;
 
 export interface OnboardEnv {
   ANTHROPIC_API_KEY: string;

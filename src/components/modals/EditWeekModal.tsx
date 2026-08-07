@@ -1,4 +1,4 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 
 /**
  * Permanent edits to the week's shape on the ACTIVE program: which days exist, what each is
@@ -18,12 +18,12 @@ export function EditWeekModal({ vm }: { vm: ViewModel }) {
       <div onClick={e => e.stopPropagation()} style={{ background: '#17140f', borderRadius: '22px 22px 0 0', width: '100%', maxHeight: '86%', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '18px 20px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="num" style={{ fontSize: 17, fontWeight: 700 }}>Edit Week</div>
-          <button onClick={w.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
+          <button aria-label="Close" onClick={w.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
         <div style={{ padding: '0 20px 10px', font: "400 11px/1.5 'Inter'", color: 'rgba(245,240,234,.4)' }}>{w.note}</div>
 
         <div style={{ overflowY: 'auto', flex: 1, padding: '4px 20px calc(20px + var(--safe-b))' }}>
-          {w.rows.map((d: any) => (
+          {w.rows.map((d) => (
             <div key={d.key} style={{ background: 'rgba(255,255,255,.04)', borderRadius: 14, padding: 12, marginBottom: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ width: 34, flex: 'none', font: "600 10px 'Inter'", color: 'rgba(245,240,234,.4)' }}>{d.dow.slice(0, 3)}</div>
@@ -32,10 +32,10 @@ export function EditWeekModal({ vm }: { vm: ViewModel }) {
                   onChange={e => d.setLabel(e.target.value)}
                   style={{ flex: 1, minWidth: 0, background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 10, padding: '8px 10px', color: '#f5f0ea', font: "600 13px 'Inter'" }}
                 />
-                <button onClick={d.moveUp} disabled={!d.canMoveUp} style={{ flex: 'none', width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: d.canMoveUp ? 'rgba(245,240,234,.75)' : 'rgba(245,240,234,.25)', fontSize: 12 }}>↑</button>
-                <button onClick={d.moveDown} disabled={!d.canMoveDown} style={{ flex: 'none', width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: d.canMoveDown ? 'rgba(245,240,234,.75)' : 'rgba(245,240,234,.25)', fontSize: 12 }}>↓</button>
+                <button aria-label="Move up" onClick={d.moveUp} disabled={!d.canMoveUp} style={{ flex: 'none', width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: d.canMoveUp ? 'rgba(245,240,234,.75)' : 'rgba(245,240,234,.25)', fontSize: 12 }}>↑</button>
+                <button aria-label="Move down" onClick={d.moveDown} disabled={!d.canMoveDown} style={{ flex: 'none', width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: d.canMoveDown ? 'rgba(245,240,234,.75)' : 'rgba(245,240,234,.25)', fontSize: 12 }}>↓</button>
                 {d.canRemove && (
-                  <button onClick={d.remove} style={{ flex: 'none', width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.6)', fontSize: 12 }}>✕</button>
+                  <button aria-label="Close" onClick={d.remove} style={{ flex: 'none', width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.08)', color: 'rgba(245,240,234,.6)', fontSize: 12 }}>✕</button>
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>

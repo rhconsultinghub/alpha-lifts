@@ -1,14 +1,14 @@
-import type { ViewModel } from '../../state/viewModel';
+﻿import type { ViewModel } from '../../state/viewModel';
 import { Sheet } from '../Sheet';
 
 export function ArchiveDetailModal({ vm }: { vm: ViewModel }) {
-  const d = vm.archiveDetail as any;
+  const d = vm.archiveDetail;
   if (!d.open) return null;
   return (
     <Sheet z={33} dim={0.6} radius={22} maxHeight="80%" padding="18px 20px calc(24px + var(--safe-b))" scrollY onClose={d.close}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <div className="num" style={{ fontSize: 18, fontWeight: 700 }}>{d.day}</div>
-          <button onClick={d.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
+          <button aria-label="Close" onClick={d.close} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
         <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.45)', marginBottom: 14 }}>{d.date} · {d.weekLabel}</div>
         {d.isSkipped ? (
@@ -29,7 +29,7 @@ export function ArchiveDetailModal({ vm }: { vm: ViewModel }) {
               <div style={{ padding: 16, borderRadius: 14, background: 'rgba(255,255,255,.04)', textAlign: 'center', font: "500 13px 'Inter'", color: 'rgba(245,240,234,.5)' }}>No per-exercise detail logged for this session.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {d.exercises.map((ex: any, i: number) => (
+                {d.exercises.map((ex, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 12, padding: '10px 12px' }}>
                     <div>
                       <div style={{ font: "600 13px 'Inter'" }}>{ex.name}</div>

@@ -1,4 +1,4 @@
-import type { ViewModel } from '../state/viewModel';
+﻿import type { ViewModel } from '../state/viewModel';
 import { ExercisePhoto } from './ExercisePhoto';
 
 export function ExercisesScreen({ vm }: { vm: ViewModel }) {
@@ -6,7 +6,7 @@ export function ExercisesScreen({ vm }: { vm: ViewModel }) {
     <div style={{ padding: '24px 20px calc(var(--tabbar-h) + var(--safe-b) + 28px)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <div className="num" style={{ fontSize: 30, fontWeight: 700 }}>Exercises</div>
-        <button onClick={vm.openAddExerciseForm} style={{ background: 'oklch(0.65 0.19 35)', border: 'none', color: '#0d0c0b', width: 36, height: 36, borderRadius: '50%', fontSize: 18, fontWeight: 700, lineHeight: 1 }}>+</button>
+        <button aria-label="Increase" onClick={vm.openAddExerciseForm} style={{ background: 'oklch(0.65 0.19 35)', border: 'none', color: '#0d0c0b', width: 36, height: 36, borderRadius: '50%', fontSize: 18, fontWeight: 700, lineHeight: 1 }}>+</button>
       </div>
       <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.45)', marginBottom: 16 }}>Every exercise in your library, grouped by primary muscle.</div>
 

@@ -16,10 +16,10 @@ import { authenticate, sessionTokenVersion } from './auth';
 import { findUserById, userTokenVersion } from './db';
 import { isEntitled } from './access';
 import { json } from './http';
-import { checkBudget, costMicroUsd, recordSpend } from './usage';
+import { checkBudget, costMicroUsd, recordSpend, MODEL } from './usage';
+import { TRAINING_TYPES } from './tools';
 import { readJsonCapped, sanitizeCatalog, MAX_AI_BODY_BYTES } from './guard';
 
-const MODEL = 'claude-opus-4-8';
 
 /** Pre-charged cost estimate, settled to the real cost after the call (see usage.ts). Higher
  *  than the coach's: max_tokens 8000 of Opus output alone is ~$0.20, so this is the honest
@@ -37,7 +37,6 @@ const EQUIPMENT = [
   'barbell', 'dumbbell', 'smith', 'cable', 'machine', 'ezbar', 'band', 'trapbar',
   'bodyweight', 'assisted', 'kettlebell'
 ] as const;
-const TRAINING_TYPES = ['progressive_overload', 'strength', 'hit', 'endurance', 'general'] as const;
 
 const MAX_TEXT_CHARS = 8000;
 

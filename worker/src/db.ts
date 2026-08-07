@@ -127,6 +127,11 @@ export async function updatePassword(db: D1Database, userId: string, passwordHas
   return row ? userTokenVersion(row) : 1;
 }
 
+/** Drop a spent/expired verification token so dead tokens don't sit on the row forever. */
+export async function clearVerifyToken(db: D1Database, userId: string): Promise<void> {
+  await db.prepare('UPDATE users SET verify_token = NULL, verify_expires = NULL WHERE id = ?').bind(userId).run();
+}
+
 /** Replace ONLY the hash (transparent iteration upgrade on login) — deliberately no
  *  token_version bump, or every login after an iteration raise would revoke the user's other
  *  sessions. Revocation belongs to updatePassword/applyPasswordReset. */

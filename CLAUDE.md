@@ -2291,3 +2291,74 @@ Deploy friction hit this round, worth remembering: `wrangler d1 execute --remote
 scopes). Fix: `npx wrangler login` to re-consent in the browser, then retry. If a migration then
 says "duplicate column name", it already applied on an earlier attempt — safe to ignore, but
 confirm with `SELECT name FROM pragma_table_info('users')`.
+
+(48) **third hardening round — the last deferred audit items.** Five tracks:
+
+- **Durable-projection sync** (`state/durable.ts` new): pushes now send `projectDurable(state)`,
+  which strips ~40 TRANSIENT fields (navigation, open modals, staged confirms, in-flight inputs,
+  the live `workout`) — exclusion-based on purpose, so a NEW field is synced by default (safe for
+  data; a forgotten transient costs bytes, a forgotten durable field would silently stop
+  syncing). Consequences, all verified live: a keystroke/nav change no longer marks sync dirty at
+  all (zero PUTs observed on typing + tab hopping; exactly one on a real durable change); the
+  dirty-clear check in useCloudSync compares PROJECTIONS by content, not state identity, so a
+  transient-only change mid-flight can't hold the dirty flag; and every place that ADOPTS a
+  server copy (sign-in reconcile's two same-account branches + the mid-session 409-conflict
+  adopt) grafts this device's live `workout` / `pendingPlanUpdate` / complete-screen state back
+  on via `mergeDeviceSession` — the server projection never contains a session, and a plain
+  adopt used to be able to erase a workout in progress. Verified: seeded live workout + newer
+  other-device push → reload adopted the server rename WHILE the workout (incl. its done set)
+  survived, landing back on the workout screen.
+- **schemaVersion migration framework** (`useApp.ts` MIGRATIONS + `SCHEMA_VERSION` in
+  initialState.ts): blobs record the highest one-time migration applied; the four historical
+  inline back-compat passes (onboarded inference, userName derivation, counts backfill, equip
+  attribution) are now migration v1, run once instead of every load. Blobs with no version
+  (pre-framework, or pushed by an old client via sync) read as 0 and re-run everything — so
+  migrations must stay idempotent. Always-run load SANITIZATION (coachPending reset, stuck-rest
+  guard) deliberately stays outside the framework: those states can recur. A migration that
+  throws leaves the blob un-migrated and un-stamped (retries next load) instead of wiping to
+  defaults.
+- **Self-hosted fonts + PWA identity**: Inter + Space Grotesk latin VARIABLE woff2s (~70 KB
+  total, one file per family) live in `src/assets/fonts/`, referenced RELATIVELY from index.css
+  so Vite hashes + rebases them for the `/alpha-lifts/` base (absolute /public paths in CSS are
+  NOT rebased — that's why they're not in public/). The render-blocking Google Fonts @import is
+  gone (offline installs used to silently fall back to system fonts), `woff2` joined
+  globPatterns (precache 35 entries / ~1.2 MB), CSP dropped the fonts.googleapis/gstatic origins
+  (`font-src 'self'`), the manifest gained a stable `id`, and package.json is finally
+  `alpha-lifts@1.0.0`. Verified: both families load from `/src/assets` (dev) with zero requests
+  to fonts.g*.
+- **Worker leftovers**: `json()` sends `Cache-Control: no-store` + `X-Content-Type-Options:
+  nosniff` on every response; `MODEL` lives once in usage.ts next to PRICING (was duplicated in
+  3 files — a one-file swap to an unpriced id used to silently zero the spend cap; unknown
+  models now meter at the priciest known rate with a loud console.error); SPLIT_IDS/
+  TRAINING_TYPES exported from tools.ts and imported by onboard/parsePlan (were 3 private
+  copies); **GET /auth/verify is now a confirm-button page and the verification happens on its
+  POST** — mail scanners prefetching the GET used to consume the single-use token before the
+  human clicked (verified: two GETs leave the token alive, POST consumes, second POST rejected);
+  expired verify tokens are cleared from the row on sight; the login DUMMY_HASH derives its
+  iteration count from PBKDF2_ITERATIONS (a hardcoded 100000 had silently diverged from real-row
+  timing when the constant went to 600k — the timing equalizer wasn't equal);
+  `REQUIRE_EMAIL_VERIFICATION="true"` (wrangler.toml) keeps BLOCKING unverified logins even if
+  the Resend key is rotated out (send-gate and enforce-gate used to be one key-presence check
+  that failed open); MAX_STATE_BYTES measured via TextEncoder byteLength (UTF-16 length
+  undercounted ~3x); coach `refused` returns 502 not 200; APP_URL is validated+escaped before
+  HTML interpolation (safeAppUrl).
+- **Typed view model + decomposition**: the 8 `let x: any` section blocks in buildViewModel
+  (currentDay, builderExercises, workout, detail, quickEdit, swap, muscleSwap, muscleDrill rows)
+  are now named inner builders (`buildCurrentDay()` etc.) with fully INFERRED return types and
+  `as const` open-flag discriminants, and every one of the ~77 `: any`/`as any` casts across 19
+  component files is gone — a VM field rename now fails `tsc` instead of silently compiling.
+  Also: aria-labels on 43 glyph-only buttons (✕/‹/↑/↓/+/–), id-based keys on the reorderable
+  lists, the Day View ⇄ Swap span got role="button"+tabIndex+keyboard handling (it can't be a
+  real <button> — it sits inside the row's quick-edit button and nested buttons are invalid
+  HTML), and VideoEmbed validates the 11-char YouTube id shape before interpolating.
+  **Deliberately NOT done: the useApp.ts hook split.** It's ~1,900 lines of callbacks sharing
+  setState/stateRef/restInterval/restDoneForRef closures; splitting means re-threading those
+  refs through hook boundaries — pure structure, zero behavior, maximal regression surface. If
+  it's ever done, do it as its own dedicated round with the browser-verification budget that
+  deserves, not as the tail of a batch.
+
+Verified: worker `tsc --noEmit` + 13-case suite (headers, verify-button flow, versioned state,
+expired-token cleanup) on top of the still-passing earlier suites; app `tsc -b` + `npm run build`
+clean; live browser pass (fonts, projection push behavior, schemaVersion stamp, adopt-with-
+workout-carryover, all sheets still render) with zero console errors. Same deploy story:
+frontend on push, **Worker needs `wrangler deploy`** (no DB migration this round).

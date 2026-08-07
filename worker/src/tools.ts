@@ -21,8 +21,10 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
 // Kept in sync with the client's SPLIT_PRESETS ids (src/data/wizard.ts) and TrainingType.
-const SPLIT_IDS = ['ppl6', 'upper_lower', 'full_body', 'bro_split', 'ppl_rest', 'ppl_ul_hybrid'] as const;
-const TRAINING_TYPES = ['progressive_overload', 'strength', 'hit', 'endurance', 'general'] as const;
+// Exported: onboard.ts and parsePlan.ts pin their tool enums to the same lists (they used to
+// keep private copies — three places to drift out of sync with the client's wizard.ts).
+export const SPLIT_IDS = ['ppl6', 'upper_lower', 'full_body', 'bro_split', 'ppl_rest', 'ppl_ul_hybrid'] as const;
+export const TRAINING_TYPES = ['progressive_overload', 'strength', 'hit', 'endurance', 'general'] as const;
 const SCREENS = ['program', 'progress', 'exercises', 'achievements'] as const;
 
 /**

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+﻿import { useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { ViewModel } from '../state/viewModel';
 import { ExercisePhoto } from './ExercisePhoto';
@@ -24,7 +24,7 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
   const pressRef = useRef<{ startY: number; rowH: number } | null>(null);
 
   if (!d) return null;
-  const exercises: any[] = d.exercises;
+  const exercises = d.exercises;
 
   const clearLongPress = () => {
     if (longPressTimer.current != null) { window.clearTimeout(longPressTimer.current); longPressTimer.current = null; }
@@ -71,7 +71,7 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
     <>
       <div style={{ background: 'linear-gradient(160deg, oklch(0.22 0.05 35), #0f0e0d 65%)', padding: '22px 20px 20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <button onClick={vm.goProgram} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14 }}>‹</button>
+          <button aria-label="Back" onClick={vm.goProgram} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14 }}>‹</button>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={d.toggleSkip} style={{ font: "600 11px 'Inter'", padding: '7px 12px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: d.skipColor }}>{d.skipLabel}</button>
             <button onClick={vm.openDayBuilder} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 30, height: 30, borderRadius: '50%', fontSize: 14 }}>✎</button>
@@ -88,7 +88,7 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-          {d.muscleBars.map((m: any) => (
+          {d.muscleBars.map((m) => (
             <div key={m.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ width: 66, font: "500 11px 'Inter'", color: 'rgba(245,240,234,.7)' }}>{m.name}</div>
               <div style={{ position: 'relative', flex: 1, height: 6, borderRadius: 4, background: 'rgba(255,255,255,.1)', overflow: 'hidden' }} title={`${m.pctText} sets · range ${m.rangeText}`}>
@@ -116,7 +116,7 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
               <span style={{ font: "600 12px 'Inter'", color: '#f5f0ea' }}>Warm-Up First</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {d.warmups.map((wu: any, i: number) => (
+              {d.warmups.map((wu, i) => (
                 <button key={i} onClick={wu.open} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, background: 'none', border: 'none', padding: '4px 0', textAlign: 'left', cursor: 'pointer' }}>
                   <span style={{ font: "500 12px 'Inter'", color: 'rgba(245,240,234,.8)' }}>{wu.name} <span style={{ color: 'rgba(245,240,234,.3)' }}>›</span></span>
                   <span style={{ flex: 'none', font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)' }}>{wu.cue}</span>
@@ -166,7 +166,17 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
               <button onClick={ex.openQuickEdit} style={{ flex: 1, minWidth: 0, background: 'none', border: 'none', padding: 0, textAlign: 'left' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
                   <span style={{ font: "600 18px 'Inter'", color: '#f5f0ea' }}>{ex.name}</span>
-                  <span onClick={(e) => { e.stopPropagation(); ex.openSwap(); }} style={{ flex: 'none', font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', color: 'rgba(245,240,234,.6)' }}>⇄ Swap</span>
+                  {/* span-with-role, not <button>: it sits inside the row's quick-edit <button>
+                      and nested buttons are invalid HTML. role+tabIndex+keys give it real
+                      button semantics (it was a bare onClick span — invisible to keyboards). */}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Swap ${ex.name}`}
+                    onClick={(e) => { e.stopPropagation(); ex.openSwap(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); ex.openSwap(); } }}
+                    style={{ flex: 'none', font: "600 10px 'Inter'", padding: '4px 9px', borderRadius: 100, border: '1px solid rgba(255,255,255,.2)', color: 'rgba(245,240,234,.6)' }}
+                  >⇄ Swap</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                   <span style={{ font: "500 11px 'Inter'", padding: '5px 10px', borderRadius: 100, background: 'rgba(255,255,255,.08)' }}>{ex.setsText}</span>

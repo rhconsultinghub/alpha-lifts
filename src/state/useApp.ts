@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EXLIB, EQUIP_CATALOG, MUSCLES, planRepDefault } from '../data/exercises';
 import { mkEx, slugify } from '../data/program';
-import { createInitialState } from '../data/initialState';
+import { createInitialState, SCHEMA_VERSION } from '../data/initialState';
 import { exportBackup as exportBackupFile, mergeBackupIntoDefaults, safeCustomEntries } from '../data/backup';
 import { clearSyncMeta } from './syncMeta';
 import { exportPlan as exportPlanFile } from '../data/planIO';
@@ -69,10 +69,96 @@ const BUILTIN_EXERCISE_IDS: ReadonlySet<string> = new Set(Object.keys(EXLIB));
 // key rather than silently overwritten; this flag surfaces a one-line notice in the UI.
 let corruptStateStashed = false;
 
+// ---------------------------------------------------------------------------------------------
+// One-time schema migrations.
+//
+// The load path's baseline safety net is the shallow merge over createInitialState() — a NEW
+// top-level field needs no migration at all. Migrations exist for everything the merge can't do:
+// deriving a value from old data, backfilling nested rows, renaming/moving fields. Each blob
+// records the highest migration it has been through (`schemaVersion`); anything below runs once
+// and the blob is re-stamped. A blob with NO version (pre-framework, or pushed by an old client
+// via cloud sync) reads as 0 and runs everything — so every migration must stay idempotent, the
+// same property the old always-run inline checks relied on.
+//
+// To add one: append { to: SCHEMA_VERSION + 1, run } here and bump SCHEMA_VERSION in
+// data/initialState.ts. `run` mutates `state` in place; `parsed` is the raw pre-merge blob for
+// the cases where "field absent" and "field at its default" mean different things.
+// Migrations run AFTER custom exercises are merged into EXLIB (some need library lookups).
+
+interface Migration {
+  to: number;
+  run: (state: AppState, parsed: Partial<AppState>) => void;
+}
+
+const MIGRATIONS: Migration[] = [
+  {
+    // v1 bundles the four historical inline back-compat passes, now run-once instead of on
+    // every single load:
+    to: 1,
+    run: (state, parsed) => {
+      // (a) sessions saved before onboarding existed have no `onboarded` flag — infer it from
+      // already having a real program, so returning users aren't sent back through the wizard.
+      if (parsed.onboarded === undefined && parsed.dayOrder && parsed.dayOrder.length > 0) {
+        state.onboarded = true;
+      }
+      // (b) before userName existed, the onboarding name only survived as the program name
+      // ("Ryan's Program") — recover it once. Not an ongoing link; renaming the program later
+      // doesn't rename the user.
+      if (!state.userName) {
+        const m = /^(.+?)['’]s\s+Program$/i.exec((state.programName || '').trim());
+        if (m) state.userName = m[1].trim();
+      }
+      // (c) setCount/repCount backfill from each row's display text ("175 lb × 8/8/6" → 3 sets,
+      // 22 reps). Historical time-tracked sets stored seconds in the rep slot — slightly
+      // overcounted, invisible in a playful total.
+      if (Array.isArray(state.history)) {
+        state.history = state.history.map(h =>
+          h.status === 'completed' && (h.repCount === undefined || h.setCount === undefined)
+            ? { ...h, ...countsFromResultText(h.exercises) }
+            : h
+        );
+      }
+      // (d) progress is tracked per equipment variant now; pre-existing exerciseHistory entries
+      // have no `equip` tag. Attribute each to the exercise's current program-slot equipment,
+      // falling back to the library default.
+      if (state.exerciseHistory && Object.keys(state.exerciseHistory).length) {
+        const slotEquip: Record<string, string> = {};
+        (state.dayOrder || []).forEach(k => {
+          state.program?.[k]?.exercises?.forEach(ex => {
+            if (slotEquip[ex.id] === undefined) {
+              const v = EXLIB[ex.id]?.equip[ex.equipIdx]?.v;
+              if (v) slotEquip[ex.id] = v;
+            }
+          });
+        });
+        let changed = false;
+        const migrated: AppState['exerciseHistory'] = {};
+        for (const [id, entries] of Object.entries(state.exerciseHistory)) {
+          migrated[id] = (entries || []).map(e => {
+            if (e.equip) return e;
+            changed = true;
+            return { ...e, equip: slotEquip[id] || EXLIB[id]?.equip?.[0]?.v || 'other' };
+          });
+        }
+        if (changed) state.exerciseHistory = migrated;
+      }
+    }
+  }
+];
+
+function runMigrations(state: AppState, parsed: Partial<AppState>): void {
+  const from = typeof parsed.schemaVersion === 'number' ? parsed.schemaVersion : 0;
+  for (const m of MIGRATIONS) {
+    if (from < m.to) m.run(state, parsed);
+  }
+  state.schemaVersion = SCHEMA_VERSION;
+}
+
 function loadInitial(): AppState {
   const defaults = createInitialState();
   let state: AppState = defaults;
   let raw: string | null = null;
+  let parsed: Partial<AppState> | null = null;
   try {
     raw = localStorage.getItem(STORAGE_KEY);
   } catch {
@@ -82,50 +168,23 @@ function loadInitial(): AppState {
     // shallow-merge over fresh defaults so fields added in later app versions (not present in an
     // older saved session) fall back to their default rather than being `undefined`.
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<AppState>;
+      parsed = JSON.parse(raw) as Partial<AppState>;
       state = { ...defaults, ...parsed };
-      // back-compat: sessions saved before onboarding existed have no `onboarded` flag in storage —
-      // infer it from already having a real program, so returning users aren't sent through the
-      // wizard again (which would otherwise overwrite their existing program).
-      if (parsed.onboarded === undefined && parsed.dayOrder && parsed.dayOrder.length > 0) {
-        state.onboarded = true;
-      }
-      // back-compat: onboarding has always asked for a name, but until userName existed the answer
-      // only survived as the program name ("Ryan's Program", see onboarding.ts#defaultProgramName).
-      // Recover it once so existing accounts get greeted by name too. A one-time derivation, not an
-      // ongoing link — renaming the program later doesn't rename the user.
-      if (!state.userName) {
-        const m = /^(.+?)['’]s\s+Program$/i.exec((state.programName || '').trim());
-        if (m) state.userName = m[1].trim();
-      }
-      // back-compat: setCount/repCount were added for the lifetime "fun fact" totals. Sessions
-      // logged before then have neither, so backfill once from each row's resultText
-      // ("175 lb × 8/8/6" → 3 sets, 22 reps). One-shot: written back into state.history here so the
-      // parse is paid on this load, not on every render. Time-tracked exercises stored seconds in the
-      // rep slot, so their historical "reps" are slightly overcounted — invisible in a playful total.
-      if (Array.isArray(state.history)) {
-        state.history = state.history.map(h =>
-          h.status === 'completed' && (h.repCount === undefined || h.setCount === undefined)
-            ? { ...h, ...countsFromResultText(h.exercises) }
-            : h
-        );
-      }
-      // An in-flight coach request can't survive a reload — if the app was closed mid-send, the
-      // persisted `true` would restore a chat stuck showing the typing indicator forever, with
-      // no request running to ever clear it.
+      // Always-run load sanitization (NOT migrations — these guard against states that can
+      // recur, e.g. delivered by an old client via cloud sync or an app killed mid-action):
+      // an in-flight coach request can't survive a reload — a persisted `true` would strand the
+      // chat showing a typing indicator forever;
       state.coachPending = false;
-      // Guard against the shallow-merge's blind spot for NESTED shapes: a workout persisted by a
-      // build before restEndAt existed restores as `resting: true` with no restEndAt, and the
-      // countdown has nothing to resume from — the rest was permanently stuck. Land it un-resting.
+      // and a workout resting with no restEndAt (pre-restEndAt blob shape) has nothing to
+      // resume the countdown from — land it un-resting instead of permanently stuck.
       if (state.workout && state.workout.resting && state.workout.restEndAt == null) {
         state.workout = { ...state.workout, resting: false, restRemaining: 0 };
       }
     }
   } catch {
-    // The persisted blob didn't parse (or a migration threw). Stash a copy under a recovery key
-    // BEFORE falling back — the save effect persists the fresh defaults immediately, which used
-    // to permanently destroy a possibly-recoverable blob (and, signed in, push the empty state
-    // to the cloud over the server's copy).
+    // The persisted blob didn't parse. Stash a copy under a recovery key BEFORE falling back —
+    // the save effect persists the fresh defaults immediately, which used to permanently
+    // destroy a possibly-recoverable blob (and, signed in, push the empty state to the cloud).
     if (raw != null) {
       try {
         localStorage.setItem('alpha-lifts-corrupt-' + Date.now(), raw);
@@ -134,6 +193,7 @@ function loadInitial(): AppState {
         /* storage full — nothing more we can do */
       }
     }
+    parsed = null;
     state = defaults;
   }
   // custom exercises live in persisted state but the exercise library itself is a module-level
@@ -141,29 +201,14 @@ function loadInitial(): AppState {
   // safeCustomEntries drops malformed defs and unsafe keys (__proto__ etc.), and refuses to
   // shadow a built-in exercise — this state may have arrived via backup import or cloud sync.
   safeCustomEntries(state.customExercises, BUILTIN_EXERCISE_IDS).forEach(([id, def]) => { EXLIB[id] = def; });
-  // back-compat: progress is now tracked per equipment variant, but pre-existing history entries have
-  // no `equip` tag. Attribute each to the equipment that exercise's current program slot uses (per the
-  // upgrade choice), falling back to the library's default equip. One-time; only fills missing tags.
-  if (state.exerciseHistory && Object.keys(state.exerciseHistory).length) {
-    const slotEquip: Record<string, string> = {};
-    (state.dayOrder || []).forEach(k => {
-      state.program?.[k]?.exercises?.forEach(ex => {
-        if (slotEquip[ex.id] === undefined) {
-          const v = EXLIB[ex.id]?.equip[ex.equipIdx]?.v;
-          if (v) slotEquip[ex.id] = v;
-        }
-      });
-    });
-    let changed = false;
-    const migrated: AppState['exerciseHistory'] = {};
-    for (const [id, entries] of Object.entries(state.exerciseHistory)) {
-      migrated[id] = (entries || []).map(e => {
-        if (e.equip) return e;
-        changed = true;
-        return { ...e, equip: slotEquip[id] || EXLIB[id]?.equip?.[0]?.v || 'other' };
-      });
+  // One-time migrations, after the EXLIB merge (some need library lookups).
+  if (parsed) {
+    try {
+      runMigrations(state, parsed);
+    } catch {
+      // A migration threw on real-world data: keep the un-migrated (but merged) state rather
+      // than wiping the user to defaults — and DON'T stamp the version, so it retries next load.
     }
-    if (changed) state.exerciseHistory = migrated;
   }
   return state;
 }

@@ -24,6 +24,9 @@ ALLOWED_ORIGINS = "https://rhconsultinghub.github.io"
 RESEND_FROM = "Alpha Lifts <noreply@alpha-lifts.com>"
 # Where the /auth/verify email-link landing page sends the user back to.
 APP_URL = "https://rhconsultinghub.github.io/alpha-lifts/"
+# Keep BLOCKING unverified logins even if RESEND_API_KEY is ever removed/rotated out (the send
+# gate and the enforcement gate used to be the same key-presence check, which failed open).
+REQUIRE_EMAIL_VERIFICATION = "true"
 
 # Set to "true" to require the coach access allowlist (see src/access.ts + README "Access
 # allowlist"). While off, anyone whose Origin is allowed can use the coach. Approved ids are KV
