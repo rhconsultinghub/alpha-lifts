@@ -1,40 +1,49 @@
 import type { ExerciseDef, EquipOption, Muscle, TrainingType } from './types';
 
-// weekly, per-muscle set targets at "progressive overload" baseline (moderate effort, ~1-3 reps
-// in reserve most sets) — roughly the commonly-cited MEV-to-MAV hypertrophy volume zone per
-// muscle per week (e.g. Renaissance Periodization volume landmarks, Schoenfeld volume meta-analyses).
-// Forearms sits low deliberately: they already get heavy indirect work from every gripping pull
-// (which counts nothing toward the bar, since muscleVolumes() credits primary muscle only), so
-// the direct-work target is a top-up, not a full hypertrophy allotment. 7 rather than a rounder
-// 6 or 8 originally because of set-count rounding at the lowest multiplier when that was 0.4
-// (6×0.4 = 2.4 has no integer inside the wizard balancer's 85-115% band; 7×0.4 = 2.8 rounds
-// cleanly to 3). At the retuned 0.65 the constraint is slack either way — 7×0.65 = 4.55 admits
-// both 4 and 5 — so 7 is kept simply because changing it would reshuffle every existing program.
-export const MUSCLE_TARGETS: Record<Muscle, number> = {
-  'Back': 16, 'Biceps': 10, 'Rear Delts': 8, 'Chest': 12, 'Triceps': 8, 'Forearms': 7, 'Shoulders': 10,
-  'Quads': 14, 'Hamstrings': 10, 'Glutes': 10, 'Calves': 12, 'Core': 10
+// Weekly per-muscle training-volume landmarks, in HARD SETS per muscle per week — the unit the
+// hypertrophy literature and every volume framework actually uses (Schoenfeld volume meta-analyses;
+// Renaissance Periodization MEV/MAV volume landmarks). `mev` = minimum effective volume (below this a
+// muscle is under-dosed), `mav` = maximum adaptive volume (above this is likely junk / more than can
+// be recovered). Anything BETWEEN the two is a widely-accepted "good" weekly dose, which is why the
+// muscle bars judge against this band, not a single point: outside advice ("10-20 sets is fine")
+// thinks in ranges, so the app does too — that's the fix for "another coach says fine, the app says
+// short." Values map RP's per-muscle landmarks onto this app's 12 combined muscle groups (e.g. Back
+// aggregates lats/traps/rhomboids, so it carries a wide, high band; delts tolerate high volume).
+// Muscles that get heavy UNCOUNTED indirect work carry a lower direct-work MEV, since the bar only
+// credits an exercise's primary muscle (muscleVolumes()): Forearms (every gripping pull), Biceps
+// (every row/pulldown/chin) and Hamstrings (every hinge/squat) all accumulate real secondary volume
+// that never shows here, so their direct-work floor is a top-up, not a full hypertrophy allotment.
+// Calves sit at the low end of the published range (they recover fast and tolerate frequency).
+export const MUSCLE_VOLUME: Record<Muscle, { mev: number; mav: number }> = {
+  'Back': { mev: 10, mav: 22 }, 'Biceps': { mev: 6, mav: 20 }, 'Rear Delts': { mev: 6, mav: 18 },
+  'Chest': { mev: 10, mav: 22 }, 'Triceps': { mev: 6, mav: 18 }, 'Forearms': { mev: 4, mav: 12 },
+  'Shoulders': { mev: 8, mav: 22 }, 'Quads': { mev: 8, mav: 20 }, 'Hamstrings': { mev: 5, mav: 16 },
+  'Glutes': { mev: 4, mav: 16 }, 'Calves': { mev: 6, mav: 16 }, 'Core': { mev: 6, mav: 16 }
 };
 
-// multiplier applied to the baseline above per training style:
-//  - Strength (low reps near 1RM, not to failure): load does the work, less volume needed.
-//  - Low Volume / High Effort (the 'hit' id): fewer, harder sets taken at or close to failure.
-//  - Endurance (higher reps, submaximal, rarely to failure): needs more total sets to add up.
-//  - General/maintenance: well under MAV is enough to hold on to gains without progressing hard.
-//
-// The 'hit' multiplier was 0.4 — literal Mentzer/HIT doctrine, and far too aggressive in practice.
-// At 0.4 a PPL6 week came out at 50 total sets against Progressive Overload's 134, with four of
-// five exercises on a Push Day reduced to a SINGLE set (the balancer's 1-set floor dominated so
-// completely that every split converged on ~50 sets regardless of structure). That only makes
-// sense if every set really is taken to true momentary failure, which almost nobody sustains.
-// 0.65 keeps this the lowest-volume style — a touch under Strength's effective output — while
-// leaving enough sets on the bar for a normal hard-training lifter to actually progress.
-export const TRAINING_MULT: Record<TrainingType, number> = {
-  progressive_overload: 1, strength: 0.6, hit: 0.65, endurance: 1.3, general: 0.6
+// The 12 muscle keys in display order — convenience for the many places that just enumerate muscles.
+export const MUSCLES = Object.keys(MUSCLE_VOLUME) as Muscle[];
+
+// Training style no longer SCALES the volume target by a large multiplier (the old TRAINING_MULT ran
+// 0.6-1.3, which halved the target on Strength/Low-Volume and was the main reason the app disagreed
+// with any outside volume check). Instead, style shifts the AIM POINT within each muscle's MEV-MAV
+// band: heavier, lower-rep styles sit toward MEV; higher-rep endurance work — submaximal, so it needs
+// more total sets to add up to a stimulus — sits toward MAV. The band itself (what reads "good") is
+// identical for every style, so a program a knowledgeable lifter calls fine reads in-range here
+// whatever the style label. 0 = at MEV, 1 = at MAV.
+export const STYLE_AIM: Record<TrainingType, number> = {
+  strength: 0.2, hit: 0.3, general: 0.35, progressive_overload: 0.5, endurance: 0.85
 };
+
+// The wizard's build target — and the aim marker on the bars — for a muscle under a given style.
+export function aimSets(muscle: Muscle, trainingType: TrainingType): number {
+  const { mev, mav } = MUSCLE_VOLUME[muscle];
+  return Math.round(mev + STYLE_AIM[trainingType] * (mav - mev));
+}
 
 // NOTE: the 'hit' *key* is load-bearing and must not be renamed — it's the persisted TrainingType
 // in every saved program, the cloud-sync blob, and three separate enum lists in worker/src. Only
-// the display strings below changed when the style was rebranded away from "High Intensity".
+// the display strings below and the tuning tables above are safe to change.
 export const TRAINING_LABELS: Record<TrainingType, string> = {
   progressive_overload: 'Progressive Overload', strength: 'Strength', hit: 'Low Volume / High Effort',
   endurance: 'Endurance', general: 'General Fitness'

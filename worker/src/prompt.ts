@@ -34,7 +34,7 @@ export interface CoachContext {
     totalPRs?: number;
     lifetimeVolume?: string;
     bestSession?: string;
-    muscleVolume?: { muscle: string; pct: number; status: string }[];
+    muscleVolume?: { muscle: string; sets: number; range: string; status: string }[];
     topLifts?: { name: string; best: string; e1rm: string }[];
   };
   // Every exercise the app knows about, grouped by muscle, name only. Present so a proposed
@@ -142,8 +142,8 @@ function renderContext(ctx: CoachContext | undefined): string {
     if (st.bestSession) head.push(`best session ${st.bestSession}`);
     if (head.length) { lines.push('', 'Stats:', `- ${head.join(', ')}`); }
     if (st.muscleVolume?.length) {
-      lines.push('Weekly volume vs. target (per muscle):');
-      lines.push('- ' + st.muscleVolume.map(m => `${m.muscle} ${m.pct}% (${m.status})`).join(', '));
+      lines.push('Weekly volume in hard sets vs. recommended range (per muscle):');
+      lines.push('- ' + st.muscleVolume.map(m => `${m.muscle} ${m.sets} sets (range ${m.range}, ${m.status})`).join(', '));
     }
     if (st.topLifts?.length) {
       lines.push('Top lifts (best logged set → estimated 1RM):');

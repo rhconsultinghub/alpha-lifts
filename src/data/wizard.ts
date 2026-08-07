@@ -1,4 +1,4 @@
-﻿import { EXLIB, MUSCLE_TARGETS, TRAINING_MULT, planRepDefault } from './exercises';
+﻿import { EXLIB, MUSCLE_VOLUME, MUSCLES, aimSets, planRepDefault } from './exercises';
 // state/logic doesn't import anything from this file, so this direction introduces no cycle — and
 // sharing restForExercise() is the point: the balancer's day-time ceiling has to be measured the
 // same way the app measures the day it displays.
@@ -18,7 +18,7 @@ export const DAY_TYPE_LABELS: Record<string, string> = {
 export const DAY_TYPE_THEME: Record<string, Muscle[]> = {
   push: ['Chest', 'Shoulders', 'Triceps'], pull: ['Back', 'Biceps', 'Rear Delts', 'Forearms', 'Core'],
   legs: ['Quads', 'Hamstrings', 'Glutes', 'Calves', 'Core'], upper: ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Rear Delts', 'Forearms', 'Core'],
-  lower: ['Quads', 'Hamstrings', 'Glutes', 'Calves', 'Core'], full_body: Object.keys(MUSCLE_TARGETS) as Muscle[],
+  lower: ['Quads', 'Hamstrings', 'Glutes', 'Calves', 'Core'], full_body: MUSCLES,
   chest: ['Chest', 'Triceps'], back: ['Back', 'Biceps'], shoulders: ['Shoulders', 'Rear Delts'], arms: ['Biceps', 'Triceps', 'Forearms'], rest: []
 };
 
@@ -33,7 +33,7 @@ export const DAY_TYPE_EXERCISES: Record<string, string[]> = {
   lower: ['rdl', 'leg_press', 'hip_thrust', 'calf_raise', 'plank'],
   // full_body's theme is every muscle (see DAY_TYPE_THEME.full_body below), so — unlike the other
   // day types, which only need to cover a 2-5 muscle theme — this list needs one exercise per
-  // muscle in MUSCLE_TARGETS or four of them silently sit at 0% volume forever (Biceps, Rear
+  // muscle in MUSCLE_VOLUME or four of them silently sit at 0% volume forever (Biceps, Rear
   // Delts, Triceps, Glutes had no primary-muscle exercise here previously; Forearms joined the
   // same rule when it became a muscle in phase 32). Isolation moves with short rest are used for
   // the added slots to keep the session from ballooning in length.
@@ -153,12 +153,11 @@ function dedupeWeekExerciseIds(weekDayTypes: string[]): string[][] {
 function generateRecommendedDayExercises(exerciseIds: string[], trainingType: TrainingType, weekDayTypes: string[]): ProgramExercise[] {
   const byMuscle: Record<string, string[]> = {};
   exerciseIds.forEach(id => { const m = EXLIB[id].muscle; (byMuscle[m] = byMuscle[m] || []).push(id); });
-  const mult = TRAINING_MULT[trainingType];
   return exerciseIds.map(id => {
     const lib = EXLIB[id];
     const m = lib.muscle;
     const occurrencesThisWeek = weekDayTypes.filter(dt => (DAY_TYPE_EXERCISES[dt] || []).some(eid => EXLIB[eid].muscle === m)).length;
-    const perOccurrenceTarget = (MUSCLE_TARGETS[m] * mult) / Math.max(1, occurrencesThisWeek);
+    const perOccurrenceTarget = aimSets(m, trainingType) / Math.max(1, occurrencesThisWeek);
     const setsPerExercise = clamp(Math.round(perOccurrenceTarget / byMuscle[m].length), 1, 6);
     return mkEx(id, setsPerExercise, 0, { weight: 0, reps: planRepDefault(trainingType, lib), hitTop: true });
   });
@@ -169,9 +168,10 @@ function generateRecommendedDayExercises(exerciseIds: string[], trainingType: Tr
 // across the whole week (e.g. Calves on a once-a-week body-part split).
 const MIN_SETS_PER_EXERCISE = 1;
 const MAX_SETS_PER_EXERCISE = 8;
-// acceptable band (relative to muscleStatus()'s 70%/120% "under"/"over" cutoffs in state/logic.ts)
-// with a little inward margin so the result doesn't sit right at the edge of tipping "over"/"under"
-// after later weight-based recalculation.
+// The balancer settles each muscle's weekly total near the style's aim point (aimSets), within
+// ±these percentages — but clamped to the muscle's MEV..MAV band, since anywhere inside that band
+// already reads "good" on the bars (muscleStatus() in state/logic.ts). A little inward margin keeps
+// the result off the edge of tipping "under"/"over".
 const BALANCE_LOW_PCT = 85;
 const BALANCE_HIGH_PCT = 115;
 // soft ceiling on a single day's estimated time (seconds) that the balancer won't push past when
@@ -225,11 +225,14 @@ function capDayTime(days: ProgramDays, dayOrder: string[], trainingType: Trainin
 // clamped, the week-wide sum routinely drifts well outside the target band (see the "everything
 // above 100%" onboarding bug this was written to fix).
 function balanceWeeklyVolume(days: ProgramDays, dayOrder: string[], trainingType: TrainingType): void {
-  const mult = TRAINING_MULT[trainingType];
   const trainingDayKeys = dayOrder.filter(k => (days[k].kind || 'training') !== 'rest');
-  (Object.keys(MUSCLE_TARGETS) as Muscle[]).forEach(m => {
-    const target = MUSCLE_TARGETS[m] * mult;
-    if (target <= 0) return;
+  MUSCLES.forEach(m => {
+    const { mev, mav } = MUSCLE_VOLUME[m];
+    const aim = aimSets(m, trainingType);
+    // aim for the style's target, but never demand fewer than MEV or push past MAV — anywhere inside
+    // the band already reads "good", so this just keeps defaults sensibly near the aim.
+    const lo = Math.max(mev, Math.round(aim * (BALANCE_LOW_PCT / 100)));
+    const hi = Math.min(mav, Math.round(aim * (BALANCE_HIGH_PCT / 100)));
     const slots: { dayKey: string; exIndex: number }[] = [];
     trainingDayKeys.forEach(dayKey => {
       days[dayKey].exercises.forEach((ex, exIndex) => { if (EXLIB[ex.id].muscle === m) slots.push({ dayKey, exIndex }); });
@@ -238,13 +241,13 @@ function balanceWeeklyVolume(days: ProgramDays, dayOrder: string[], trainingType
     const setsOf = (s: { dayKey: string; exIndex: number }) => days[s.dayKey].exercises[s.exIndex].sets;
     const totalSets = () => slots.reduce((a, s) => a + setsOf(s), 0);
     for (let guard = 0; guard < 40; guard++) {
-      const pct = (totalSets() / target) * 100;
-      if (pct < BALANCE_LOW_PCT) {
+      const total = totalSets();
+      if (total < lo) {
         const candidates = slots.filter(s => setsOf(s) < MAX_SETS_PER_EXERCISE && estimateDaySetTimeSec(days, s.dayKey, trainingType) < MAX_DAY_TIME_SEC);
         if (!candidates.length) break;
         candidates.sort((a, b) => setsOf(a) - setsOf(b));
         days[candidates[0].dayKey].exercises[candidates[0].exIndex].sets += 1;
-      } else if (pct > BALANCE_HIGH_PCT) {
+      } else if (total > hi) {
         const candidates = slots.filter(s => setsOf(s) > MIN_SETS_PER_EXERCISE);
         if (!candidates.length) break;
         candidates.sort((a, b) => setsOf(b) - setsOf(a));
@@ -266,7 +269,7 @@ export function buildProgramFromPreset(preset: SplitPreset, trainingType: Traini
     days[key] = {
       key, label: DAY_TYPE_LABELS[d.type] || 'Training Day', dow: WEEKDAYS[i % 7],
       kind: isRest ? 'rest' : 'training', skipped: false,
-      theme: DAY_TYPE_THEME[d.type] || (Object.keys(MUSCLE_TARGETS) as Muscle[]),
+      theme: DAY_TYPE_THEME[d.type] || (MUSCLES),
       exercises: (isRest || prefill === 'scratch') ? [] : generateRecommendedDayExercises(dayExerciseIds, trainingType, weekDayTypes)
     };
     dayOrder.push(key);
@@ -284,7 +287,7 @@ export function buildCustomProgram(customDays: WizardCustomDay[]): { days: Progr
     const key = 'custom_' + i;
     days[key] = {
       key, label: d.label || ('Day ' + (i + 1)), dow: WEEKDAYS[i % 7],
-      kind: d.kind, skipped: false, theme: d.kind === 'rest' ? [] : (Object.keys(MUSCLE_TARGETS) as Muscle[]),
+      kind: d.kind, skipped: false, theme: d.kind === 'rest' ? [] : (MUSCLES),
       exercises: []
     };
     dayOrder.push(key);

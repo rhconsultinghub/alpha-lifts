@@ -10,7 +10,7 @@ export function MuscleDrillModal({ vm }: { vm: ViewModel }) {
           <div className="num" style={{ fontSize: 18, fontWeight: 700 }}>{md.name}</div>
           <button onClick={vm.closeMuscleDrill} style={{ background: 'rgba(255,255,255,.08)', border: 'none', color: '#f5f0ea', width: 28, height: 28, borderRadius: '50%', fontSize: 13 }}>✕</button>
         </div>
-        <div className="num" style={{ fontSize: 13, fontWeight: 700, color: md.color, marginBottom: 14 }}>{md.pctText} of weekly target</div>
+        <div className="num" style={{ fontSize: 13, fontWeight: 700, color: md.color, marginBottom: 14 }}>{md.setsText} sets/week · range {md.rangeText} · {md.statusLabel}</div>
         {md.alsoTargets.length > 0 && (
           <>
             <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 8 }}>MUSCLES TARGETED</div>

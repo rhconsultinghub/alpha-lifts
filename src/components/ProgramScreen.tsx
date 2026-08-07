@@ -35,11 +35,13 @@ export function ProgramScreen({ vm }: { vm: ViewModel }) {
       </button>
       {!vm.muscleBalanceCollapsed && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 26, background: 'rgba(255,255,255,.03)', borderRadius: 14, padding: '10px 8px' }}>
+          <div style={{ font: "400 10px 'Inter'", color: 'rgba(245,240,234,.4)', padding: '0 6px 4px' }}>Weekly hard sets per muscle. The lighter zone on each bar is the recommended range — tap for details.</div>
           {vm.muscleBars.map(m => (
             <button key={m.name} onClick={m.drill} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', padding: '5px 6px', borderRadius: 8, width: '100%' }}>
               <div style={{ width: 70, font: "500 11px 'Inter'", color: 'rgba(245,240,234,.65)', textAlign: 'left' }}>{m.name}</div>
-              <div style={{ flex: 1, height: 4, borderRadius: 3, background: 'rgba(255,255,255,.1)', overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${m.pctClamped}%`, background: m.color }} />
+              <div style={{ position: 'relative', flex: 1, height: 4, borderRadius: 3, background: 'rgba(255,255,255,.1)', overflow: 'hidden' }} title={`${m.pctText} sets · range ${m.rangeText}`}>
+                <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${m.goodLoPct}%`, right: 0, background: 'rgba(255,255,255,.1)' }} />
+                <div style={{ position: 'relative', height: '100%', width: `${m.pctClamped}%`, background: m.color }} />
               </div>
               <div className="num" style={{ width: 38, textAlign: 'right', fontSize: 11, fontWeight: 700, color: m.color }}>{m.pctText}</div>
             </button>

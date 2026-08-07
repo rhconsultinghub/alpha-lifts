@@ -1,5 +1,5 @@
 import type { AppState, CoachProposal, CoachEntitlement, TrainingType, Screen, ExerciseDef, ProgramDays, ProgramExercise, Muscle, ParsedPlan } from '../data/types';
-import { EXLIB, EQUIP_CATALOG, MUSCLE_TARGETS } from '../data/exercises';
+import { EXLIB, EQUIP_CATALOG, MUSCLES } from '../data/exercises';
 import { mkEx, slugify } from '../data/program';
 import {
   muscleBarsList, fmtWeight, completedWorkoutCount, bestEverStreak, totalPRCount,
@@ -98,7 +98,7 @@ export interface CoachContext {
     totalPRs?: number;
     lifetimeVolume?: string;
     bestSession?: string;
-    muscleVolume?: { muscle: string; pct: number; status: string }[];
+    muscleVolume?: { muscle: string; sets: number; range: string; status: string }[];
     topLifts?: { name: string; best: string; e1rm: string }[];
   };
   catalog?: { muscle: string; names: string[] }[];
@@ -137,10 +137,12 @@ function buildStats(s: AppState): CoachContext['stats'] {
   const best = bestSessionVolumeKg(s);
   if (best > 0) stats.bestSession = fmtWeight(best, s.units);
 
-  // Per-muscle weekly volume vs. target — the same numbers the Program screen's bars show.
+  // Per-muscle weekly volume in hard sets vs. the recommended MEV–MAV range — the same numbers the
+  // Program screen's bars show, sent as sets + range (not a single %) so the coach reasons in the
+  // same ranges the app and outside volume guidance use.
   stats.muscleVolume = muscleBarsList(s)
-    .filter(b => b.pct > 0)
-    .map(b => ({ muscle: b.name, pct: b.pct, status: b.status }));
+    .filter(b => b.sets > 0)
+    .map(b => ({ muscle: b.name, sets: Math.round(b.sets * 10) / 10, range: b.rangeText, status: b.status }));
 
   // Strongest logged lifts by estimated 1RM. Only weighted lifts qualify — a 1RM estimate is
   // meaningless for bodyweight/timed work, and history carries no equip to tell them apart, so
@@ -696,7 +698,6 @@ export async function parsePlanText(text: string, fallbackType: TrainingType): P
 }
 
 function buildPlanFromParse(raw: RawPlan, fallbackType: TrainingType): ParsedPlan {
-  const MUSCLES = Object.keys(MUSCLE_TARGETS) as Muscle[];
   const days: ProgramDays = {};
   const dayOrder: string[] = [];
   const customExercises: Record<string, ExerciseDef> = {};

@@ -1,4 +1,4 @@
-import { EXLIB, MUSCLE_TARGETS, TRAINING_MULT, TRAINING_LABELS, incrementForEquip, KG_PER_LB_STEP } from '../data/exercises';
+import { EXLIB, MUSCLE_VOLUME, MUSCLES, aimSets, TRAINING_LABELS, incrementForEquip, KG_PER_LB_STEP } from '../data/exercises';
 import { clamp, roundTo } from '../data/program';
 import { WARMUP_LIBRARY, type WarmupMove } from '../data/warmups';
 import type { AppState, ProgramDays, ProgramExercise, Muscle, Units, TrainingType, ExerciseHistoryEntry, HistoryEntry, ExerciseLast } from '../data/types';
@@ -34,10 +34,29 @@ export function weightStep(units: Units): number {
   return units === 'lb' ? KG_PER_LB_STEP : 2.5;
 }
 
-// Volume is expressed in "effective sets": each exercise's set count scaled by how its
-// current working weight (or, for bodyweight moves, reps) compares to its original baseline.
-// So adding sets OR pushing more weight both raise the muscle's tracked volume.
-export function muscleVolumes(program: ProgramDays, dayOrder: string[]): Record<string, number> {
+// How much of a "hard set" a logged set is worth, as a function of how close to failure it was
+// (logged RIR) AND the training style — because "close enough to failure to count" is style-
+// dependent. Endurance work is submaximal by design, so an RIR-4 set there is a normal working set
+// (full credit); the same RIR-4 set on a Low Volume / High Effort plan largely misses the point
+// (partial credit). A set with no logged RIR counts full — we never penalize users who don't log it.
+const RIR_TOL: Record<TrainingType, number> = {
+  hit: 1, strength: 3, progressive_overload: 3, general: 3, endurance: 5
+};
+export function setCredit(rir: number | undefined | null, trainingType: TrainingType): number {
+  if (rir == null) return 1;
+  const tol = RIR_TOL[trainingType];
+  if (rir <= tol) return 1;
+  return Math.max(0.5, 1 - 0.15 * (rir - tol));
+}
+
+// Weekly volume per muscle, counted in HARD SETS (the unit MUSCLE_VOLUME's landmarks are in). Each
+// planned working set counts as one set toward its exercise's PRIMARY muscle (secondaries earn no
+// bar credit — see MUSCLE_VOLUME's note), lightly weighted by setCredit() using that exercise's most
+// recent logged RIR as a proxy for how hard it's actually taken. Deliberately NOT scaled by load or
+// weight-vs-baseline: a hard set is a hard set regardless of whether load went up since some frozen
+// baseline, which is how every external volume reference counts — and counting it any other way is
+// what made the app disagree with them.
+export function muscleVolumes(program: ProgramDays, dayOrder: string[], trainingType: TrainingType, exerciseHistory?: Record<string, ExerciseHistoryEntry[]>): Record<string, number> {
   const vols: Record<string, number> = {};
   dayOrder.forEach(k => {
     const day = program[k];
@@ -49,16 +68,9 @@ export function muscleVolumes(program: ProgramDays, dayOrder: string[]): Record<
       // early) contributes nothing this week, even though it's still part of the plan.
       if (day.exercisesDoneMask && day.exercisesDoneMask[i] === false) return;
       const lib = EXLIB[ex.id];
-      const equip = lib.equip[ex.equipIdx];
-      let mult = 1;
-      if (ex.baseline) {
-        if (equip.v === 'bodyweight' || equip.v === 'assisted') {
-          mult = ex.baseline.reps > 0 ? clamp(ex.last.reps / ex.baseline.reps, 0.7, 1.6) : 1;
-        } else if (ex.baseline.weight > 0) {
-          mult = clamp(ex.last.weight / ex.baseline.weight, 0.7, 1.6);
-        }
-      }
-      vols[lib.muscle] = (vols[lib.muscle] || 0) + ex.sets * mult;
+      const last = effectiveLast(ex, exerciseHistory && exerciseHistory[ex.id]);
+      const credit = setCredit(last.rir, trainingType);
+      vols[lib.muscle] = (vols[lib.muscle] || 0) + ex.sets * credit;
     });
   });
   return vols;
@@ -69,30 +81,52 @@ export interface MuscleStatus {
   color: string;
 }
 
-export function muscleStatus(pct: number): MuscleStatus {
-  if (pct >= 120) return { status: 'over', color: 'oklch(0.72 0.17 35)' };
-  if (pct <= 70) return { status: 'under', color: 'oklch(0.72 0.13 230)' };
+// Band-relative status: below MEV is under-dosed, above MAV is likely too much, anything inside the
+// MEV-MAV range is a widely-accepted "good" weekly dose (no single-point target to miss narrowly).
+export function muscleStatus(sets: number, mev: number, mav: number): MuscleStatus {
+  if (sets > mav) return { status: 'over', color: 'oklch(0.72 0.17 35)' };
+  if (sets < mev) return { status: 'under', color: 'oklch(0.72 0.13 230)' };
   return { status: 'good', color: 'oklch(0.7 0.15 145)' };
 }
 
 export interface MuscleBar {
   name: string;
-  pct: number;
-  pctText: string;
-  pctClamped: number;
-  color: string;
+  sets: number;         // RIR-adjusted counted hard sets this week
+  mev: number;
+  mav: number;
+  aim: number;          // style's aim point within the band
+  rangeText: string;    // e.g. "10–20"
   status: 'over' | 'under' | 'good';
+  color: string;
+  // bar geometry — a 0..MAV track (100% = MAV)
+  fillPct: number;      // fill width = sets/MAV, clamped 0..100
+  goodLoPct: number;    // where the MEV..MAV "good zone" starts on the track
+  aimPct: number;       // aim marker position on the track
+  // compact-row + legacy fields (kept so existing components keep working)
+  pct: number;          // sets/aim ×100, rounded — used for heatmap comparability + sorting
+  pctText: string;      // the compact number box now shows the set count, e.g. "14"
+  pctClamped: number;   // = fillPct, the compact bar width
 }
 
 export function muscleBarsList(state: AppState): MuscleBar[] {
-  const mult = TRAINING_MULT[state.trainingType];
-  const vols = muscleVolumes(state.program, state.dayOrder);
-  return Object.keys(MUSCLE_TARGETS).map(name => {
-    const target = MUSCLE_TARGETS[name as Muscle] * mult;
-    const vol = vols[name] || 0;
-    const pct = target > 0 ? Math.round((vol / target) * 100) : 0;
-    const st = muscleStatus(pct);
-    return { name, pct, pctText: pct + '%', pctClamped: Math.min(100, pct), color: st.color, status: st.status };
+  const vols = muscleVolumes(state.program, state.dayOrder, state.trainingType, state.exerciseHistory);
+  return MUSCLES.map(name => {
+    const { mev, mav } = MUSCLE_VOLUME[name];
+    const aim = aimSets(name, state.trainingType);
+    const sets = vols[name] || 0;
+    const st = muscleStatus(sets, mev, mav);
+    const setsRounded = Math.round(sets * 10) / 10;
+    return {
+      name, sets, mev, mav, aim,
+      rangeText: mev + '–' + mav,
+      status: st.status, color: st.color,
+      fillPct: Math.min(100, mav > 0 ? (sets / mav) * 100 : 0),
+      goodLoPct: mav > 0 ? (mev / mav) * 100 : 0,
+      aimPct: Math.min(100, mav > 0 ? (aim / mav) * 100 : 0),
+      pct: aim > 0 ? Math.round((sets / aim) * 100) : 0,
+      pctText: String(Math.round(setsRounded)),
+      pctClamped: Math.min(100, mav > 0 ? (sets / mav) * 100 : 0),
+    };
   });
 }
 
@@ -107,18 +141,19 @@ export function dayWarning(state: AppState, dayKey: string, bars: MuscleBar[]): 
   const day = state.program[dayKey];
   const musclesToday = [...new Set(day.exercises.map(ex => EXLIB[ex.id].muscle))];
   const rows = bars.filter(b => musclesToday.includes(b.name as Muscle));
-  const overs = rows.filter(r => r.status === 'over').sort((a, b) => b.pct - a.pct);
-  const unders = rows.filter(r => r.status === 'under').sort((a, b) => a.pct - b.pct);
+  // rank by how far outside the band each muscle sits, so the most extreme is called out first.
+  const overs = rows.filter(r => r.status === 'over').sort((a, b) => (b.sets - b.mav) - (a.sets - a.mav));
+  const unders = rows.filter(r => r.status === 'under').sort((a, b) => (a.sets - a.mev) - (b.sets - b.mev));
   if (overs.length) {
     const o = overs[0];
-    let text = o.name + ' is overtrained (' + o.pct + '%) toward its weekly target, counting all your program days.';
-    if (unders.length) text += ' ' + unders[0].name + ' is under target (' + unders[0].pct + '%) — consider adding volume.';
+    let text = o.name + ' is above its ' + o.rangeText + ' set range (' + Math.round(o.sets) + ' sets/week, counting all your program days).';
+    if (unders.length) text += ' ' + unders[0].name + ' is below its ' + unders[0].rangeText + ' range (' + Math.round(unders[0].sets) + ' sets) — consider adding volume there.';
     return { level: 'over', color: 'oklch(0.82 0.13 35)', text, bars: rows };
   }
   if (unders.length) {
     return {
       level: 'under', color: 'oklch(0.75 0.13 230)',
-      text: unders.map(x => x.name).join(' & ') + ' running under your weekly ' + TRAINING_LABELS[state.trainingType] + ' target, even counting other program days. Consider adding sets.',
+      text: unders.map(x => x.name).join(' & ') + ' running below the weekly set range for your ' + TRAINING_LABELS[state.trainingType] + ' plan, even counting other program days. Consider adding sets.',
       bars: rows
     };
   }
@@ -570,10 +605,9 @@ function historyTimestamp(h: HistoryEntry): number {
 // elsewhere in the app.
 export function weeklyHeatmapData(state: AppState, bars: MuscleBar[]) {
   const weeksN = 6;
-  const muscles = Object.keys(MUSCLE_TARGETS);
+  const muscles = MUSCLES as string[];
   const basePct: Record<string, number> = {};
   bars.forEach(b => { basePct[b.name] = b.pct; });
-  const mult = TRAINING_MULT[state.trainingType];
 
   // exerciseHistory entries only carry a display date/day string, not a timestamp — join back to
   // state.history (written in the same completeWorkout() action, so date+day always match) to
@@ -600,7 +634,9 @@ export function weeklyHeatmapData(state: AppState, bars: MuscleBar[]) {
   const cols: { label: string; w: number }[] = [];
   for (let w = weeksN - 1; w >= 0; w--) cols.push({ label: w === 0 ? 'Now' : '-' + w + 'w', w });
   const rows = muscles.map(m => {
-    const target = MUSCLE_TARGETS[m as Muscle] * mult;
+    // reference the style's aim point so historical weeks and the live "Now" column (which is
+    // sets/aim ×100 via basePct) are on the same scale.
+    const target = aimSets(m as Muscle, state.trainingType);
     const cells = cols.map(c => {
       const pct = c.w === 0 ? (basePct[m] || 0) : (target > 0 ? Math.round(((weekSets[c.w][m] || 0) / target) * 100) : 0);
       const t = clamp(pct / 130, 0, 1);
@@ -772,7 +808,7 @@ export function consistencyData(state: AppState) {
 const DONUT_PALETTE = ['oklch(0.65 0.19 35)', 'oklch(0.7 0.13 230)', 'oklch(0.7 0.15 145)', 'oklch(0.75 0.13 90)', 'oklch(0.68 0.15 300)', 'oklch(0.7 0.14 20)', 'oklch(0.72 0.12 260)', 'oklch(0.66 0.16 160)', 'oklch(0.7 0.12 0)', 'oklch(0.62 0.1 250)', 'oklch(0.72 0.16 60)'];
 
 export function volumeDonutData(state: AppState) {
-  const vols = muscleVolumes(state.program, state.dayOrder);
+  const vols = muscleVolumes(state.program, state.dayOrder, state.trainingType, state.exerciseHistory);
   const total = Object.values(vols).reduce((a, v) => a + v, 0) || 1;
   const entries = Object.keys(vols).filter(m => vols[m] > 0).sort((a, b) => vols[b] - vols[a]);
   let acc = 0;

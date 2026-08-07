@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { EXLIB, EQUIP_CATALOG, MUSCLE_TARGETS, planRepDefault } from '../data/exercises';
+import { EXLIB, EQUIP_CATALOG, MUSCLES, planRepDefault } from '../data/exercises';
 import { mkEx, slugify } from '../data/program';
 import { createInitialState } from '../data/initialState';
 import { exportBackup as exportBackupFile, mergeBackupIntoDefaults } from '../data/backup';
@@ -674,7 +674,7 @@ export function useApp() {
       const key = 'day_' + Date.now();
       program[key] = {
         key, label: 'New Day', dow: WEEKDAYS[dayOrder.length % 7], kind: 'training', skipped: false,
-        theme: Object.keys(MUSCLE_TARGETS) as Muscle[], exercises: []
+        theme: MUSCLES, exercises: []
       };
       return [...dayOrder, key];
     })));
@@ -992,7 +992,7 @@ export function useApp() {
     setState(s => ({
       ...s,
       exerciseForm: {
-        editingId: null, name: '', muscle: (Object.keys(MUSCLE_TARGETS) as Muscle[])[0], secondary: [],
+        editingId: null, name: '', muscle: MUSCLES[0], secondary: [],
         equip: [], restBase: 90, repLo: 10, repHi: 12, compound: false, pattern: '', cue: '', error: '',
         trackingMode: 'reps'
       }

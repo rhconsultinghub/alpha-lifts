@@ -1,4 +1,4 @@
-import { EXLIB, DAY_THEMES, MUSCLE_TARGETS, TRAINING_LABELS, TRAINING_TYPE_DESCS, EQUIP_CATALOG } from '../data/exercises';
+import { EXLIB, DAY_THEMES, MUSCLES, TRAINING_LABELS, TRAINING_TYPE_DESCS, EQUIP_CATALOG } from '../data/exercises';
 import { SPLIT_PRESETS, DAY_TYPE_LABELS, WEEKDAYS } from '../data/wizard';
 import { WARMUP_LIBRARY } from '../data/warmups';
 import { ACHIEVEMENT_FAMILIES, CATEGORY_LABELS, TOTAL_POSSIBLE_POINTS, TOTAL_TIERS, type AchievementCategory } from '../data/achievements';
@@ -436,12 +436,12 @@ export function buildViewModel(state: AppState, actions: Actions) {
     if (dominantEntry) {
       const [domMuscle, idxs] = dominantEntry;
       const theme = day.theme || DAY_THEMES[dayKey] || [];
-      const underBar = bars.filter(b => b.status === 'under' && b.name !== domMuscle && theme.includes(b.name as Muscle)).sort((a, b) => a.pct - b.pct)[0];
+      const underBar = bars.filter(b => b.status === 'under' && b.name !== domMuscle && theme.includes(b.name as Muscle)).sort((a, b) => (a.sets - a.mev) - (b.sets - b.mev))[0];
       if (underBar) {
         const exA = day.exercises[idxs[0]], exB = day.exercises[idxs[1]];
         balanceTip = {
           show: true,
-          text: EXLIB[exB.id].name + ' targets ' + domMuscle + ' just like ' + EXLIB[exA.id].name + '. ' + underBar.name + ' is under target (' + underBar.pct + '%) — consider swapping it in instead.',
+          text: EXLIB[exB.id].name + ' targets ' + domMuscle + ' just like ' + EXLIB[exA.id].name + '. ' + underBar.name + ' is below its ' + underBar.rangeText + ' set range — consider swapping it in instead.',
           ctaLabel: 'Swap for ' + underBar.name,
           swap: () => actions.openSwap(dayKey, idxs[1], 'replace', false)
         };
@@ -712,7 +712,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     const currentEx = isAdd ? null : exercisesArr[s.swap.exIndex];
     const currentLib = currentEx ? EXLIB[currentEx.id] : null;
     const tab = isAdd ? 'replace' : s.swap.tab;
-    const theme = s.program[dayKey]?.theme || DAY_THEMES[dayKey] || (Object.keys(MUSCLE_TARGETS) as Muscle[]);
+    const theme = s.program[dayKey]?.theme || DAY_THEMES[dayKey] || (MUSCLES);
 
     const equipOptions = currentLib ? currentLib.equip.map((o, idx) => {
       const staged = s.swap!.stagedEquipIdx != null ? s.swap!.stagedEquipIdx : currentEx!.equipIdx;
@@ -788,7 +788,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     // union of every applicable day's theme, so the replacement list stays valid no matter which
     // of the affected days end up selected.
     const theme = new Set<Muscle>();
-    ms.dayKeys.forEach(k => (s.program[k]?.theme || DAY_THEMES[k] || (Object.keys(MUSCLE_TARGETS) as Muscle[])).forEach(m => theme.add(m)));
+    ms.dayKeys.forEach(k => (s.program[k]?.theme || DAY_THEMES[k] || (MUSCLES)).forEach(m => theme.add(m)));
 
     const dayOptions = ms.dayKeys.map(k => {
       const day = s.program[k];
@@ -870,9 +870,13 @@ export function buildViewModel(state: AppState, actions: Actions) {
     } else if (bar.status === 'under') {
       rec = 'Add a set to an existing ' + name + ' exercise, or add a dedicated ' + name + ' exercise on a day that already trains it.';
     } else {
-      rec = name + ' is on target — no changes needed.';
+      rec = name + ' is in its target range — no changes needed.';
     }
-    return { open: true, name, pctText: bar.pctText, color: bar.color, rows, alsoTargets, rec };
+    const statusLabel = bar.status === 'over' ? 'above range' : bar.status === 'under' ? 'below range' : 'in range';
+    return {
+      open: true, name, color: bar.color, rows, alsoTargets, rec,
+      setsText: String(Math.round(bar.sets * 10) / 10), rangeText: bar.rangeText, aim: bar.aim, statusLabel,
+    };
   })();
 
   // ---------- warm-up detail ----------
@@ -1083,8 +1087,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
     muscleBalanceSummary: (() => {
       const under = bars.filter(m => m.status === 'under').length;
       const over = bars.filter(m => m.status === 'over').length;
-      if (under) return `${under} muscle${under === 1 ? '' : 's'} under target`;
-      if (over) return `${over} muscle${over === 1 ? '' : 's'} over target`;
+      if (under) return `${under} muscle${under === 1 ? '' : 's'} below range`;
+      if (over) return `${over} muscle${over === 1 ? '' : 's'} above range`;
       return 'All muscles on target';
     })(),
     programDays, newProgramWizard,
@@ -1156,7 +1160,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
         const lib = EXLIB[id];
         return lib.name.toLowerCase().includes(query) || lib.muscle.toLowerCase().includes(query);
       };
-      return (Object.keys(MUSCLE_TARGETS) as Muscle[]).map(muscle => {
+      return (MUSCLES).map(muscle => {
         const ids = Object.keys(EXLIB).filter(id => EXLIB[id].muscle === muscle && matches(id)).sort((a, b) => EXLIB[a].name.localeCompare(EXLIB[b].name));
         return {
           muscle, muscleUpper: muscle.toUpperCase(),
@@ -1194,11 +1198,11 @@ export function buildViewModel(state: AppState, actions: Actions) {
     exerciseForm: (() => {
       const f = s.exerciseForm;
       if (!f) return { open: false };
-      const muscleOptions = (Object.keys(MUSCLE_TARGETS) as Muscle[]).map(m => {
+      const muscleOptions = (MUSCLES).map(m => {
         const sel = m === f.muscle;
         return { label: m, select: () => actions.toggleFormMuscle(m), bg: sel ? ACCENT : 'rgba(255,255,255,.06)', color: sel ? '#0d0c0b' : 'rgba(245,240,234,.7)', border: sel ? ACCENT : 'rgba(255,255,255,.12)' };
       });
-      const secondaryOptions = (Object.keys(MUSCLE_TARGETS) as Muscle[]).filter(m => m !== f.muscle).map(m => {
+      const secondaryOptions = (MUSCLES).filter(m => m !== f.muscle).map(m => {
         const sel = f.secondary.includes(m);
         return { label: m, toggle: () => actions.toggleFormSecondary(m), bg: sel ? 'oklch(0.65 0.19 35 / 0.2)' : 'rgba(255,255,255,.06)', color: sel ? '#f5f0ea' : 'rgba(245,240,234,.6)', border: sel ? 'oklch(0.65 0.19 35 / 0.6)' : 'rgba(255,255,255,.12)' };
       });
