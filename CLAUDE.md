@@ -2276,5 +2276,18 @@ Same deploy story as phase 46 (one combined push): frontend auto-deploys;
 around the same time: `npx wrangler d1 execute alpha-lifts-db --remote
 --file=migrate-add-password-security.sql` (safe in either order — the Worker reads the new
 columns defensively, treating missing as version 0 — but until BOTH are live, password
-change/reset and revocation aren't in effect). To actually SEND reset emails, RESEND_API_KEY
-must be configured (same gate as verification emails); without it request-reset is an inert 200.
+change/reset and revocation aren't in effect).
+
+**All of the above WAS deployed and verified in production the same session**: migration applied
+(columns + indexes confirmed via pragma query), Worker deployed with both rate-limit bindings,
+live smoke tests green (spoofed-identity 401, reset page served, localhost origin 403), Pages
+picked up the bundle + CSP. **Resend email is fully working in prod** — RESEND_API_KEY is set,
+the `alpha-lifts.com` sending domain is verified, and a real password-reset email was triggered,
+delivered, and received by the owner (live `wrangler tail` showed zero Resend errors).
+
+Deploy friction hit this round, worth remembering: `wrangler d1 execute --remote` failed with
+**"Authentication error [code: 10000]"** despite `wrangler whoami` showing the right account WITH
+`d1 (write)` scope — the OAuth token was simply stale (wrangler warned about missing newer
+scopes). Fix: `npx wrangler login` to re-consent in the browser, then retry. If a migration then
+says "duplicate column name", it already applied on an earlier attempt — safe to ignore, but
+confirm with `SELECT name FROM pragma_table_info('users')`.
