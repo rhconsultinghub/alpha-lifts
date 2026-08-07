@@ -43,6 +43,23 @@ function coachAckAllText(props: CoachProposal[]): string {
   return `Done — applied ${props.length} changes:\n${lines}`;
 }
 
+// One-shot backfill helper: recover set/rep counts from the display rows of a pre-counter session.
+// A logged row's resultText is "<weight> × 8/8/6"; a skipped-within-session row is "N sets planned".
+// Only the former contributes. Excludes any row whose reps look like plank seconds is impossible
+// here (no trackingMode survives on the row), so this is the documented approximate case.
+function countsFromResultText(rows: { resultText: string }[]): { setCount: number; repCount: number } {
+  let setCount = 0, repCount = 0;
+  for (const row of rows || []) {
+    const m = /×\s*([\d/]+)/.exec(row.resultText || '');
+    if (!m) continue;
+    const reps = m[1].split('/').map(Number).filter(n => Number.isFinite(n));
+    if (!reps.length) continue;
+    setCount += reps.length;
+    repCount += reps.reduce((a, n) => a + n, 0);
+  }
+  return { setCount, repCount };
+}
+
 function loadInitial(): AppState {
   const defaults = createInitialState();
   let state: AppState = defaults;
@@ -66,6 +83,18 @@ function loadInitial(): AppState {
       if (!state.userName) {
         const m = /^(.+?)['’]s\s+Program$/i.exec((state.programName || '').trim());
         if (m) state.userName = m[1].trim();
+      }
+      // back-compat: setCount/repCount were added for the lifetime "fun fact" totals. Sessions
+      // logged before then have neither, so backfill once from each row's resultText
+      // ("175 lb × 8/8/6" → 3 sets, 22 reps). One-shot: written back into state.history here so the
+      // parse is paid on this load, not on every render. Time-tracked exercises stored seconds in the
+      // rep slot, so their historical "reps" are slightly overcounted — invisible in a playful total.
+      if (Array.isArray(state.history)) {
+        state.history = state.history.map(h =>
+          h.status === 'completed' && (h.repCount === undefined || h.setCount === undefined)
+            ? { ...h, ...countsFromResultText(h.exercises) }
+            : h
+        );
       }
       // An in-flight coach request can't survive a reload — if the app was closed mid-send, the
       // persisted `true` would restore a chat stuck showing the typing indicator forever, with
@@ -1607,6 +1636,7 @@ export function useApp() {
       const deloading = activeDeloadPct(s) !== null;
       const summary: AppState['completeSummary'] = [];
       let totalVolume = 0;
+      let totalSets = 0, totalReps = 0;
       const exercisesDoneMask: boolean[] = [];
       const updatedDayExercises = s.workout.dayExercises.map((ex, idx) => {
         const lib = EXLIB[ex.id];
@@ -1632,6 +1662,10 @@ export function useApp() {
           doneSets.forEach(r => { totalVolume += (r.weight || 0) * r.reps; });
           const isBodyweight = equip.v === 'bodyweight' || equip.v === 'assisted';
           const isTime = lib.trackingMode === 'time';
+          // Every completed set counts toward setCount; reps only from real rep-tracked work, since
+          // a time exercise stores seconds in the reps slot (a plank isn't 45 reps).
+          totalSets += doneSets.length;
+          if (!isTime) totalReps += doneSets.reduce((a, r) => a + (r.reps || 0), 0);
           const prior = s.exerciseHistory[ex.id] || [];
           // a first-ever log has nothing to beat, so it's a PR by default — otherwise compare
           // against the best prior session the same way bestSetScore is used for the e1RM metric.
@@ -1661,7 +1695,7 @@ export function useApp() {
       const avgRestSec = Math.round(s.workout.dayExercises.reduce((a, ex) => a + restForExercise(ex.id, s.restPacing), 0) / Math.max(1, s.workout.dayExercises.length));
       const historyEntry = {
         id: 'h' + now.getTime(), day: dayLabel, program: s.programName, date: dateStr, volumeKg: Math.round(totalVolume),
-        durationMin, avgRestSec, weekNumber: s.weekNumber, status: 'completed' as const, exercises: summary!
+        durationMin, avgRestSec, setCount: totalSets, repCount: totalReps, weekNumber: s.weekNumber, status: 'completed' as const, exercises: summary!
       };
       const exerciseHistory = { ...s.exerciseHistory };
       const loggedIds = new Set<string>();

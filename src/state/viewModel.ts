@@ -12,8 +12,10 @@ import {
   warmupInfo, dayMuscleRanks, formatElapsed, fmtWeight, weightStep, formatSetTime,
   volumeChartData, weeklyHeatmapData, exerciseProgressData, compareLiftsData, consistencyData,
   volumeDonutData, durationTrendData, warmupForDay, bodyWeightChartData, platesBreakdown, deloadSuggestion,
-  effectiveLast
+  effectiveLast, lifetimeVolumeKg, totalTrainingMinutes, completedWorkoutCount, lifetimeReps, lifetimeSets
 } from './logic';
+import { weightFactoid, timeFactoid } from '../data/factoids';
+import { seededFrac } from '../data/program';
 
 // "a", "a and b", "a, b and c" — the deload banner can cite up to three fatigue signals at once,
 // and joining them all with " and " reads as a run-on.
@@ -916,6 +918,48 @@ export function buildViewModel(state: AppState, actions: Actions) {
   // One line above Day View's Start Workout button.
   const startWorkoutHint = firstName ? `Ready when you are, ${firstName}.` : 'Ready when you are.';
 
+  // ---------- fun factoids ----------
+  // Cumulative "by the numbers" card on the Progress tab. Day-seeded so the object each comparison
+  // picks rotates once a day rather than churning on every repaint — same idiom as homeGreeting.
+  const funStats = (() => {
+    const daySeed = Math.floor(Date.now() / 86400000);
+    const volKg = lifetimeVolumeKg(s);
+    const mins = totalTrainingMinutes(s);
+    const weight = weightFactoid(volKg, daySeed);
+    const time = timeFactoid(mins, daySeed);
+    const workouts = completedWorkoutCount(s);
+    const reps = lifetimeReps(s);
+    const sets = lifetimeSets(s);
+    // fmtWeight doesn't group thousands; these lifetime totals get big, so add separators to the
+    // leading number ("88185 lb" → "88,185 lb") for the subtitle only.
+    const grouped = (t: string) => t.replace(/\d+/, m => Number(m).toLocaleString('en-US'));
+    return {
+      // Below the smallest object in both tables (a brand-new account) — show a starter line rather
+      // than a broken "0.2 house cats".
+      hasData: !!(weight || time),
+      weight: weight ? { emoji: weight.emoji, text: `You've lifted the equivalent of ${weight.text}`, value: grouped(fmtWeight(volKg, s.units)) } : null,
+      time: time ? { emoji: time.emoji, text: `That's ${time.text} of training time`, value: formatDuration(mins * 60) } : null,
+      // Plain celebrated totals — a big rep number is satisfying on its own, no object needed.
+      totals: `${workouts.toLocaleString('en-US')} workout${workouts === 1 ? '' : 's'} · ${reps.toLocaleString('en-US')} reps · ${sets.toLocaleString('en-US')} sets`,
+      starter: 'Log a few workouts and your fun stats start stacking up.'
+    };
+  })();
+
+  // Per-session factoid on the Complete screen, from the session just appended to history. Seeded by
+  // the session id (via seededFrac) so it's fixed for that session rather than re-rolled on every
+  // re-render. Falls back volume → time → nothing, so a light bodyweight day omits the line instead
+  // of printing something silly.
+  const sessionFactoid = (() => {
+    const last = s.history[0];
+    if (!last || last.status !== 'completed') return null;
+    const seed = Math.floor(seededFrac(last.id) * 1000);
+    const weight = weightFactoid(last.volumeKg || 0, seed);
+    if (weight) return { emoji: weight.emoji, text: `This session moved the equivalent of ${weight.text}.` };
+    const time = timeFactoid(last.durationMin || 0, seed);
+    if (time) return { emoji: time.emoji, text: `That's about ${time.text} under the bar.` };
+    return null;
+  })();
+
   const showResume = !!s.workout && s.screen !== 'workout' && s.screen !== 'complete';
   const resumeText = s.workout ? ('Resume ' + s.program[s.workout.dayKey].label + ' — Exercise ' + (s.workout.exIndex + 1) + ' of ' + s.program[s.workout.dayKey].exercises.length) : '';
   const resumeElapsedText = s.workout ? formatElapsed(Date.now() - (s.workout.startedAt || Date.now())) : '';
@@ -1092,6 +1136,7 @@ export function buildViewModel(state: AppState, actions: Actions) {
     planPrompt,
     completeSubtitle,
     editWeek, openEditWeek: actions.openEditWeek,
+    funStats, sessionFactoid,
     firstName, homeGreeting, startWorkoutHint,
     showResume, resumeText, resumeElapsedText, resumeWorkout: actions.resumeWorkout,
     currentUnitsLabel, currentPlanLabel: TRAINING_LABELS[s.trainingType], programName: s.programName,

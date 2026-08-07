@@ -147,6 +147,12 @@ export interface HistoryEntry {
   volumeKg: number;
   durationMin: number;
   avgRestSec: number;
+  // Per-session set/rep counts, summed for lifetime "fun fact" totals (see state/factoids usage).
+  // Optional/back-compat: absent on sessions logged before this existed — loadInitial() backfills
+  // them once from each row's resultText. repCount excludes time-tracked exercises (a plank has no
+  // reps); setCount counts every completed set.
+  setCount?: number;
+  repCount?: number;
   weekNumber: number;
   status: 'completed' | 'skipped';
   exercises: CompleteSummaryRow[];

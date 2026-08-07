@@ -7,9 +7,15 @@ export function CompleteScreen({ vm }: { vm: ViewModel }) {
     <div style={{ padding: '60px 24px 40px', textAlign: 'center' }}>
       <div style={{ fontSize: 44, marginBottom: 12 }}>🏁</div>
       <div className="num" style={{ fontSize: 28, fontWeight: 700, marginBottom: 6 }}>Workout Complete</div>
-      <div style={{ font: "400 13px 'Inter'", color: 'rgba(245,240,234,.5)', marginBottom: prCount > 0 ? 10 : 28 }}>{vm.completeSubtitle}</div>
+      <div style={{ font: "400 13px 'Inter'", color: 'rgba(245,240,234,.5)', marginBottom: prCount > 0 || vm.sessionFactoid ? 10 : 28 }}>{vm.completeSubtitle}</div>
       {prCount > 0 && (
-        <div style={{ font: "700 13px 'Inter'", color: 'oklch(0.8 0.16 90)', marginBottom: 28 }}>🏆 {prCount} new record{prCount > 1 ? 's' : ''} this session!</div>
+        <div style={{ font: "700 13px 'Inter'", color: 'oklch(0.8 0.16 90)', marginBottom: vm.sessionFactoid ? 12 : 28 }}>🏆 {prCount} new record{prCount > 1 ? 's' : ''} this session!</div>
+      )}
+
+      {vm.sessionFactoid && (
+        <div style={{ font: "600 13px 'Inter'", color: 'oklch(0.8 0.16 90)', marginBottom: 28 }}>
+          {vm.sessionFactoid.emoji} {vm.sessionFactoid.text}
+        </div>
       )}
 
       {earned.length > 0 && (

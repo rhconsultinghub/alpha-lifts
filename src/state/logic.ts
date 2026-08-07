@@ -847,6 +847,18 @@ export function lifetimeVolumeKg(state: AppState): number {
   return state.history.reduce((sum, h) => sum + (h.volumeKg || 0), 0);
 }
 
+// Lifetime set/rep totals. Summed per-session like volume above (not kept as a running scalar) so
+// they can always be re-derived and never drift — see the HistoryEntry.setCount/repCount note.
+// loadInitial() backfills these onto pre-counter sessions, so the sum covers all history, not just
+// sessions logged since the fields existed.
+export function lifetimeSets(state: AppState): number {
+  return state.history.reduce((sum, h) => sum + (h.setCount || 0), 0);
+}
+
+export function lifetimeReps(state: AppState): number {
+  return state.history.reduce((sum, h) => sum + (h.repCount || 0), 0);
+}
+
 // Longest run of consecutive completed sessions found *anywhere* in history, not just the current
 // run from most-recent — so breaking today's streak doesn't un-earn a badge for a longer streak
 // held in the past.

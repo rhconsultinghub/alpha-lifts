@@ -13,12 +13,42 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
   const cons = vm.consistency as any;
   const donut = vm.volumeDonut as any;
   const dur = vm.durationTrend as any;
+  const fun = vm.funStats as any;
 
   return (
     <>
       <div style={{ padding: '24px 20px 0' }}>
         <div className="num" style={{ fontSize: 30, fontWeight: 700, marginBottom: 4 }}>Progress</div>
         <div style={{ font: "400 12px 'Inter'", color: 'rgba(245,240,234,.45)', marginBottom: 22 }}>Analytics on your training over time.</div>
+
+        <div style={SECTION_LABEL}>BY THE NUMBERS</div>
+        <div style={{ ...CARD, marginTop: 8 }}>
+          {fun.hasData ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {fun.weight && (
+                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <span style={{ fontSize: 18, flex: 'none', lineHeight: 1.3 }}>{fun.weight.emoji}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ font: "400 13px/1.4 'Inter'", color: 'rgba(245,240,234,.85)' }}>{fun.weight.text}</div>
+                    <div className="num" style={{ font: "600 11px 'Inter'", color: 'oklch(0.72 0.17 35)', marginTop: 2 }}>{fun.weight.value} total</div>
+                  </div>
+                </div>
+              )}
+              {fun.time && (
+                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <span style={{ fontSize: 18, flex: 'none', lineHeight: 1.3 }}>{fun.time.emoji}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ font: "400 13px/1.4 'Inter'", color: 'rgba(245,240,234,.85)' }}>{fun.time.text}</div>
+                    <div className="num" style={{ font: "600 11px 'Inter'", color: 'oklch(0.72 0.17 35)', marginTop: 2 }}>{fun.time.value} total</div>
+                  </div>
+                </div>
+              )}
+              <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.5)', borderTop: '1px solid rgba(255,255,255,.06)', paddingTop: 10 }}>{fun.totals}</div>
+            </div>
+          ) : (
+            <div style={{ padding: '4px 0', textAlign: 'center', font: "400 12px 'Inter'", color: 'rgba(245,240,234,.4)' }}>{fun.starter}</div>
+          )}
+        </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
           <div style={SECTION_LABEL}>BODY WEIGHT</div>

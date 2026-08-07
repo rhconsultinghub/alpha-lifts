@@ -2078,3 +2078,53 @@ weekly day-structure editing.
   `npx tsc -b`, `npm run build` and the worker's `tsc --noEmit` all clean. **`propose_set_day_kind`,
   `propose_rename_day`, the TOOL_RULES line and the reworded training-style descriptions need a
   `wrangler deploy`** from `L:\…\alpha-lifts\worker`; the frontend auto-deploys on push.
+
+(45) **fun "factoid" comparison blurbs** — reframing cumulative stats as something tangible
+("you've lifted the equivalent of 5 elephants", "that's the Harry Potter films ×3 in the gym"),
+requested with those exact examples. Frontend-only.
+
+- **`src/data/factoids.ts`** (new, pure) — two ascending reference tables (weight in kg: house cat →
+  grand piano → car → elephant → double-decker bus → blue whale → Space Shuttle; time in min: pop
+  song → feature film → the Harry Potter films → the HP audiobooks) and `weightFactoid(kg, seed)` /
+  `timeFactoid(min, seed)`. Each filters to references whose count lands in a *relatable* band
+  (`[1.1, 250]`) so it never prints "0.2 cars" or "13,000 cats", picks among the survivors by the
+  caller's seed, and returns `null` below the smallest object so callers fall back or hide.
+  Deliberately unit-agnostic ("10 cars" reads the same in kg or lb), the opposite of the achievement
+  volume tiers which *are* unit-specific — verified across magnitudes: 3 kg → null, 40,000 kg rotates
+  believably (elephants/pianos/cars by seed), 2,000,000 kg → "250 T-rexes" not "millions of cats",
+  500,000,000 kg still caps sensibly at Space Shuttles.
+
+- **Reps/sets counters.** The user asked whether a per-session counter bloats storage / why not a
+  running total. Answer, and the design: it *is* effectively a running total, stored the way the app
+  already stores `volumeKg`/`durationMin` — per-session on each `HistoryEntry`
+  (`setCount`/`repCount`, optional/back-compat), summed by new `lifetimeSets`/`lifetimeReps` helpers
+  in `logic.ts` exactly like `lifetimeVolumeKg`. Two integers per workout, and the sum is the same
+  cheap reduce already run for volume; a per-session number can always be re-derived and never
+  drifts, which is why the app never kept a running scalar for volume either. Written in
+  `completeWorkout()` from `doneSets` (already in hand): **`repCount` excludes time-tracked exercises**
+  (a plank stores seconds in the rep slot, so it's a set with no reps), `setCount` counts every
+  completed set. `loadInitial()` backfills pre-counter sessions **once** by parsing each row's
+  `resultText` (`"80 kg × 8/8/6"` → 3 sets, 22 reps), written back into `state.history` so the parse
+  is paid on load not per render; historical plank seconds count as reps in the backfill only, a
+  documented invisible-scale approximation (verified: h1 with a `45s × 60/60` plank backfilled to
+  162 reps, while a *live* logged plank correctly contributed 0 reps / 1 set — going-forward path is
+  precise).
+
+- **Placement** (per the user's pick — not Achievements/home): a `BY THE NUMBERS` card at the top of
+  the Progress tab (`funStats` in the VM — a weight line, a time line, and a plain
+  `N workouts · N reps · N sets` total, each object **day-seeded** via the same
+  `Math.floor(Date.now()/86400000)` idiom as `homeGreeting` so it rotates daily without churning),
+  and a one-line factoid on the Complete screen between the PR banner and the achievements block
+  (`sessionFactoid`, seeded by the session `id` through the previously-dead `seededFrac` so it's
+  fixed for that session, not re-rolled per render). Both degrade cleanly: the Progress card shows a
+  "log a few workouts" starter when both factoids are `null`, each line hides independently when its
+  own total is too small (verified — a sub-minute test session showed the weight line but not the
+  time line), and the Complete line is omitted entirely on a bodyweight day too light for any object.
+  Weight-total subtitles get thousands separators (`fmtWeight` doesn't group), so "88,185 lb" not
+  "88185 lb".
+
+  Verified live end-to-end: factoid math across magnitudes + seed rotation, backfill onto a
+  pre-counter blob, a real logged workout writing precise counts and rendering "🛞 This session moved
+  the equivalent of 96 car tyres", the Progress card, and the empty-history starter. `npx tsc -b` and
+  `npm run build` clean, zero console errors on a fresh tab. **No `worker/` changes — pure frontend,
+  auto-deploys on push, no `wrangler deploy` needed.**
