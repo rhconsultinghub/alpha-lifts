@@ -7,6 +7,7 @@
 import { COACH_API_URL, COACH_CONFIGURED } from './coach';
 import { getStoredToken } from './tokenStore';
 import { buildPlanEnvelope } from '../data/planIO';
+import { isNative } from '../native/platform';
 import type { AppState } from '../data/types';
 
 export const SHARE_CONFIGURED = COACH_CONFIGURED;
@@ -25,8 +26,13 @@ export async function createPlanShareLink(state: AppState): Promise<{ ok: true; 
     if (!res.ok || !data.id) {
       return { ok: false, error: data.error === 'plan_too_large' ? 'This plan is too large to share.' : 'Couldn’t create the link — try again in a bit.' };
     }
-    // location.origin + BASE_URL is the app's real root in both dev (/) and prod (/alpha-lifts/).
-    const url = `${location.origin}${import.meta.env.BASE_URL}#plan=${data.id}`;
+    // Web: location.origin + BASE_URL is the app's real root in both dev (/) and prod
+    // (/alpha-lifts/). Native: location.origin is capacitor://localhost — useless to a
+    // recipient — so links always point at the web deployment, where any browser can open them.
+    const root = isNative()
+      ? 'https://rhconsultinghub.github.io/alpha-lifts/'
+      : `${location.origin}${import.meta.env.BASE_URL}`;
+    const url = `${root}#plan=${data.id}`;
     return { ok: true, url };
   } catch {
     return { ok: false, error: 'Couldn’t reach the share service — are you online?' };

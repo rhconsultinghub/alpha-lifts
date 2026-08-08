@@ -2,6 +2,7 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { ViewModel } from '../state/viewModel';
 import { ExercisePhoto } from './ExercisePhoto';
+import { hapticTap } from '../native/haptics';
 import { BodyDiagram } from './BodyDiagram';
 import { MusclesWorkedModal } from './modals/MusclesWorkedModal';
 
@@ -42,7 +43,7 @@ export function DayViewScreen({ vm }: { vm: ViewModel }) {
     longPressTimer.current = window.setTimeout(() => {
       longPressTimer.current = null;
       target.setPointerCapture?.(pointerId);
-      if (navigator.vibrate) navigator.vibrate(15); // haptic "pop" on pickup (mobile only, no-op elsewhere)
+      hapticTap(); // haptic "pop" on pickup (platform-branched; no-op where unsupported)
       setDrag({ p0: position, startY, rowH, dy: 0, target: position });
     }, LONG_PRESS_MS);
   };

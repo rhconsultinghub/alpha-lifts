@@ -1,4 +1,5 @@
 import { EXLIB } from './exercises';
+import { saveOrShareFile } from '../native/files';
 import type { AppState, ExerciseHistoryEntry, HistoryEntry, Units } from './types';
 
 // One-tap spreadsheet export of the workout history — the "share with a coach / analyze in
@@ -118,15 +119,11 @@ export function buildWorkoutCsv(state: AppState): string {
 
 export function exportWorkoutCsv(state: AppState): void {
   const csv = buildWorkoutCsv(state);
-  // UTF-8 BOM so Excel detects the encoding (exercise names can carry non-ASCII).
-  const blob = new Blob([String.fromCharCode(0xfeff), csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
   const dateStr = new Date().toISOString().slice(0, 10);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `alpha-lifts-history-${dateStr}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  void saveOrShareFile({
+    filename: `alpha-lifts-history-${dateStr}.csv`,
+    mime: 'text/csv;charset=utf-8',
+    // UTF-8 BOM so Excel detects the encoding (exercise names can carry non-ASCII).
+    data: new Blob([String.fromCharCode(0xfeff), csv], { type: 'text/csv;charset=utf-8' })
+  });
 }

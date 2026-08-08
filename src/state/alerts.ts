@@ -52,7 +52,9 @@ const REST_END_LINES: Record<string, string[]> = {
 
 // Deliberately random per fire rather than cycling an index: the alternative needs persisted state
 // for something that genuinely doesn't matter, and a repeat now and then is unnoticeable.
-function restEndLine(voice: string): string {
+// Exported (with contextBody) for the native shell: src/native/notifications.ts composes the same
+// copy into a *scheduled* local notification, so the tray reads identically on web and native.
+export function restEndLine(voice: string): string {
   const lines = REST_END_LINES[voice] || REST_END_LINES.Encouraging;
   return lines[Math.floor(Math.random() * lines.length)];
 }
@@ -61,10 +63,23 @@ function restEndLine(voice: string): string {
 // bodyweight lift with no target doesn't produce a dangling separator. `withName` is false for the
 // countdown, whose title already carries the exercise name — repeating it there costs one of the
 // two body lines a phone will show, to say something already on screen.
-function contextBody(ctx: RestContext | undefined, suffix: string, withName: boolean): string {
+export function contextBody(ctx: RestContext | undefined, suffix: string, withName: boolean): string {
   if (!ctx) return suffix;
   const parts = [withName ? ctx.exerciseName : '', ctx.setLabel, ctx.targetText, ctx.dayLabel].filter(Boolean);
   return parts.join(' · ') + (suffix ? '\n' + suffix : '');
+}
+
+// The registration lookup every tray call goes through. getRegistration(), never .ready — .ready
+// resolves only once a registration EXISTS, so with the API present but nothing registered (dev
+// server, a native WebView) an `await navigator.serviceWorker.ready` parks forever and wedges the
+// awaiting caller. push.ts already follows this rule; these helpers make alerts.ts match it.
+async function activeRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    return (await navigator.serviceWorker.getRegistration()) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // Returns whether the browser *accepted* the call. Chrome returns false when it refuses to vibrate
@@ -110,8 +125,8 @@ export async function notifyRestEnd(vibrate: boolean, ctx?: RestContext, voice =
       data: { type: 'rest-complete' },
       ...(vibrate ? { vibrate: [200, 100, 200] } : {})
     } as NotificationOptions;
-    if ('serviceWorker' in navigator) {
-      const reg = await navigator.serviceWorker.ready;
+    const reg = await activeRegistration();
+    if (reg) {
       // clear the silent countdown first so the completion lands as a brand-new notification
       const stale = await reg.getNotifications({ tag: TAG_PROGRESS });
       stale.forEach(n => n.close());
@@ -133,8 +148,8 @@ export async function notifyRestEnd(vibrate: boolean, ctx?: RestContext, voice =
 export async function updateRestProgressNotification(remainingSec: number, ctx?: RestContext): Promise<void> {
   try {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-    if (!('serviceWorker' in navigator)) return;
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await activeRegistration();
+    if (!reg) return;
     const mm = Math.floor(remainingSec / 60);
     const ss = String(remainingSec % 60).padStart(2, '0');
     // Clock first in the title — it's the one thing being glanced at, and it stays readable even
@@ -154,8 +169,8 @@ export async function updateRestProgressNotification(remainingSec: number, ctx?:
 // without resting) so a stale "Resting… 0:12 remaining" doesn't sit in the tray forever.
 export async function clearRestProgressNotification(): Promise<void> {
   try {
-    if (!('serviceWorker' in navigator)) return;
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await activeRegistration();
+    if (!reg) return;
     for (const tag of [TAG_PROGRESS, TAG_DONE]) {
       const notifs = await reg.getNotifications({ tag });
       notifs.forEach(n => n.close());

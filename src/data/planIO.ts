@@ -1,4 +1,5 @@
 import type { AppState, ProgramDays, ExerciseDef, TrainingType, ParsedPlan } from './types';
+import { saveOrShareFile } from '../native/files';
 
 export type { ParsedPlan };
 
@@ -51,19 +52,15 @@ export function buildPlanEnvelope(state: AppState): PlanEnvelope {
   };
 }
 
-// Download the active program as a plan file (mirrors exportBackup's Blob+anchor dance).
+// Export the active program as a plan file (delivery platform-branched in saveOrShareFile).
 export function exportPlan(state: AppState): void {
   const envelope = buildPlanEnvelope(state);
-  const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
   const dateStr = new Date().toISOString().slice(0, 10);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `alpha-lifts-plan-${dateStr}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  void saveOrShareFile({
+    filename: `alpha-lifts-plan-${dateStr}.json`,
+    mime: 'application/json',
+    data: JSON.stringify(envelope, null, 2)
+  });
 }
 
 // Validate + coerce a parsed JSON object into a ParsedPlan. Throws a friendly Error on anything

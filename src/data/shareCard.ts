@@ -1,6 +1,8 @@
 // Workout summary share card — a canvas-rendered PNG in the app's own look, handed to the Web
 // Share API (falling back to a plain download where share-with-files isn't supported). Pure
 // client-side: nothing is uploaded anywhere; "sharing" is the OS share sheet.
+import { isNative } from '../native/platform';
+import { saveOrShareFile } from '../native/files';
 
 export interface ShareCardData {
   dayLabel: string;
@@ -121,10 +123,15 @@ function truncate(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
 }
 
 /** Share via the OS sheet where files are supported; otherwise download the PNG. Returns how it
- *  was delivered so the UI can phrase the confirmation. */
+ *  was delivered so the UI can phrase the confirmation. Native goes straight to the Capacitor
+ *  share sheet (a WebView's navigator.canShare is unreliable and anchor downloads are dead). */
 export async function shareWorkoutCard(data: ShareCardData): Promise<'shared' | 'downloaded' | 'failed'> {
   const blob = await renderShareCard(data);
   if (!blob) return 'failed';
+  if (isNative()) {
+    const result = await saveOrShareFile({ filename: 'alpha-lifts-workout.png', mime: 'image/png', data: blob });
+    return result === 'failed' ? 'failed' : 'shared';
+  }
   const file = new File([blob], 'alpha-lifts-workout.png', { type: 'image/png' });
   if (typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })) {
     try {
@@ -135,13 +142,6 @@ export async function shareWorkoutCard(data: ShareCardData): Promise<'shared' | 
       return 'shared';
     }
   }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'alpha-lifts-workout.png';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  await saveOrShareFile({ filename: 'alpha-lifts-workout.png', mime: 'image/png', data: blob });
   return 'downloaded';
 }

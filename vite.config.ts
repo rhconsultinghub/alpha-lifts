@@ -4,8 +4,24 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // Served from https://<user>.github.io/alpha-lifts/ in production (GitHub Pages project site),
 // so the build needs that subpath as its base; local dev stays at root.
-export default defineConfig(({ command }) => ({
-  base: command === 'build' ? '/alpha-lifts/' : '/',
+//
+// `--mode native` builds the SAME app for the Capacitor shell: base '/' (the WebView serves the
+// bundle from its own root — a /alpha-lifts/ prefix would 404 every asset), and .env.native bakes
+// in the deployed Worker URL. Everything else is shared; see capacitor.config.ts.
+export default defineConfig(({ command, mode }) => ({
+  base: mode === 'native' ? '/' : command === 'build' ? '/alpha-lifts/' : '/',
+  build: {
+    rollupOptions: {
+      output: {
+        // All Capacitor plugin code (only ever loaded via dynamic import() inside isNative()
+        // branches — see src/native/) lands in one stably-named lazy chunk, so the web precache
+        // can exclude it by name below. Web users never fetch a byte of it.
+        manualChunks(id: string) {
+          if (id.includes('node_modules/@capacitor/')) return 'capacitor-native';
+        }
+      }
+    }
+  },
   plugins: [
     react(),
     VitePWA({
@@ -54,7 +70,10 @@ export default defineConfig(({ command }) => ({
         // still available offline; unvisited ones need one online view first). The pngs stay:
         // body-diagram art + muscle masks + icons are core UI, ~350 KB total.
         // woff2: the two self-hosted font files (~70 KB) — they must work offline.
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}']
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // The Capacitor plugin chunk (see manualChunks above) exists only for the native shell;
+        // the web app never imports it, so precaching it would waste every web install's bytes.
+        globIgnores: ['**/capacitor-native-*.js']
       }
     })
   ],

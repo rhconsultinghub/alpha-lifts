@@ -19,6 +19,7 @@ import {
 import { weightFactoid, timeFactoid } from '../data/factoids';
 import { PUSH_CONFIGURED, pushSupported } from './push';
 import { SHARE_CONFIGURED, createPlanShareLink } from './share';
+import { hapticsSupported } from '../native/haptics';
 import { shareWorkoutCard } from '../data/shareCard';
 import { seededFrac } from '../data/program';
 import { createInitialState } from '../data/initialState';
@@ -297,8 +298,8 @@ export function buildViewModel(state: AppState, actions: Actions) {
     restAlertNotify: s.restAlertNotify,
     // Some platforms don't expose the Vibration API at all (notably iOS, in every browser including
     // an installed PWA), where the Vibrate toggle would be a switch wired to nothing. Detect it and
-    // say so rather than letting the setting quietly lie.
-    vibrationSupported: typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function',
+    // say so rather than letting the setting quietly lie. The native shell always has haptics.
+    vibrationSupported: hapticsSupported(),
     toggleRestAlertSound: () => actions.setRestAlertSound(!s.restAlertSound),
     toggleRestAlertVibrate: () => actions.setRestAlertVibrate(!s.restAlertVibrate),
     toggleRestAlertNotify: () => actions.setRestAlertNotify(!s.restAlertNotify),
