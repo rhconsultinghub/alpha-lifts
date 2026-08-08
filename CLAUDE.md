@@ -2439,3 +2439,62 @@ Round-wide notes: dev-server port for THIS repo's browser verification moved to 
 (root `.claude/launch.json`) so it can't collide with another session's 5173. Commit messages
 must avoid double quotes — PowerShell 5.1 mangles embedded quotes when passing here-string args
 to native git, splitting the message into bogus pathspecs.
+
+
+(50) **roadmap continuation — the four remaining medium items from phase 49's analysis.** The
+large bets (native wrapper, cardio, social feed, marketplace, cycle training) stay deliberately
+parked. Four tracks, each verified live and committed separately; 245 tests green throughout:
+
+- **Drop sets + AMRAP** (`WorkoutSetRow.setType`/`SetHistoryRow.setType`, 'drop' | 'amrap';
+  warm-ups stay a separate boolean). A pill on each working-set card cycles Normal -> Drop ->
+  AMRAP (hidden on warm-ups and time-tracked exercises). Behaviour: NO rest into a pending drop
+  set (checked in toggleSetDone before the superset logic — a drop set follows immediately);
+  AMRAP shows an open rep target. Both count FULLY toward volume/set counts/PRs, but the
+  progression reference excludes them on both sides — completeWorkout's topSet/hitTop read only
+  `setType == null` rows (fallback: all), and effectiveLast applies the same filter to history
+  entries — so a trailing 60% drop set never becomes "last time's weight" and a short drop rep
+  count never blocks hitTop. Types persist into lastSets/exerciseHistory rows and a new CSV
+  'Type' column (header now Date..Set,Type,Weight..; column indices in csv.test.ts shifted).
+- **Supersets generalized to N-exercise circuits.** toggleSuperset now MERGES groups (chaining
+  Link Next builds A-B-C) and, on two same-group members, SPLITS at their boundary (each side
+  keeping/getting a group, solo sides unlinked) — for a pair that degenerates to the old
+  unlink-both. Mid-workout is a round-robin: completing working-ordinal k advances to the next
+  member (cyclic, day order) still owing set k (a never-visited member with enough planned sets
+  counts as owing, matching the old lazy-exSets behaviour); a full round rests using the LONGEST
+  member's restForExercise. New helpers `groupIndices`/`clearSoloGroup` in useApp; all six
+  clearing sites (builder remove, in-session remove, both swapConfirm paths, muscleSwapConfirm,
+  coach proposals) now keep survivors linked unless the group drops to one. Banner: "Circuit
+  with X + Y — rotate through...". Verified: 3-exercise rotation, shared 120s rest, survivor
+  linking, builder chain+split.
+- **Share cards + plan share links.** `src/data/shareCard.ts` canvas-renders a 1080px PNG
+  (gradient bg, day/date, volume/duration/PR stat tiles, up to 10 exercise rows with PR
+  highlight, skipped rows excluded) → Web Share API with files when supported, else download;
+  "Share This Workout" on the Complete screen (vm.shareWorkout builds the data from history[0] +
+  completeSummary). Plan links: `worker/src/share.ts` — POST /share (session-authed, auth rate
+  limiter, 64KB cap, newest-20-per-account trim) writes the PlanEnvelope to new D1 table
+  `shared_plans` (schema.sql + migrate-add-share.sql) and returns a 12-char id; GET /share/:id
+  is public (the unguessable id is the capability; the plan stays opaque server-side — all
+  validation is client-side parsePlanFile, same as the file path). Client: planIO refactored
+  onto `buildPlanEnvelope`; `src/state/share.ts` creates `origin + BASE_URL + #plan=<id>` links
+  (Settings > Workout Plan "Copy Share Link", clipboard + visible URL); a boot-hash effect in
+  useApp (mirrors #rest-exercise) fetches #plan=<id>, strips the hash, and stages the plan
+  behind the SAME pendingPlanImport confirm — never auto-applied. Verified end-to-end against
+  local wrangler dev on :8787 (which the dev client's .env.local already points at): create →
+  copy → open link → staged "My Push Plan" prompt; 401 unauth create; 404 unknown id.
+  **Live-verification traps hit:** worker/.dev.vars ALLOWED_ORIGINS needed http://localhost:5199
+  added (and wrangler dev does NOT hot-reload .dev.vars — restart it); and seeding localStorage
+  state for a REAL signed-in local account gets wiped by reconcileOnSignIn adopting the
+  account's empty server state — PUT the seed state to /state first, then reload to pull.
+- **Nutrition check-in** (`nutritionLog` — {date, calories?, proteinG?}, one entry per LOCAL
+  date, same-day re-log MERGES fields rather than erasing). Progress-tab card: two inputs +
+  protein/calories sparkline toggle (`nutritionChartData`, skipping days that didn't log that
+  metric) + `nutritionSummary` 7-day line (averages computed only over days carrying each
+  field). buildCoachContext emits the summary as `ctx.nutrition` (only when non-empty);
+  worker/src/prompt.ts sanitizes it (capNum bounds) and renders "Nutrition check-in: logged N of
+  the last 7 days, averaging ~X kcal/day and ~Y g protein/day." Explicitly NOT a food diary.
+
+Prod deploys this round: Worker deployed twice (share routes + nutrition prompt; cron intact),
+`shared_plans` created in remote D1. **Note: `wrangler d1 execute --remote --file=...` hit a real
+Authentication error [code: 10000] on the d1 IMPORT endpoint while `wrangler deploy` worked fine
+— the `--command` form (different API endpoint) succeeded. Try --command with the file's
+statements inline before reaching for `npx wrangler login`.** Pages auto-deployed on push.
