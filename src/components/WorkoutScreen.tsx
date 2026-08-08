@@ -93,7 +93,18 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
                 <span className="num" style={{ fontSize: 15, fontWeight: 700, color: s.isWarmup ? 'oklch(0.78 0.13 230)' : undefined }}>{s.label}</span>
-                <span style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)' }}> · target {s.targetText}</span>
+                {s.canCycleType && (
+                  <button
+                    onClick={s.cycleType}
+                    style={{
+                      font: "700 8px 'Inter'", padding: '3px 7px', borderRadius: 100, marginLeft: 6, verticalAlign: 'middle',
+                      border: s.setTypeActive ? '1px solid oklch(0.75 0.15 300 / 0.6)' : '1px dashed rgba(255,255,255,.25)',
+                      background: s.setTypeActive ? 'oklch(0.75 0.15 300 / 0.15)' : 'none',
+                      color: s.setTypeActive ? 'oklch(0.8 0.13 300)' : 'rgba(245,240,234,.4)', letterSpacing: '.05em'
+                    }}
+                  >{s.setTypeLabel}</button>
+                )}
+                <span style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', display: 'block' }}>target {s.targetText}</span>
                 {s.hasLast && (
                   <button onClick={s.viewHistory} style={{ display: 'block', background: 'none', border: 'none', padding: 0, marginTop: 2, font: "500 11px 'Inter'", color: 'oklch(0.72 0.17 35)', textDecoration: 'underline', cursor: 'pointer' }}>Last time: {s.lastText}</button>
                 )}

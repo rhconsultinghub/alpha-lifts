@@ -30,10 +30,30 @@ describe('buildWorkoutCsv', () => {
       }
     });
     const lines = buildWorkoutCsv(state).trim().split('\r\n');
-    expect(lines[0]).toBe('Date,Workout,Program,Week,Duration (min),Exercise,Equipment,Set,Weight,Unit,Reps,Seconds,RIR,PR,Deload');
+    expect(lines[0]).toBe('Date,Workout,Program,Week,Duration (min),Exercise,Equipment,Set,Type,Weight,Unit,Reps,Seconds,RIR,PR,Deload');
     expect(lines.length).toBe(4); // header + 3 sets
-    expect(lines[1]).toBe('2026-08-01,Push Day,PPL,3,55,Bench Press,Barbell,1,100,kg,8,,2,Yes,');
-    expect(lines[3]).toBe('2026-08-01,Push Day,PPL,3,55,Bench Press,Barbell,3,100,kg,6,,0,Yes,');
+    expect(lines[1]).toBe('2026-08-01,Push Day,PPL,3,55,Bench Press,Barbell,1,,100,kg,8,,2,Yes,');
+    expect(lines[3]).toBe('2026-08-01,Push Day,PPL,3,55,Bench Press,Barbell,3,,100,kg,6,,0,Yes,');
+  });
+
+  it('labels drop and AMRAP sets in the Type column', () => {
+    const state = testState({
+      units: 'kg',
+      history: [histEntry({
+        id: 'h' + T, date: 'Sat, Aug 1', day: 'Push Day',
+        exercises: [{ name: 'Bench Press', resultText: '', badgeText: 'Logged', badgeBg: '', badgeColor: '' }]
+      })],
+      exerciseHistory: {
+        bench_press: [exEntry({
+          date: 'Sat, Aug 1', day: 'Push Day',
+          sets: [{ weight: 100, reps: 8 }, { weight: 70, reps: 10, setType: 'drop' }, { weight: 100, reps: 12, setType: 'amrap' }]
+        })]
+      }
+    });
+    const lines = buildWorkoutCsv(state).trim().split('\r\n');
+    expect(lines[1].split(',')[8]).toBe('');
+    expect(lines[2].split(',')[8]).toBe('Drop');
+    expect(lines[3].split(',')[8]).toBe('AMRAP');
   });
 
   it('converts joined weights to the current display unit', () => {
@@ -48,8 +68,8 @@ describe('buildWorkoutCsv', () => {
       }
     });
     const row = buildWorkoutCsv(state).trim().split('\r\n')[1].split(',');
-    expect(row[8]).toBe('220.5'); // 100 kg → 220.5 lb at 0.1 precision
-    expect(row[9]).toBe('lb');
+    expect(row[9]).toBe('220.5'); // 100 kg → 220.5 lb at 0.1 precision
+    expect(row[10]).toBe('lb');
   });
 
   it('falls back to parsing resultText for sessions aged out of the per-set cap', () => {
@@ -64,10 +84,10 @@ describe('buildWorkoutCsv', () => {
     expect(lines.length).toBe(4);
     const row = lines[1].split(',');
     expect(row[7]).toBe('1');   // set number
-    expect(row[8]).toBe('220'); // weight as logged
-    expect(row[9]).toBe('lb');  // unit as logged, not current setting
-    expect(row[10]).toBe('8');
-    expect(row[12]).toBe('');   // RIR unknown on fallback rows
+    expect(row[9]).toBe('220'); // weight as logged
+    expect(row[10]).toBe('lb'); // unit as logged, not current setting
+    expect(row[11]).toBe('8');
+    expect(row[13]).toBe('');   // RIR unknown on fallback rows
   });
 
   it('puts time-tracked work in the Seconds column with no weight', () => {
@@ -82,9 +102,9 @@ describe('buildWorkoutCsv', () => {
     });
     const lines = buildWorkoutCsv(state).trim().split('\r\n');
     const row = lines[1].split(',');
-    expect(row[8]).toBe('');   // no weight
-    expect(row[10]).toBe('');  // no reps
-    expect(row[11]).toBe('60'); // seconds
+    expect(row[9]).toBe('');   // no weight
+    expect(row[11]).toBe('');  // no reps
+    expect(row[12]).toBe('60'); // seconds
   });
 
   it('marks deload rows and skips skipped exercises and skipped sessions', () => {

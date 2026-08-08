@@ -15,7 +15,7 @@ import type { AppState, ExerciseHistoryEntry, HistoryEntry, Units } from './type
 
 const HEADER = [
   'Date', 'Workout', 'Program', 'Week', 'Duration (min)',
-  'Exercise', 'Equipment', 'Set', 'Weight', 'Unit', 'Reps', 'Seconds', 'RIR', 'PR', 'Deload'
+  'Exercise', 'Equipment', 'Set', 'Type', 'Weight', 'Unit', 'Reps', 'Seconds', 'RIR', 'PR', 'Deload'
 ];
 
 /** Quote a CSV field only when it needs it (comma, quote, or newline). */
@@ -88,6 +88,7 @@ export function buildWorkoutCsv(state: AppState): string {
         sets.forEach((set, i) => {
           lines.push([
             ...base, row.name, equipLabel, i + 1,
+            set.setType === 'drop' ? 'Drop' : set.setType === 'amrap' ? 'AMRAP' : '',
             isTime ? '' : displayWeight(set.weight, state.units),
             isTime ? '' : state.units,
             isTime ? '' : set.reps,
@@ -102,7 +103,7 @@ export function buildWorkoutCsv(state: AppState): string {
       if (!parsed) continue;
       parsed.reps.forEach((reps, i) => {
         lines.push([
-          ...base, row.name, '', i + 1,
+          ...base, row.name, '', i + 1, '',
           isTime ? '' : parsed.weight,
           isTime ? '' : parsed.unit,
           isTime ? '' : reps,

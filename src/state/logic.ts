@@ -1,7 +1,7 @@
 import { EXLIB, MUSCLE_VOLUME, MUSCLES, aimSets, TRAINING_LABELS, incrementForEquip, KG_PER_LB_STEP } from '../data/exercises';
 import { clamp, roundTo } from '../data/program';
 import { WARMUP_LIBRARY, type WarmupMove } from '../data/warmups';
-import type { AppState, ProgramDays, ProgramExercise, Muscle, Units, TrainingType, ExerciseHistoryEntry, HistoryEntry, ExerciseLast } from '../data/types';
+import type { AppState, ProgramDays, ProgramExercise, Muscle, Units, TrainingType, ExerciseHistoryEntry, HistoryEntry, ExerciseLast, SetHistoryRow } from '../data/types';
 
 export function fmtWeight(kg: number, units: Units): string {
   if (units === 'lb') return Math.round((kg * 2.20462) / 5) * 5 + ' lb';
@@ -238,7 +238,12 @@ export function effectiveLast(ex: ProgramExercise, history?: ExerciseHistoryEntr
   if (usable && usable.length) {
     const lib = EXLIB[ex.id];
     const latest = usable[usable.length - 1];
-    const sets = latest.sets && latest.sets.length ? latest.sets : [{ weight: latest.weight, reps: latest.reps }];
+    const all: SetHistoryRow[] = latest.sets && latest.sets.length ? latest.sets : [{ weight: latest.weight, reps: latest.reps }];
+    // Progression reads only the straight working sets: a trailing drop set at reduced weight
+    // must not become "last time's weight", and a short drop/AMRAP rep count must not gate
+    // hitTop. (Mirrors the same filter at write time in completeWorkout.)
+    const core = all.filter(r => r.setType == null);
+    const sets = core.length ? core : all;
     const topSet = sets[sets.length - 1];
     const hitTop = sets.every(r => r.reps >= lib.repHi);
     return { weight: topSet.weight, reps: topSet.reps, hitTop, rir: topSet.rir };

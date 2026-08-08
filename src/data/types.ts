@@ -39,10 +39,17 @@ export interface ExerciseLast {
   rir?: number;
 }
 
+/** Special working-set styles. Warm-up rows are a separate boolean (WorkoutSetRow.warmup) —
+ *  warm-ups are excluded from all stats, while drop/AMRAP sets are real working sets that
+ *  count fully and only change in-session behaviour (no rest into a drop; open rep target on
+ *  an AMRAP). */
+export type SetType = 'drop' | 'amrap';
+
 export interface SetHistoryRow {
   weight: number;
   reps: number;
   rir?: number;
+  setType?: SetType;
 }
 
 export interface ProgramExercise {
@@ -111,6 +118,8 @@ export interface WorkoutSetRow {
   // volume, set/rep counts, PR detection, exerciseHistory, and the slot's stored `last` target —
   // see completeWorkout() in useApp.ts. Session-only by design; never persisted into history.
   warmup?: boolean;
+  // Drop/AMRAP marker (never combined with warmup). Unlike warmup, these persist into history.
+  setType?: SetType;
 }
 
 export interface WorkoutState {

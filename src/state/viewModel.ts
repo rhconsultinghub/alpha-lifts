@@ -680,13 +680,24 @@ export function buildViewModel(state: AppState, actions: Actions) {
         // WORKING-set ordinal (not the raw row index), since warm-up rows sit above and would
         // otherwise shift every working set onto the wrong prior set.
         const lastRow = isWarmup ? undefined : lastSetsArr[workingNum - 1] || lastSetsArr[lastSetsArr.length - 1];
+        const setType = isWarmup ? undefined : row.setType;
         return {
           num: i + 1,
           label,
           isWarmup,
           isTime,
+          // Drop/AMRAP badge pill: tap cycles Normal → Drop → AMRAP → Normal. Hidden on warm-ups
+          // and time-tracked exercises (an AMRAP plank is just a max hold; drops don't apply).
+          setTypeLabel: setType === 'drop' ? 'DROP' : setType === 'amrap' ? 'AMRAP' : 'SET TYPE',
+          setTypeActive: setType != null,
+          canCycleType: !isWarmup && !isTime,
+          cycleType: () => actions.cycleSetType(i),
           targetText: isWarmup
             ? 'ramp — doesn’t count toward stats'
+            : setType === 'amrap'
+            ? 'as many reps as possible'
+            : setType === 'drop'
+            ? 'drop the weight, no rest before this set'
             : isTime ? formatSetTime(lib.repLo) + '-' + formatSetTime(lib.repHi) : lib.repLo + '-' + lib.repHi + ' reps',
           hasLast: !!lastRow,
           lastText: lastRow ? (isTime ? formatSetTime(lastRow.reps) : fmtWeight(lastRow.weight, s.units) + ' × ' + lastRow.reps) : '',

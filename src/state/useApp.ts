@@ -1860,6 +1860,19 @@ export function useApp() {
       return { ...s, workout: { ...s.workout, exSets: { ...s.workout.exSets, [idx]: sets } } };
     });
   }, []);
+  // Normal → Drop → AMRAP → Normal. Warm-up rows are excluded (a warm-up drop set is nonsense).
+  const cycleSetType = useCallback((i: number) => {
+    setState(s => {
+      if (!s.workout) return s;
+      const idx = s.workout.exIndex;
+      const sets = s.workout.exSets[idx].map((row, k) => {
+        if (k !== i || row.warmup) return row;
+        const next = row.setType == null ? 'drop' as const : row.setType === 'drop' ? 'amrap' as const : undefined;
+        return { ...row, setType: next };
+      });
+      return { ...s, workout: { ...s.workout, exSets: { ...s.workout.exSets, [idx]: sets } } };
+    });
+  }, []);
   const bumpSetField = useCallback((i: number, field: 'weight' | 'reps', delta: number) => {
     setState(s => {
       if (!s.workout) return s;
@@ -1884,6 +1897,12 @@ export function useApp() {
       // this exercise alone, and its whole point is to be quick.
       if (state.workout.exSets[idx][i].warmup) {
         startRest(60);
+        return;
+      }
+      // The NEXT set is a drop set: no rest and no superset jump — a drop set's whole definition
+      // is that it follows immediately at reduced weight.
+      const nextRow = state.workout.exSets[idx][i + 1];
+      if (nextRow && !nextRow.done && nextRow.setType === 'drop') {
         return;
       }
       // linked superset partner: jump straight to it with no rest instead of resting, unless its
@@ -1972,14 +1991,20 @@ export function useApp() {
         let newEx = ex;
         let isPR = false;
         if (doneSets) {
-          const topSet = doneSets[doneSets.length - 1];
-          const hitTop = doneSets.every(r => r.reps >= lib.repHi);
+          // Drop/AMRAP sets count fully toward volume and PRs below, but the progression
+          // REFERENCE (topSet weight, hitTop) reads only the straight working sets — a trailing
+          // drop set at 60% would otherwise become "last time's weight", and its short rep count
+          // would block hitTop forever for anyone who drops every session.
+          const coreSets = doneSets.filter(r => r.setType == null);
+          const refSets = coreSets.length ? coreSets : doneSets;
+          const topSet = refSets[refSets.length - 1];
+          const hitTop = refSets.every(r => r.reps >= lib.repHi);
           // a fresh real log always supersedes a manual weight/reps correction, wherever it was set.
           // Not during a deload week though: the slot's stored target (and any manual correction)
           // should survive the light week untouched, so normal training resumes from the real
           // working weight rather than from 60% of it.
           if (!deloading) {
-            newEx = { ...ex, last: { weight: topSet.weight, reps: topSet.reps, hitTop, rir: topSet.rir }, lastSets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })), sets: doneSets.length, manualTarget: null };
+            newEx = { ...ex, last: { weight: topSet.weight, reps: topSet.reps, hitTop, rir: topSet.rir }, lastSets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir, setType: r.setType })), sets: doneSets.length, manualTarget: null };
           }
           doneSets.forEach(r => { totalVolume += (r.weight || 0) * r.reps; });
           const isBodyweight = equip.v === 'bodyweight' || equip.v === 'assisted';
@@ -2031,7 +2056,7 @@ export function useApp() {
         if (!doneSets.length) return;
         const eV = EXLIB[ex.id]?.equip[ex.equipIdx]?.v;
         loggedVariants.add(ex.id + '@' + eV);
-        const entry = { date: dateStr, weight: doneSets[0].weight, reps: doneSets[0].reps, day: dayLabel, equip: eV, sets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir })), ...(deloading ? { deload: true } : {}) };
+        const entry = { date: dateStr, weight: doneSets[0].weight, reps: doneSets[0].reps, day: dayLabel, equip: eV, sets: doneSets.map(r => ({ weight: r.weight, reps: r.reps, rir: r.rir, setType: r.setType })), ...(deloading ? { deload: true } : {}) };
         // Cap history at the last 8 sessions PER equipment variant — dropping the oldest same-tool
         // entry — so logging on one tool never ages out the other tool's history.
         const list = [...(exerciseHistory[ex.id] || []), entry];
@@ -2273,7 +2298,7 @@ export function useApp() {
       requestRemoveWorkoutExercise, cancelRemoveWorkoutExercise, confirmRemoveWorkoutExercise,
       openMuscleSwap, closeMuscleSwap, toggleMuscleSwapDay, muscleSwapToggleAll, muscleSwapStageEx, muscleSwapConfirm, muscleSwapSetQuery,
       removeExercise, requestRemoveBuilderExercise, changeSets, moveExercise, reorderExercise, setExerciseTarget, bumpExerciseTarget, toggleSuperset,
-      startWorkout, switchExercise, setSetField, setSetRir, bumpSetField, toggleSetDone, addSet, addWarmupSets, removeSet,
+      startWorkout, switchExercise, setSetField, setSetRir, cycleSetType, bumpSetField, toggleSetDone, addSet, addWarmupSets, removeSet,
       restAdjust, restSkip, advance, applyPlanUpdate, discardPlanUpdate,
       exitWorkout, resumeWorkout, requestEndEarly, completeWorkout, stopRest,
       continueWorkoutFromIdle, endWorkoutFromIdle

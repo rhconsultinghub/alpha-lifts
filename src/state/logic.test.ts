@@ -119,6 +119,20 @@ describe('effectiveLast', () => {
     expect(effectiveLast(ex, allHit).hitTop).toBe(true);
     expect(effectiveLast(ex, oneShort).hitTop).toBe(false);
   });
+  it('reads the progression reference from straight working sets, not drop/AMRAP sets', () => {
+    const ex = slot('bench_press', 3, 0, 60, 8);
+    // last row is a drop set at 60 kg — "last time" must still be the 100 kg working top set,
+    // and the drop set's short rep count must not decide hitTop.
+    const hist = [exEntry({
+      sets: [
+        { weight: 100, reps: 8 }, { weight: 100, reps: 8 },
+        { weight: 60, reps: 12, setType: 'drop' as const }
+      ]
+    })];
+    const last = effectiveLast(ex, hist);
+    expect(last.weight).toBe(100);
+    expect(last.hitTop).toBe(true);
+  });
   it('skips deload entries unless nothing else exists', () => {
     const ex = slot('bench_press', 3, 0, 60, 8);
     const withReal = [exEntry({ weight: 100 }), exEntry({ weight: 60, deload: true })];
