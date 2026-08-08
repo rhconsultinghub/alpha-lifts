@@ -13,9 +13,12 @@ compatibility_flags = ["nodejs_compat"]
 # — a project site is always https://<owner>.github.io. If a custom domain is ever
 # added, this needs to change with it, or every request 403s.
 [vars]
-# Production origins only — localhost is NOT trusted by the deployed Worker. Local dev gets it
-# via worker/.dev.vars (gitignored), which overrides [vars] under `wrangler dev`.
-ALLOWED_ORIGINS = "https://rhconsultinghub.github.io"
+# Production origins. Dev-server localhost is still NOT trusted here (local dev gets it via
+# worker/.dev.vars, which overrides [vars] under `wrangler dev`) — but the two NATIVE WebView
+# origins are: the Capacitor Android shell sends Origin: https://localhost and iOS (M-later)
+# sends capacitor://localhost. A real browser can never send either origin cross-site, so
+# allowlisting them opens nothing to websites; every sensitive route is session-authed anyway.
+ALLOWED_ORIGINS = "https://rhconsultinghub.github.io,https://localhost,capacitor://localhost"
 
 # Email verification (src/email.ts). It only switches ON when the RESEND_API_KEY secret is set:
 #   npx wrangler secret put RESEND_API_KEY        # from resend.com dashboard
