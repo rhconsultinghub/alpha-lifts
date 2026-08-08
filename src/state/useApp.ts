@@ -23,6 +23,8 @@ import { activeDeloadPct, advanceDeloadForWeek, SKIP_SUPPRESS_WEEKS } from './de
 import { vibrateRestEnd, playRestEndSound, notifyRestEnd, updateRestProgressNotification, clearRestProgressNotification } from './alerts';
 import type { RestContext } from './alerts';
 import { shouldFireReminder, fireReminder } from './reminders';
+import { isNative } from '../native/platform';
+import { scheduleRestEndNotification, cancelRestEndNotification, scheduleDailyReminder, cancelDailyReminder } from '../native/notifications';
 
 // Exported so the cloud-sync layer (sync.ts) reads/writes the exact same key — the whole app
 // state is this one blob, and sync just mirrors it to the server.
@@ -334,6 +336,9 @@ export function useApp() {
         setState(s => (s.workout && !s.idleWorkoutPrompt ? { ...s, idleWorkoutPrompt: true } : s));
       }
       const now = new Date();
+      // Web-only: natively the reminder is an OS-scheduled notification (see setRemindersEnabled)
+      // and this interval firing too would double-notify.
+      if (isNative()) return;
       if (!shouldFireReminder(cur, now)) return;
       const dow = now.toLocaleDateString(undefined, { weekday: 'long' });
       const todayProgDay = cur.dayOrder.map(k => cur.program[k]).find(d => d && d.dow === dow);
@@ -583,17 +588,38 @@ export function useApp() {
   }, []);
 
   // ---------- reminder notifications ----------
+  // Native shell: the reminder is a repeating OS-scheduled local notification (fires with the
+  // app fully closed — the thing the web 60s interval honestly can't do). Web keeps the interval
+  // path below. The native copy is day-agnostic for M1; M2's server push restores "only when a
+  // session is owed".
+  const firstNameOf = (s: AppState) => (s.userName || '').trim().split(/\s+/)[0] || undefined;
   const setRemindersEnabled = useCallback((v: boolean) => {
-    if (v && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    if (v && !isNative() && typeof Notification !== 'undefined' && Notification.permission === 'default') {
       Notification.requestPermission();
     }
     setState(s => ({ ...s, remindersEnabled: v }));
+    if (isNative()) {
+      const cur = stateRef.current;
+      if (v) void scheduleDailyReminder(cur.reminderTime, firstNameOf(cur));
+      else void cancelDailyReminder();
+    }
   }, []);
   const setReminderTime = useCallback((v: string) => {
     setState(s => ({ ...s, reminderTime: v }));
     // A subscribed device re-registers so the server-side reminder fires at the new time. The
     // Worker upserts on the endpoint, so this is a cheap idempotent update, not a re-permission.
     if (stateRef.current.pushRemindersEnabled) void subscribePush(v);
+    if (isNative() && stateRef.current.remindersEnabled) {
+      void scheduleDailyReminder(v, firstNameOf(stateRef.current));
+    }
+  }, []);
+  // Re-assert the native schedule once per launch: scheduleDailyReminder is cancel-then-schedule
+  // (idempotent), and this heals a reminder lost to an OS reboot or a cleared notification.
+  useEffect(() => {
+    if (!isNative()) return;
+    const cur = stateRef.current;
+    if (cur.remindersEnabled) void scheduleDailyReminder(cur.reminderTime, firstNameOf(cur));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // Cloud (Web Push) reminders — async by nature (permission prompt, SW subscription, network),
   // so the flag is only committed once the subscription actually succeeded; failures roll the
@@ -1740,6 +1766,9 @@ export function useApp() {
     // (the natural-completion path in restTick below replaces it with the "Rest complete" alert
     // instead of clearing it, so this only matters for early-exit paths).
     clearRestProgressNotification();
+    // Native mirror of the same cleanup: the OS-scheduled rest-end notification (see startRest)
+    // must not fire for a rest that was skipped or otherwise exited early.
+    if (isNative()) void cancelRestEndNotification();
   }, []);
 
   // Shared by the 1s interval and the visibilitychange resync below, so a throttled/suspended
@@ -1776,6 +1805,24 @@ export function useApp() {
     };
   }, []);
 
+  // Native shell: (re)schedule the OS-delivered rest-end notification against the COMMITTED
+  // state. Deferred a tick on purpose — callers invoke this right after a setState, and
+  // stateRef only reflects the new restEndAt after the commit; reading it early would schedule
+  // against the previous rest (or name the wrong set in the copy). Scheduling at restEndAt is
+  // what makes the native alert survive a suspended WebView — no JS needs to be running when
+  // the timer expires, unlike the web tick-driven path below.
+  const scheduleNativeRestEnd = useCallback(() => {
+    if (!isNative()) return;
+    window.setTimeout(() => {
+      const fresh = stateRef.current;
+      const w = fresh.workout;
+      if (!w || !w.resting || w.restEndAt == null) return;
+      if (fresh.restAlertVibrate || fresh.restAlertNotify) {
+        void scheduleRestEndNotification(w.restEndAt, restContext(fresh), fresh.coachVoice);
+      }
+    }, 0);
+  }, [restContext]);
+
   const restTick = useCallback(() => {
     const cur = stateRef.current;
     if (!cur.workout || !cur.workout.resting || cur.workout.restEndAt == null) return;
@@ -1790,7 +1837,9 @@ export function useApp() {
       // Fire the notification whenever vibrate OR notify is on, not just notify: the default
       // restAlertVibrate:true setting should still reach a backgrounded phone (where
       // navigator.vibrate is a no-op) via the OS alerting on the notification — see alerts.ts.
-      if (cur.restAlertVibrate || cur.restAlertNotify) notifyRestEnd(cur.restAlertVibrate, restContext(cur), cur.coachVoice);
+      // Not on native: the OS-scheduled local notification (scheduleNativeRestEnd) already fired
+      // — or is about to — at restEndAt; posting the web one too would double-notify.
+      if (!isNative() && (cur.restAlertVibrate || cur.restAlertNotify)) notifyRestEnd(cur.restAlertVibrate, restContext(cur), cur.coachVoice);
       setState(s => (s.workout ? { ...s, workout: { ...s.workout, resting: false, restRemaining: 0, restEndAt: null } } : s));
       return;
     }
@@ -1801,7 +1850,9 @@ export function useApp() {
     // full re-render + view-model rebuild + state re-serialization (persist AND cloud-sync
     // dirty-marking) once a second for every rest period. restRemaining is still written at
     // transition points (start/adjust/skip/end) but is no longer a live counter.
-    if (cur.restAlertNotify && document.hidden) updateRestProgressNotification(Math.round(remainingMs / 1000), restContext(cur));
+    // Live tray countdown is a web-only workaround (no scheduled notifications exist there);
+    // natively the in-app RestToast covers the foreground and the scheduled alert covers the rest.
+    if (!isNative() && cur.restAlertNotify && document.hidden) updateRestProgressNotification(Math.round(remainingMs / 1000), restContext(cur));
   }, [restContext]);
 
   // Vibrate/WebAudio are both restricted to a visible document by the browser (vibrate no-ops
@@ -1857,8 +1908,9 @@ export function useApp() {
       const restEndAt = Date.now() + total * 1000;
       return { ...s, workout: { ...s.workout, resting: true, restTotal: total, restRemaining: total, restEndAt } };
     });
+    scheduleNativeRestEnd();
     restInterval.current = window.setInterval(restTick, 1000);
-  }, [stopRest, restTick]);
+  }, [stopRest, restTick, scheduleNativeRestEnd]);
 
   const restAdjust = useCallback((delta: number) => {
     setState(s => {
@@ -1869,7 +1921,9 @@ export function useApp() {
       const restRemaining = Math.round((restEndAt - Date.now()) / 1000);
       return { ...s, workout: { ...s.workout, restRemaining, restTotal: Math.max(s.workout.restTotal, restRemaining), restEndAt } };
     });
-  }, []);
+    // ±15s moved the deadline — the OS-scheduled native alert must move with it.
+    scheduleNativeRestEnd();
+  }, [scheduleNativeRestEnd]);
   const restSkip = useCallback(() => {
     stopRest();
     setState(s => (s.workout ? { ...s, workout: { ...s.workout, resting: false, restRemaining: 0, restEndAt: null } } : s));
@@ -2006,6 +2060,8 @@ export function useApp() {
   }, []);
 
   const completeWorkout = useCallback(() => {
+    // Belt-and-braces: whatever path ended the session, no scheduled rest alert may outlive it.
+    if (isNative()) void cancelRestEndNotification();
     setState(s => {
       if (!s.workout) return s;
       const dayKey = s.workout.dayKey;

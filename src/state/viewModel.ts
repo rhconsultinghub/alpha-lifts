@@ -20,6 +20,7 @@ import { weightFactoid, timeFactoid } from '../data/factoids';
 import { PUSH_CONFIGURED, pushSupported } from './push';
 import { SHARE_CONFIGURED, createPlanShareLink } from './share';
 import { hapticsSupported } from '../native/haptics';
+import { isNative } from '../native/platform';
 import { shareWorkoutCard } from '../data/shareCard';
 import { seededFrac } from '../data/program';
 import { createInitialState } from '../data/initialState';
@@ -334,7 +335,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
     reminderPermissionDenied: typeof Notification !== 'undefined' && Notification.permission === 'denied',
     toggleReminders: () => actions.setRemindersEnabled(!s.remindersEnabled),
     // Cloud (Web Push) reminders — offered only when the Worker is configured; per-device.
-    pushRemindersAvailable: PUSH_CONFIGURED && pushSupported(),
+    // Hidden in the native shell: no service worker there, so no Web Push — the native scheduled
+    // reminder covers the same need (and M2's FCM restores the server-side smarts).
+    pushRemindersAvailable: !isNative() && PUSH_CONFIGURED && pushSupported(),
     pushRemindersEnabled: !!s.pushRemindersEnabled,
     togglePushReminders: () => { void actions.setPushReminders(!s.pushRemindersEnabled); },
     pushSetupNotice: s.pushSetupNotice || null,
