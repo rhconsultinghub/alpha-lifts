@@ -8,7 +8,12 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:native": "tsc -b && vite build --mode native",
+    "cap:sync": "npm run build:native && cap sync android",
+    "cap:open": "cap open android",
+    "cap:run": "npm run cap:sync && cap run android",
+    "cap:assets": "capacitor-assets generate --android"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

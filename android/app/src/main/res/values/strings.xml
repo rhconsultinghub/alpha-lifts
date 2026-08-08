@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Alpha Lifts</string>
+    <string name="title_activity_main">Alpha Lifts</string>
+    <string name="package_name">com.alphalifts.app</string>
+    <string name="custom_url_scheme">com.alphalifts.app</string>
+</resources>
