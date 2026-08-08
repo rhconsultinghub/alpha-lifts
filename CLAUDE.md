@@ -2362,3 +2362,80 @@ expired-token cleanup) on top of the still-passing earlier suites; app `tsc -b` 
 clean; live browser pass (fonts, projection push behavior, schemaVersion stamp, adopt-with-
 workout-carryover, all sheets still render) with zero console errors. Same deploy story:
 frontend on push, **Worker needs `wrangler deploy`** (no DB migration this round).
+
+
+(49) **market-gap round — test harness + five features from a competitive analysis.** A research
+pass (Strong/Hevy/Fitbod/Jefit comparisons + 2026 fitness-app feature roundups) mapped the app
+against market expectations; the approved quick wins and medium items all shipped in one session
+(full analysis: ~/.claude/plans/do-a-search-online-sleepy-badger.md). Six tracks:
+
+- **Vitest harness — the first automated tests in the repo.** `vitest.config.ts` (deliberately
+  separate from vite.config.ts; plain node, no DOM), `npm test`, and a `npm test` step in
+  deploy.yml so a red suite blocks the Pages deploy. 240 tests across `src/state/logic.test.ts`,
+  `src/data/wizard.test.ts`, `src/state/deload.test.ts`, `src/data/csv.test.ts`, with shared
+  builders in `src/state/testFixtures.ts` (no vitest imports there, so tsc -b typechecks it with
+  the app). Wizard suite runs every split preset x training type asserting: full week shape, no
+  within-day duplicate exercises, 1-8 sets per exercise, the 90-min hard cap (recomputed via the
+  real restForExercise), every muscle programmed, and nothing over MAV. Test files live in src/
+  (tsconfig.app includes them, so they're typechecked); vitest.config.ts joined tsconfig.node's
+  include.
+- **CSV export** (`src/data/csv.ts`, Settings > BACKUP): one-tap Strong-style set-by-set CSV.
+  Joins real per-set rows (weight/reps/RIR/equipment/deload) from exerciseHistory back to
+  sessions via the same date+day key weeklyHeatmapData uses; sessions aged out of the 8-entry
+  cap fall back to parsing resultText (weight+unit as logged, equipment/RIR blank). ISO dates
+  derived from HistoryEntry.id timestamps; weights in the CURRENT display unit at 0.1 precision
+  on joined rows; UTF-8 BOM for Excel; time exercises fill a Seconds column instead of
+  Weight/Reps. Button hidden until a completed session exists.
+- **Equipment filter on the Exercises tab**: chip row (All + each equipment type at least one
+  exercise offers), tap-again-to-clear, and the text search now also matches equipment labels
+  ("smith" finds all 9 Smith-machine exercises). New transient `exerciseEquipFilter` field.
+- **Loggable warm-up sets**: the advisory ramp card gained "+ Log warm-up sets", which prepends
+  the ramp as checkable blue-tinted rows (`WorkoutSetRow.warmup`) labeled "Warm-up N", no RIR
+  picker, flat 60s rest, no superset choreography. THE INVARIANT: warm-up rows are excluded from
+  volume, set/rep counts, PR detection, exerciseHistory, and the slot's stored `last` (both
+  `filter(r => r.done)` sites in completeWorkout carry `&& !r.warmup`); warm-ups alone don't
+  count as doing the exercise. Superset round-matching and per-set "last time" now index by
+  WORKING-set ordinal, not raw row index — prepended rows would otherwise shift both.
+- **Body measurements + progress photos** (Progress tab). Measurements mirror the bodyweight
+  pattern exactly: fixed 8-type catalog (`MEASUREMENT_TYPES` in logic.ts), stored cm, displayed
+  cm/in by unit setting, one entry per type per LOCAL date, `measurementChartData()` reuses the
+  sparkline shape. Photos are deliberately OUTSIDE AppState: IndexedDB (`src/data/photoStore.ts`,
+  DB `alpha-lifts-photos`), downscaled to 1280px JPEG q0.85 on import, rendered by the
+  self-contained `ProgressPhotosCard.tsx` (the one sanctioned exception to the vm-only rule —
+  IDB is async; the "why" is commented in both files). UI states photos stay on-device: not in
+  backups, not synced (a photo sync would multiply the 4MB-capped state PUT).
+- **Web Push cloud reminders** — the first true push notifications; removes the "reminders only
+  fire while the app is open" ceiling reminders.ts documents. Server half (`worker/src/push.ts`):
+  `/push/config` (public VAPID key), `/push/subscribe|unsubscribe` (session-authed; endpoint-
+  keyed upsert into new D1 table `push_subscriptions` — schema.sql + migrate-add-push.sql), and
+  a `scheduled()` cron sweep (`*/10 * * * *` in wrangler.toml [triggers]) that sends a
+  VAPID-signed EMPTY push when: user-local time (IANA zone per subscription, DST-proof, via
+  Intl) is past reminder_time but within a 60-min catch-up window, nothing sent this user-local
+  day (last_sent_date), and the user's synced state says a training day is still owed (mirror of
+  shouldFireReminder; absent/unparseable state = remind anyway). Dead endpoints pruned on
+  404/410; transient send errors still mark the date (one push/day, never a retry storm).
+  Empty pushes are the load-bearing simplification: VAPID is just an ES256 JWT via WebCrypto
+  (~40 lines, zero deps), while a payload would need RFC 8291 aes128gcm — the SW's `push`
+  handler composes the text instead ("Time to train"), and p256dh/auth are stored anyway so
+  payloads can be added later without re-subscribing devices. Client half: `src/state/push.ts`
+  (uses getRegistration, NOT .ready, which never resolves under npm run dev), a per-device
+  "Cloud Reminders" toggle in Settings (transient `pushRemindersEnabled` — a subscription
+  belongs to ONE browser; syncing the flag would lie on other devices), failure reasons
+  surfaced via `pushSetupNotice`, and changing the reminder time re-posts the subscription
+  (Worker upserts on endpoint). **VAPID keys**: public in wrangler.toml, private is the
+  `VAPID_PRIVATE_JWK` secret; `worker/scripts/gen-vapid.mjs` regenerates a pair, but doing so
+  invalidates every existing subscription. Verified against `wrangler dev --test-scheduled`
+  with a local HTTP listener standing in for the push service (correct VAPID JWT aud/sub/TTL,
+  empty body, once-per-day dedupe, rest-day skip, unsubscribe); **deployed the same session**:
+  remote D1 migrated, secret set, Worker + cron live, production /push/config serving. The
+  wrangler "Authentication error"-looking failure during the remote migration was actually
+  PowerShell 5.1 wrapping wrangler's stderr WARNING banner as a NativeCommandError — the
+  migration had succeeded; read the full output before re-running (phase 47's stale-OAuth note
+  still applies when it IS real).
+  Not yet exercised: a real end-to-end browser delivery on the deployed app (needs the owner's
+  signed-in device to flip the Settings toggle once and receive the next due reminder).
+
+Round-wide notes: dev-server port for THIS repo's browser verification moved to 5199
+(root `.claude/launch.json`) so it can't collide with another session's 5173. Commit messages
+must avoid double quotes — PowerShell 5.1 mangles embedded quotes when passing here-string args
+to native git, splitting the message into bogus pathspecs.
