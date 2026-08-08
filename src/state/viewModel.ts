@@ -616,15 +616,20 @@ export function buildViewModel(state: AppState, actions: Actions) {
       };
     });
     const workoutAllDone = dayExercises.every((_e, i) => s.workout!.exSets[i] && s.workout!.exSets[i].every(r => r.done));
-    const supersetPartner = ex.supersetGroup ? dayExercises.find((e2, i2) => i2 !== exIndex && e2.supersetGroup === ex.supersetGroup) : null;
-    const supersetPartnerName = supersetPartner ? EXLIB[supersetPartner.id].name : null;
+    // Circuit banner: every OTHER member of this exercise's group, in day order. One partner
+    // reads "Paired with X"; more read "Circuit with X + Y".
+    const supersetMemberNames = ex.supersetGroup
+      ? dayExercises.filter((e2, i2) => i2 !== exIndex && e2.supersetGroup === ex.supersetGroup).map(e2 => EXLIB[e2.id].name)
+      : [];
+    const supersetPartnerName = supersetMemberNames.length ? supersetMemberNames.join(' + ') : null;
+    const supersetIsCircuit = supersetMemberNames.length > 1;
 
     return {
       progressText: 'Exercise ' + (exIndex + 1) + ' of ' + dayExercises.length,
       // Raw timestamp — the live elapsed clock is derived in the component via useElapsedText,
       // so ticking it re-renders only that leaf instead of rebuilding this whole view model.
       startedAt: s.workout.startedAt || null,
-      navList, workoutAllDone, supersetPartnerName,
+      navList, workoutAllDone, supersetPartnerName, supersetIsCircuit,
       completeWorkout: actions.completeWorkout,
       endEarly: actions.requestEndEarly,
       endEarlyLabel: s.confirmEndEarly ? 'Tap again to confirm ending' : 'End Workout Early',

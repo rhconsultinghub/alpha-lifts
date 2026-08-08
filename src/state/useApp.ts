@@ -265,16 +265,34 @@ function newHistoryId(now: number): string {
   return 'h' + now + '_' + historyIdCounter++;
 }
 
-// A linked superset pair shares rest after a full round (both exercises' current-index set done)
-// rather than each exercise having its own rest — uses the longer of the two so neither lift gets
+// Indices of every member of a superset group, in day order. Groups are N-exercise circuits
+// (generalized from the original adjacent pairs) — all workout-flow logic matches by group id,
+// never by position.
+function groupIndices(exercises: readonly { supersetGroup?: string | null }[], gid: string): number[] {
+  const out: number[] = [];
+  exercises.forEach((e, i) => { if (e.supersetGroup === gid) out.push(i); });
+  return out;
+}
+
+// After an exercise leaves a group (removed/swapped out), a group of one is meaningless — clear
+// the survivor's id. Groups with 2+ survivors stay linked (with the old pair model, "clear the
+// partner" and this were the same thing; with circuits they very much are not).
+function clearSoloGroup(exercises: { supersetGroup?: string | null }[], gid: string | null | undefined): void {
+  if (!gid) return;
+  const members = groupIndices(exercises, gid);
+  if (members.length === 1) exercises[members[0]].supersetGroup = null;
+}
+
+// A circuit shares rest after a full round (every member's current-round set done) rather than
+// each exercise having its own rest — uses the longest member's rest so no lift gets
 // shortchanged on recovery.
 function restTotalFor(dayExercises: ProgramExercise[], idx: number, restPacing: RestPacing, trainingType: TrainingType, rir?: number): number {
   const ex = dayExercises[idx];
   const base = restForExercise(ex.id, restPacing, trainingType, rir);
   if (!ex.supersetGroup) return base;
-  const partner = dayExercises.find((e, i) => i !== idx && e.supersetGroup === ex.supersetGroup);
-  if (!partner) return base;
-  return Math.max(base, restForExercise(partner.id, restPacing, trainingType, rir));
+  const members = groupIndices(dayExercises, ex.supersetGroup);
+  if (members.length < 2) return base;
+  return Math.max(...members.map(i => restForExercise(dayExercises[i].id, restPacing, trainingType, rir)));
 }
 
 export function useApp() {
@@ -1066,10 +1084,7 @@ export function useApp() {
         if (idx < 0) return s;
         const oldGroup = day.exercises[idx].supersetGroup;
         day.exercises[idx] = mkEx(p.toExId, day.exercises[idx].sets, 0, { weight: 0, reps: lib.repHi, hitTop: true });
-        if (oldGroup) {
-          const partner = day.exercises.find((e: ProgramExercise) => e.supersetGroup === oldGroup);
-          if (partner) partner.supersetGroup = null;
-        }
+        clearSoloGroup(day.exercises, oldGroup);
         return { ...s, program };
       }
       case 'remove_exercise': {
@@ -1080,10 +1095,7 @@ export function useApp() {
         if (idx < 0) return s;
         const removed = day.exercises[idx];
         day.exercises.splice(idx, 1);
-        if (removed?.supersetGroup) {
-          const partner = day.exercises.find((e: ProgramExercise) => e.supersetGroup === removed.supersetGroup);
-          if (partner) partner.supersetGroup = null;
-        }
+        clearSoloGroup(day.exercises, removed?.supersetGroup);
         return { ...s, program };
       }
       case 'set_params': {
@@ -1429,10 +1441,7 @@ export function useApp() {
         const oldEx = day.exercises.find((ex: ProgramExercise) => ex.id === ms.exId);
         const oldGroup = oldEx?.supersetGroup;
         day.exercises = day.exercises.map((ex: ProgramExercise) => (ex.id === ms.exId ? mkEx(ms.stagedExId as string, ex.sets, 0, { weight: 0, reps: lib.repHi, hitTop: true }) : ex));
-        if (oldGroup) {
-          const partner = day.exercises.find((e: ProgramExercise) => e.supersetGroup === oldGroup);
-          if (partner) partner.supersetGroup = null;
-        }
+        clearSoloGroup(day.exercises, oldGroup);
       });
       return { ...s, program, muscleSwap: null };
     });
@@ -1470,10 +1479,10 @@ export function useApp() {
           // over automatically (the user can re-link it if they want the new one paired too).
           newEx = mkEx(swap.stagedExId, oldEx.sets, 0, { weight: 0, reps: EXLIB[swap.stagedExId].repHi, hitTop: true });
         }
-        let dayExercises = s.workout.dayExercises.map((ex, i) => (i === idx ? newEx : ex));
-        if (swap.tab === 'replace' && oldEx.supersetGroup) {
-          dayExercises = dayExercises.map(e => (e.supersetGroup === oldEx.supersetGroup ? { ...e, supersetGroup: null } : e));
-        }
+        const dayExercises = s.workout.dayExercises.map((ex, i) => (i === idx ? newEx : ex));
+        // The swapped-out exercise leaves its circuit (the replacement isn't auto-linked);
+        // remaining members stay linked unless only one survives.
+        if (swap.tab === 'replace') clearSoloGroup(dayExercises, oldEx.supersetGroup);
         const rec = recommendation(newEx, s.units, s.coachVoice, s.exerciseHistory[newEx.id], s.exerciseHistory, activeDeloadPct(s), s.trainingType);
         const sets: WorkoutSetRow[] = [];
         for (let i = 0; i < newEx.sets; i++) sets.push({ weight: rec.weight, reps: rec.reps, done: false });
@@ -1494,10 +1503,7 @@ export function useApp() {
         const lib = EXLIB[swap.stagedExId];
         const oldGroup = day.exercises[swap.exIndex].supersetGroup;
         day.exercises[swap.exIndex] = mkEx(swap.stagedExId, day.exercises[swap.exIndex].sets, 0, { weight: 0, reps: lib.repHi, hitTop: true });
-        if (oldGroup) {
-          const partner = day.exercises.find((e: ProgramExercise) => e.supersetGroup === oldGroup);
-          if (partner) partner.supersetGroup = null;
-        }
+        clearSoloGroup(day.exercises, oldGroup);
       }
       return { ...s, program, swap: null };
     });
@@ -1509,10 +1515,8 @@ export function useApp() {
     setState(s => {
       if (!s.workout || s.workout.dayExercises.length <= 1) return s;
       const removedGroup = s.workout.dayExercises[idx].supersetGroup;
-      let dayExercises = s.workout.dayExercises.filter((_, i) => i !== idx);
-      if (removedGroup) {
-        dayExercises = dayExercises.map(e => (e.supersetGroup === removedGroup ? { ...e, supersetGroup: null } : e));
-      }
+      const dayExercises = s.workout.dayExercises.filter((_, i) => i !== idx).map(e => ({ ...e }));
+      clearSoloGroup(dayExercises, removedGroup);
       const exSets: Record<number, WorkoutSetRow[]> = {};
       s.workout.dayExercises.forEach((_, i) => {
         if (i === idx) return;
@@ -1568,34 +1572,36 @@ export function useApp() {
 
   // ---------- day builder ----------
   // Links exercise `idx` with the exercise right after it as an adjacent-pair superset (shared
-  // group id) — or unlinks both if they're already linked. Scoped to pairs, not arbitrary
-  // N-exercise circuits, to keep the workout-flow state machine (one active exercise at a time)
-  // tractable — see toggleSetDone below for how the pairing changes rest behavior mid-workout.
-  // Links exercise idxA with idxB (any two slots in the day, not just adjacent ones — the workout-
-  // flow logic in toggleSetDone/restTotalFor below only ever looks up a partner by matching
-  // supersetGroup, never by position, so non-adjacent pairing already works with no further
-  // changes needed there). Calling this again on the same pair unlinks both. Calling it when either
-  // side is already linked to a *different* exercise re-links: the old pair is broken first, so an
-  // exercise is never a member of more than one pair at a time.
+  // Links exercise idxA with idxB into a superset CIRCUIT (any group size — generalized from the
+  // original adjacent-pair model in phase 13). Semantics:
+  //  - Different groups (or no group): MERGE — every member of both sides lands in one new group,
+  //    so chaining Link Next down three rows builds an A→B→C circuit naturally.
+  //  - Same group: SPLIT at the boundary between the two — members at/below the lower index keep
+  //    one group, members above get another, and any side left with a single member is unlinked.
+  //    (For a pair that degenerates to exactly the old unlink-both behaviour.)
+  // The workout flow (toggleSetDone/restTotalFor) matches members by group id, never position,
+  // so non-adjacent membership after reordering keeps working.
   const toggleSuperset = useCallback((dayKey: string, idxA: number, idxB: number) => {
     setState(s => {
       const program = JSON.parse(JSON.stringify(s.program));
-      const exercises = program[dayKey].exercises;
+      const exercises = program[dayKey].exercises as ProgramExercise[];
       const a = exercises[idxA], b = exercises[idxB];
       if (!a || !b) return s;
       if (a.supersetGroup && a.supersetGroup === b.supersetGroup) {
-        a.supersetGroup = null; b.supersetGroup = null;
+        const gid = a.supersetGroup;
+        const boundary = Math.min(idxA, idxB);
+        const members = groupIndices(exercises, gid);
+        const upperGid = 'ss' + Date.now();
+        members.forEach(i => { if (i > boundary) exercises[i].supersetGroup = upperGid; });
+        clearSoloGroup(exercises, gid);
+        clearSoloGroup(exercises, upperGid);
         return { ...s, program };
       }
-      if (a.supersetGroup) {
-        const oldPartner = exercises.find((e: ProgramExercise, i: number) => i !== idxA && e.supersetGroup === a.supersetGroup);
-        if (oldPartner) oldPartner.supersetGroup = null;
-      }
-      if (b.supersetGroup) {
-        const oldPartner = exercises.find((e: ProgramExercise, i: number) => i !== idxB && e.supersetGroup === b.supersetGroup);
-        if (oldPartner) oldPartner.supersetGroup = null;
-      }
       const gid = 'ss' + Date.now();
+      const aGid = a.supersetGroup, bGid = b.supersetGroup;
+      exercises.forEach(e => {
+        if ((aGid && e.supersetGroup === aGid) || (bGid && e.supersetGroup === bGid)) e.supersetGroup = gid;
+      });
       a.supersetGroup = gid; b.supersetGroup = gid;
       return { ...s, program };
     });
@@ -1605,12 +1611,9 @@ export function useApp() {
       const program = JSON.parse(JSON.stringify(s.program));
       const removed = program[dayKey].exercises[idx];
       program[dayKey].exercises.splice(idx, 1);
-      // clear a dangling link on the removed exercise's former partner, if any, so no group id
-      // ever points at an exercise that no longer exists in the day.
-      if (removed?.supersetGroup) {
-        const partner = program[dayKey].exercises.find((e: ProgramExercise) => e.supersetGroup === removed.supersetGroup);
-        if (partner) partner.supersetGroup = null;
-      }
+      // survivors of the removed exercise's circuit stay linked; a lone survivor is unlinked so
+      // no group id ever points at a group of one.
+      clearSoloGroup(program[dayKey].exercises, removed?.supersetGroup);
       return { ...s, program };
     });
   }, []);
@@ -1912,15 +1915,26 @@ export function useApp() {
         ? state.workout.dayExercises.findIndex((e, k) => k !== idx && e.supersetGroup === ex.supersetGroup)
         : -1;
       if (partnerIdx !== -1) {
-        // Rounds are matched by WORKING-set ordinal, not raw row index — either side of the pair
-        // may have warm-up rows prepended, which would otherwise shift the alignment.
+        // Circuit round-robin: after this member's set, advance to the NEXT member (cyclic, in
+        // day order) still owing its set for this round. Rounds are matched by WORKING-set
+        // ordinal, not raw row index — any member may have warm-up rows prepended, which would
+        // otherwise shift the alignment. A member whose sets were never lazily built counts as
+        // owing (same as the old pair logic treated a missing partnerSets).
+        const gid = ex.supersetGroup!;
+        const members = groupIndices(state.workout.dayExercises, gid);
         const workingOrdinal = state.workout.exSets[idx].slice(0, i).filter(r => !r.warmup).length;
-        const partnerWorking = (state.workout.exSets[partnerIdx] || []).filter(r => !r.warmup);
-        const partnerSetDone = !!(partnerWorking[workingOrdinal] && partnerWorking[workingOrdinal].done);
-        if (!partnerSetDone) {
-          switchExercise(partnerIdx);
-          return;
+        const rotated = [...members.filter(m => m > idx), ...members.filter(m => m < idx)];
+        for (const m of rotated) {
+          const rows = state.workout.exSets[m];
+          const owes = rows
+            ? (() => { const w = rows.filter(r => !r.warmup); return !!w[workingOrdinal] && !w[workingOrdinal].done; })()
+            : state.workout.dayExercises[m].sets > workingOrdinal;
+          if (owes) {
+            switchExercise(m);
+            return;
+          }
         }
+        // Round complete across the whole circuit — fall through to the shared rest below.
       }
       // Rest reflects the effort of the set just finished: a set logged at RIR 0 (failure) rests
       // longer than one left several reps short. Undefined rir (not logged) falls back to neutral.

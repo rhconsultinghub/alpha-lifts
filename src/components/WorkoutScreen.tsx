@@ -61,7 +61,11 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
         {w.supersetPartnerName && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 14px', borderRadius: 14, background: 'oklch(0.7 0.13 230 / 0.1)', border: '1px solid oklch(0.7 0.13 230 / 0.35)', marginBottom: 14 }}>
             <span style={{ fontSize: 14 }}>⚡</span>
-            <span style={{ font: "500 12px/1.4 'Inter'", color: 'oklch(0.78 0.13 230)' }}>Paired with {w.supersetPartnerName} — no rest between until both sets are done.</span>
+            <span style={{ font: "500 12px/1.4 'Inter'", color: 'oklch(0.78 0.13 230)' }}>
+              {w.supersetIsCircuit
+                ? <>Circuit with {w.supersetPartnerName} — rotate through with no rest until the round is done.</>
+                : <>Paired with {w.supersetPartnerName} — no rest between until both sets are done.</>}
+            </span>
           </div>
         )}
 
