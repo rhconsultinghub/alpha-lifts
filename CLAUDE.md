@@ -2498,3 +2498,61 @@ Prod deploys this round: Worker deployed twice (share routes + nutrition prompt;
 Authentication error [code: 10000] on the d1 IMPORT endpoint while `wrangler deploy` worked fine
 — the `--command` form (different API endpoint) succeeded. Try --command with the file's
 statements inline before reaching for `npx wrangler login`.** Pages auto-deployed on push.
+
+
+(51) **native wrapper M1 — Capacitor Android shell** (plan: ~/.claude/plans/do-a-search-online-
+sleepy-badger.md, superseding the phase-49 analysis it used to hold). The web PWA is unchanged;
+the same codebase now also builds a Play-Store-ready Android app. Five phases, all code-side work
+done and committed; on-device verification + Play submission wait on owner tooling (see
+android/PLAY_RELEASE.md — the owner runbook with the full first-boot checklist).
+
+- **`src/native/` is the ONLY place that touches Capacitor.** Detection reads the injected
+  `window.Capacitor` global (platform.ts) — no @capacitor import in web code paths — and plugin
+  modules load via dynamic import() inside isNative() branches only. All @capacitor deps are
+  consolidated by a rollup manualChunks rule into one lazy `capacitor-native-*.js` chunk that
+  the web precache excludes via globIgnores (web precache unchanged at ~1.28 MB). Modules:
+  platform / haptics (hapticTap, hapticPattern; web = navigator.vibrate) / files
+  (saveOrShareFile — web anchor download deduped from backup/csv/planIO/shareCard, native =
+  Filesystem cache write + Share sheet) / notifications (scheduled LocalNotifications, web
+  no-op) / lifecycle (initNativeShell: back button → history.back() driving the EXISTING
+  popstate ladder, else minimizeApp; notification taps → the existing #rest-exercise hash path;
+  StatusBar style-then-color — color throws on iOS).
+- **Real web bugfix shipped with P1**: alerts.ts had three `await navigator.serviceWorker.ready`
+  sites that hang forever when the API exists but nothing is registered (dev server, native
+  WebView) — now `getRegistration()` with fallback via a shared activeRegistration() helper,
+  matching push.ts. restEndLine/contextBody exported for the native notification composer.
+- **Dual-target build**: `vite build --mode native` → base '/', `.env.native` (committed —
+  public value) bakes the deployed Worker URL. Scripts: build:native / cap:sync / cap:open /
+  cap:run / cap:assets. capacitor.config.ts: appId `com.alphalifts.app` (**permanent once
+  uploaded — owner sign-off gate**), adjustMarginsForEdgeToEdge 'auto', splash #0d0c0b,
+  LocalNotifications smallIcon ic_stat_notify. `android/` committed (Capacitor 8.x, 7 plugins).
+  `scripts/make-native-assets.mjs` (kept, per the lost-asset-script rule) generates the 1024
+  icon + 2732 splash sources from icon-512 and the alpha-only ic_stat_notify drawables from
+  badge-96; `npm run cap:assets` generated 100 Android resources.
+- **Worker CORS**: ALLOWED_ORIGINS += `https://localhost` (Android Capacitor WebView origin) +
+  `capacitor://localhost` (iOS, pre-seeded). Browsers can't forge these cross-site; session auth
+  is the real gate. Deployed + verified live (both 200 with correct ACAO echo; unknown origins
+  still 403). NOTE the ~15s edge propagation delay before a fresh deploy answers correctly —
+  don't debug a 403 for at least one retry.
+- **Native rest alerts are SCHEDULED, not tick-driven**: scheduleNativeRestEnd() in useApp
+  schedules a LocalNotification at the committed restEndAt (deferred one tick after setState so
+  stateRef reflects the new rest and the copy names the right set), cancelled/rescheduled by
+  stopRest (skip/switch), restAdjust (±15s), and completeWorkout; fires with the WebView
+  suspended. Web tray paths (notifyRestEnd, live countdown) are gated `!isNative()` to avoid
+  double alerts; WebAudio beep + RestToast stay on both. Daily reminder natively = repeating
+  scheduled notification (re-asserted per launch, idempotent cancel-then-schedule; day-agnostic
+  copy — M2 FCM restores "only when a session is owed"); the web 60s interval and the Web Push
+  Cloud Reminders toggle are gated off in the shell. Exact alarms deliberately NOT requested
+  (Play-restricted); measure drift on device, changeExactNotificationSetting() is the staged
+  fallback.
+- **Release scaffolding**: android/app/build.gradle reads gitignored keystore.properties
+  (template committed; *.keystore gitignored), versionName 1.0.0; public/privacy.html ships at
+  /alpha-lifts/privacy.html for the Play listing; android/PLAY_RELEASE.md carries owner setup
+  (Android Studio, $25 Play Console, keystore + Play App Signing, closed-test rule), the
+  first-boot verification checklist (chrome://inspect is the debug surface), data-safety
+  answers, and listing copy. Flagged fast-follow: a self-serve account-deletion endpoint (Play
+  requires a deletion path; support-email answer is the M1 stopgap).
+- 252 tests green throughout (7 new for the abstraction layer); both build targets clean; web
+  rest/export flows re-verified live. Roadmap seams unchanged: M2 FCM (swap ~50 VAPID lines in
+  worker/src/push.ts), M3 Health Connect, M4 Play Billing via the isEntitled seam, iOS via
+  cloud CI (its origin already allowlisted).
