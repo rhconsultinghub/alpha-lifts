@@ -24,6 +24,9 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # Unit tests over the pure algorithm modules (logic/wizard/deload) — a red suite blocks the
+      # deploy rather than shipping a progression/volume regression to the live app.
+      - run: npm test
       - run: npm run build
         env:
           # The deployed Worker URL for the AI coach. Belongs in a repository *variable*: Vite
