@@ -77,17 +77,22 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
               <div style={{ font: "600 12px 'Inter'", color: 'oklch(0.78 0.13 230)' }}>Warm-up</div>
               <div style={{ font: "400 12px/1.4 'Inter'", color: 'rgba(245,240,234,.7)', marginTop: 2 }}>{w.warmup.note}</div>
               <div className="num" style={{ fontSize: 13, fontWeight: 700, marginTop: 6, color: 'rgba(245,240,234,.85)' }}>{w.warmup.setsText}</div>
+              {w.warmup.added ? (
+                <div style={{ font: "600 11px 'Inter'", color: 'oklch(0.75 0.15 145)', marginTop: 8 }}>✓ Added below — check them off as you ramp</div>
+              ) : (
+                <button onClick={w.warmup.logSets} style={{ font: "600 11px 'Inter'", padding: '6px 12px', borderRadius: 100, border: '1px solid oklch(0.7 0.13 230 / 0.5)', background: 'oklch(0.7 0.13 230 / 0.15)', color: 'oklch(0.82 0.11 230)', marginTop: 8 }}>+ Log warm-up sets</button>
+              )}
             </div>
           </div>
         )}
 
-        <div style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>WORKING SETS</div>
+        <div style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>{w.sets.some(x => x.isWarmup) ? 'SETS' : 'WORKING SETS'}</div>
 
         {w.sets.map((s, i) => (
           <div key={i} style={{ borderRadius: 18, background: s.cardBg, border: `1px solid ${s.cardBorder}`, padding: 14, marginBottom: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
-                <span className="num" style={{ fontSize: 15, fontWeight: 700 }}>Set {s.num}</span>
+                <span className="num" style={{ fontSize: 15, fontWeight: 700, color: s.isWarmup ? 'oklch(0.78 0.13 230)' : undefined }}>{s.label}</span>
                 <span style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)' }}> · target {s.targetText}</span>
                 {s.hasLast && (
                   <button onClick={s.viewHistory} style={{ display: 'block', background: 'none', border: 'none', padding: 0, marginTop: 2, font: "500 11px 'Inter'", color: 'oklch(0.72 0.17 35)', textDecoration: 'underline', cursor: 'pointer' }}>Last time: {s.lastText}</button>
@@ -132,12 +137,12 @@ export function WorkoutScreen({ vm }: { vm: ViewModel }) {
                 )}
               </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
+            {!s.isWarmup && <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
               <span style={{ font: "500 10px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em' }}>RIR</span>
               {s.rirOptions.map((o) => (
                 <button key={o.v} onClick={o.select} style={{ width: 26, height: 26, borderRadius: '50%', border: 'none', background: o.bg, color: o.color, font: "700 10px 'Inter'" }}>{o.label}</button>
               ))}
-            </div>
+            </div>}
           </div>
         ))}
         <button onClick={w.addSet} style={{ width: '100%', marginTop: 4, background: 'none', border: '1px dashed rgba(255,255,255,.25)', color: 'rgba(245,240,234,.6)', font: "600 13px 'Inter'", padding: 13, borderRadius: 14 }}>+ Add Set</button>

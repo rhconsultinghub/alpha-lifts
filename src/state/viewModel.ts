@@ -583,10 +583,14 @@ export function buildViewModel(state: AppState, actions: Actions) {
     // working weight if they've changed it, otherwise today's recommendation) — not last session's.
     const workingWeight = currentSets.length ? Math.max(...currentSets.map(r => r.weight)) : rec.weight;
     const warmupRaw = warmupInfo(ex, s.warmupStyle, workingWeight);
+    const warmupAdded = currentSets.some(r => r.warmup);
     const warmup = warmupRaw ? {
       show: true, note: warmupRaw.note,
-      setsText: warmupRaw.sets.map(ws => fmtWeight(ws.weight, s.units) + ' × ' + ws.reps).join('  ·  ')
-    } : { show: false };
+      setsText: warmupRaw.sets.map(ws => fmtWeight(ws.weight, s.units) + ' × ' + ws.reps).join('  ·  '),
+      // One-tap: turn the advisory ramp into loggable rows above the working sets (once).
+      added: warmupAdded,
+      logSets: () => actions.addWarmupSets(warmupRaw.sets)
+    } : { show: false, added: false, logSets: () => {} };
     const allDone = currentSets.length > 0 && currentSets.every(r => r.done);
     const navList = dayExercises.map((e2, i) => {
       const l2 = EXLIB[e2.id];
@@ -655,17 +659,27 @@ export function buildViewModel(state: AppState, actions: Actions) {
         const lastSetsArr = neverLogged ? [] : (latestHistoryEntry && latestHistoryEntry.sets && latestHistoryEntry.sets.length)
           ? latestHistoryEntry.sets
           : (ex.lastSets && ex.lastSets.length) ? ex.lastSets : (ex.last ? Array(ex.sets).fill({ weight: ex.last.weight, reps: ex.last.reps }) : []);
+        let warmupNum = 0, workingNum = 0;
         return currentSets.map((row, i) => {
         const isTime = lib.trackingMode === 'time';
+        const isWarmup = row.warmup === true;
+        const label = isWarmup ? 'Warm-up ' + (++warmupNum) : 'Set ' + (++workingNum);
         const step = weightStep(s.units);
         const dispWeight = s.units === 'lb' ? Math.round((row.weight * 2.20462) / 5) * 5 : Math.round(row.weight * 2) / 2;
         const plates = equip.v === 'barbell' ? platesBreakdown(dispWeight, s.units) : null;
         const platesText = plates ? plates.join(' + ') + ' per side' : '';
-        const lastRow = lastSetsArr[i] || lastSetsArr[lastSetsArr.length - 1];
+        // "Last time" is a working-set reference — meaningless on a warm-up row. Indexed by the
+        // WORKING-set ordinal (not the raw row index), since warm-up rows sit above and would
+        // otherwise shift every working set onto the wrong prior set.
+        const lastRow = isWarmup ? undefined : lastSetsArr[workingNum - 1] || lastSetsArr[lastSetsArr.length - 1];
         return {
           num: i + 1,
+          label,
+          isWarmup,
           isTime,
-          targetText: isTime ? formatSetTime(lib.repLo) + '-' + formatSetTime(lib.repHi) : lib.repLo + '-' + lib.repHi + ' reps',
+          targetText: isWarmup
+            ? 'ramp — doesn’t count toward stats'
+            : isTime ? formatSetTime(lib.repLo) + '-' + formatSetTime(lib.repHi) : lib.repLo + '-' + lib.repHi + ' reps',
           hasLast: !!lastRow,
           lastText: lastRow ? (isTime ? formatSetTime(lastRow.reps) : fmtWeight(lastRow.weight, s.units) + ' × ' + lastRow.reps) : '',
           viewHistory: () => actions.openExerciseHistory(ex.id),
@@ -681,8 +695,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
           done: row.done,
           doneBg: row.done ? 'oklch(0.7 0.15 145)' : 'rgba(255,255,255,.08)',
           doneColor: row.done ? '#0d0c0b' : 'rgba(245,240,234,.4)',
-          cardBg: row.done ? 'oklch(0.7 0.15 145 / 0.07)' : 'rgba(255,255,255,.045)',
-          cardBorder: row.done ? 'oklch(0.7 0.15 145 / 0.35)' : 'rgba(255,255,255,.06)',
+          // Warm-up rows carry the same blue tint as the warm-up card so they read as the ramp,
+          // not more working sets.
+          cardBg: row.done ? 'oklch(0.7 0.15 145 / 0.07)' : isWarmup ? 'oklch(0.7 0.13 230 / 0.07)' : 'rgba(255,255,255,.045)',
+          cardBorder: row.done ? 'oklch(0.7 0.15 145 / 0.35)' : isWarmup ? 'oklch(0.7 0.13 230 / 0.3)' : 'rgba(255,255,255,.06)',
           platesText,
           rirOptions: [0, 1, 2, 3, 4].map(v => ({
             v, label: v === 4 ? '4+' : String(v), sel: row.rir === v,

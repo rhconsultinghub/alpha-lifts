@@ -106,6 +106,11 @@ export interface WorkoutSetRow {
   reps: number;
   done: boolean;
   rir?: number;
+  // A logged warm-up ramp set (added from the warm-up card). Checked off like any set in-session,
+  // but excluded from everything that reads "how strong are you / how much work was done":
+  // volume, set/rep counts, PR detection, exerciseHistory, and the slot's stored `last` target —
+  // see completeWorkout() in useApp.ts. Session-only by design; never persisted into history.
+  warmup?: boolean;
 }
 
 export interface WorkoutState {

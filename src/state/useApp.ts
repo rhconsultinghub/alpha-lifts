@@ -1839,6 +1839,12 @@ export function useApp() {
       return { ...s, workout: { ...s.workout, exSets: { ...s.workout.exSets, [idx2]: sets } } };
     });
     if (nowDone) {
+      // A warm-up ramp set: short fixed rest, and no superset choreography — the ramp belongs to
+      // this exercise alone, and its whole point is to be quick.
+      if (state.workout.exSets[idx][i].warmup) {
+        startRest(60);
+        return;
+      }
       // linked superset partner: jump straight to it with no rest instead of resting, unless its
       // matching-index set is already done (i.e. this was the second half of the round) — then
       // fall through to a normal rest, shared across both exercises via restTotalFor().
@@ -1846,8 +1852,11 @@ export function useApp() {
         ? state.workout.dayExercises.findIndex((e, k) => k !== idx && e.supersetGroup === ex.supersetGroup)
         : -1;
       if (partnerIdx !== -1) {
-        const partnerSets = state.workout.exSets[partnerIdx];
-        const partnerSetDone = !!(partnerSets && partnerSets[i] && partnerSets[i].done);
+        // Rounds are matched by WORKING-set ordinal, not raw row index — either side of the pair
+        // may have warm-up rows prepended, which would otherwise shift the alignment.
+        const workingOrdinal = state.workout.exSets[idx].slice(0, i).filter(r => !r.warmup).length;
+        const partnerWorking = (state.workout.exSets[partnerIdx] || []).filter(r => !r.warmup);
+        const partnerSetDone = !!(partnerWorking[workingOrdinal] && partnerWorking[workingOrdinal].done);
         if (!partnerSetDone) {
           switchExercise(partnerIdx);
           return;
@@ -1868,6 +1877,19 @@ export function useApp() {
       const last = cur[cur.length - 1];
       const sets = [...cur, { weight: last ? last.weight : 0, reps: last ? last.reps : 10, done: false }];
       return { ...s, workout: { ...s.workout, exSets: { ...s.workout.exSets, [idx]: sets } } };
+    });
+  }, []);
+  // One-tap from the warm-up card: turn the advisory ramp into loggable rows, prepended above the
+  // working sets. Guarded so a second tap can't stack a duplicate ramp. Rows come from the caller
+  // (the view model already computed the ramp off today's actual working weight — see warmupInfo).
+  const addWarmupSets = useCallback((rows: { weight: number; reps: number }[]) => {
+    setState(s => {
+      if (!s.workout || !rows.length) return s;
+      const idx = s.workout.exIndex;
+      const cur = s.workout.exSets[idx] || [];
+      if (cur.some(r => r.warmup)) return s;
+      const warmups = rows.map(r => ({ weight: r.weight, reps: r.reps, done: false, warmup: true }));
+      return { ...s, workout: { ...s.workout, exSets: { ...s.workout.exSets, [idx]: [...warmups, ...cur] } } };
     });
   }, []);
   const removeSet = useCallback((i: number) => {
@@ -1899,8 +1921,11 @@ export function useApp() {
         const equip = lib.equip[ex.equipIdx];
         // only sets actually checked off count as "done" — an exercise that was merely
         // visited (e.g. navigated to, then the workout was ended early) doesn't count.
+        // Warm-up ramp rows are excluded before ANY of the reads below: they must not feed
+        // volume, set/rep counts, PR detection, the slot's stored `last` target, or the
+        // exerciseHistory entry — and warm-ups alone don't count as doing the exercise.
         const rawSets = s.workout!.exSets[idx];
-        const completedRows = rawSets ? rawSets.filter(r => r.done) : [];
+        const completedRows = rawSets ? rawSets.filter(r => r.done && !r.warmup) : [];
         const doneSets = completedRows.length ? completedRows : null;
         exercisesDoneMask[idx] = !!doneSets;
         let newEx = ex;
@@ -1960,7 +1985,8 @@ export function useApp() {
       const exerciseHistory = { ...s.exerciseHistory };
       const loggedVariants = new Set<string>();
       s.workout.dayExercises.forEach((ex, idx) => {
-        const doneSets = (s.workout!.exSets[idx] || []).filter(r => r.done);
+        // Warm-up rows excluded here too — the history entry is what progression/PR/charts read.
+        const doneSets = (s.workout!.exSets[idx] || []).filter(r => r.done && !r.warmup);
         if (!doneSets.length) return;
         const eV = EXLIB[ex.id]?.equip[ex.equipIdx]?.v;
         loggedVariants.add(ex.id + '@' + eV);
@@ -2205,7 +2231,7 @@ export function useApp() {
       requestRemoveWorkoutExercise, cancelRemoveWorkoutExercise, confirmRemoveWorkoutExercise,
       openMuscleSwap, closeMuscleSwap, toggleMuscleSwapDay, muscleSwapToggleAll, muscleSwapStageEx, muscleSwapConfirm, muscleSwapSetQuery,
       removeExercise, requestRemoveBuilderExercise, changeSets, moveExercise, reorderExercise, setExerciseTarget, bumpExerciseTarget, toggleSuperset,
-      startWorkout, switchExercise, setSetField, setSetRir, bumpSetField, toggleSetDone, addSet, removeSet,
+      startWorkout, switchExercise, setSetField, setSetRir, bumpSetField, toggleSetDone, addSet, addWarmupSets, removeSet,
       restAdjust, restSkip, advance, applyPlanUpdate, discardPlanUpdate,
       exitWorkout, resumeWorkout, requestEndEarly, completeWorkout, stopRest,
       continueWorkoutFromIdle, endWorkoutFromIdle
