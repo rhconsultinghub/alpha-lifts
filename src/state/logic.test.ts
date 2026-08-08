@@ -4,7 +4,8 @@ import {
   rirRestFactor, restForExercise, effectiveLast, similarExerciseReference, recommendation,
   muscleVolumes, muscleStatus, isWeekComplete, warmupInfo, deloadSuggestion,
   bestEverStreak, cleanWeekCount, totalPRCount, consistencyData,
-  nextIncompleteIndex, isWorkoutFullyDone, estimateDayTime, formatSetTime, formatElapsed
+  nextIncompleteIndex, isWorkoutFullyDone, estimateDayTime, formatSetTime, formatElapsed,
+  fmtMeasurement, measurementUnitLabel, measurementChartData
 } from './logic';
 import { EXLIB, KG_PER_LB_STEP } from '../data/exercises';
 import { testState, histEntry, exEntry, trainingDay, restDay, slot, stateWithProgram } from './testFixtures';
@@ -399,6 +400,31 @@ describe('estimateDayTime', () => {
   it('adds the warm-up block for a heavy compound', () => {
     const state = stateWithProgram([slot('bench_press', 3, 0, 100, 8)]);
     expect(estimateDayTime(state, 'd1')).toBe(660);
+  });
+});
+
+describe('measurements', () => {
+  it('formats cm for kg users and inches for lb users', () => {
+    expect(fmtMeasurement(91.44, 'kg')).toBe('91.4 cm');
+    expect(fmtMeasurement(91.44, 'lb')).toBe('36 in');
+    expect(measurementUnitLabel('kg')).toBe('cm');
+    expect(measurementUnitLabel('lb')).toBe('in');
+  });
+  it('charts only the selected type, sorted by date, with a delta', () => {
+    const state = testState({
+      units: 'kg',
+      measurementLog: [
+        { date: '2026-08-05', type: 'waist', valueCm: 88 },
+        { date: '2026-08-01', type: 'waist', valueCm: 90 },
+        { date: '2026-08-03', type: 'chest', valueCm: 105 }
+      ]
+    });
+    const d = measurementChartData(state, 'waist');
+    expect(d.hasData).toBe(true);
+    expect(d.points.length).toBe(2);
+    expect(d.latestText).toBe('88 cm');
+    expect(d.deltaText).toContain('-2 cm since 2026-08-01');
+    expect(measurementChartData(state, 'thigh').hasData).toBe(false);
   });
 });
 

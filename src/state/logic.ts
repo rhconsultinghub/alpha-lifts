@@ -910,6 +910,49 @@ export function bodyWeightChartData(state: AppState) {
   return { hasData: true, empty: false, points, linePoints, deltaText, latestText: fmtBodyWeight(latest.weightKg, state.units) };
 }
 
+// ---------- body measurements ----------
+
+// Fixed catalog rather than free-text types, so the chips/chart stay consistent and a synced
+// blob can't accumulate near-duplicate labels ("arm"/"arms"/"bicep").
+export const MEASUREMENT_TYPES: { key: string; label: string }[] = [
+  { key: 'neck', label: 'Neck' }, { key: 'shoulders', label: 'Shoulders' }, { key: 'chest', label: 'Chest' },
+  { key: 'waist', label: 'Waist' }, { key: 'hips', label: 'Hips' }, { key: 'biceps', label: 'Biceps' },
+  { key: 'thigh', label: 'Thigh' }, { key: 'calf', label: 'Calf' }
+];
+
+// Measurements are stored in cm; lb users see inches (their mental model pairs lb with in the
+// same way kg pairs with cm). 0.1 precision — same reasoning as fmtBodyWeight.
+export function measurementUnitLabel(units: Units): string {
+  return units === 'lb' ? 'in' : 'cm';
+}
+export function fmtMeasurement(cm: number, units: Units): string {
+  if (units === 'lb') return Math.round((cm / 2.54) * 10) / 10 + ' in';
+  return Math.round(cm * 10) / 10 + ' cm';
+}
+
+// Same points/linePoints/deltaText shape as bodyWeightChartData, so ProgressScreen reuses the
+// identical sparkline markup.
+export function measurementChartData(state: AppState, type: string) {
+  const entries = (state.measurementLog || []).filter(e => e.type === type).sort((a, b) => a.date.localeCompare(b.date));
+  if (!entries.length) return { hasData: false, empty: true, points: [] as { x: number; y: number; date: string }[], linePoints: '', deltaText: '', latestText: '' };
+  const maxV = Math.max(1, ...entries.map(e => e.valueCm));
+  const minV = Math.min(...entries.map(e => e.valueCm));
+  const range = Math.max(1, maxV - minV);
+  const n = entries.length;
+  const points = entries.map((e, i) => ({
+    x: n > 1 ? Math.round((i / (n - 1)) * 260 + 10) : 140,
+    y: Math.round(90 - ((e.valueCm - minV) / range) * 70),
+    date: e.date
+  }));
+  const linePoints = points.map(p => p.x + ',' + p.y).join(' ');
+  const first = entries[0], latest = entries[entries.length - 1];
+  const deltaCm = latest.valueCm - first.valueCm;
+  const deltaText = entries.length > 1
+    ? (deltaCm >= 0 ? '+' : '-') + fmtMeasurement(Math.abs(deltaCm), state.units) + ' since ' + first.date
+    : 'First logged ' + first.date;
+  return { hasData: true, empty: false, points, linePoints, deltaText, latestText: fmtMeasurement(latest.valueCm, state.units) };
+}
+
 export function durationTrendData(state: AppState) {
   const recent = state.history.slice(0, 8).reverse();
   const maxDur = Math.max(1, ...recent.map(h => h.durationMin || 0));

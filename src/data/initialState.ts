@@ -74,6 +74,10 @@ export function createInitialState(): AppState {
     bodyWeightLog: [],
     bodyWeightInput: '',
 
+    measurementLog: [],
+    measurementInput: '',
+    selectedMeasurementType: 'waist',
+
     deloadDismissedWeek: null,
 
     deloadEnabled: false,

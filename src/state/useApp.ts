@@ -587,6 +587,23 @@ export function useApp() {
     });
   }, []);
 
+  // ---------- body measurements (mirrors the body-weight pattern above: display-unit input,
+  // cm storage, one entry per type per LOCAL calendar date) ----------
+  const setMeasurementInput = useCallback((v: string) => setState(s => ({ ...s, measurementInput: v })), []);
+  const selectMeasurementType = useCallback((t: string) => setState(s => ({ ...s, selectedMeasurementType: t })), []);
+  const logMeasurement = useCallback(() => {
+    setState(s => {
+      const displayVal = parseFloat(s.measurementInput || '');
+      if (!Number.isFinite(displayVal) || displayVal <= 0) return s;
+      const type = s.selectedMeasurementType || 'waist';
+      const valueCm = s.units === 'lb' ? displayVal * 2.54 : displayVal;
+      const d = new Date();
+      const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const measurementLog = [...(s.measurementLog || []).filter(e => !(e.date === todayKey && e.type === type)), { date: todayKey, type, valueCm }];
+      return { ...s, measurementLog, measurementInput: '' };
+    });
+  }, []);
+
   // ---------- program management ----------
   const switchProgram = useCallback((id: string) => {
     setState(s => {
@@ -2218,6 +2235,7 @@ export function useApp() {
       requestResetApp, cancelResetApp, resetApp,
       setRestAlertSound, setRestAlertVibrate, setRestAlertNotify, setRemindersEnabled, setReminderTime,
       setBodyWeightInput, logBodyWeight,
+      setMeasurementInput, selectMeasurementType, logMeasurement,
       switchProgram, newProgram, requestRemoveProgram, renameSavedProgram,
       openNewProgramWizard, closeNewProgramWizard, setWizardField, setWizardPrefill, selectWizardSplit,
       addWizardCustomDay, removeWizardCustomDay, setWizardCustomDayField, createProgramFromWizard,

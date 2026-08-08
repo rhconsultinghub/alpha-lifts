@@ -13,7 +13,7 @@ import {
   volumeChartData, weeklyHeatmapData, exerciseProgressData, compareLiftsData, consistencyData,
   volumeDonutData, durationTrendData, warmupForDay, bodyWeightChartData, platesBreakdown, deloadSuggestion,
   effectiveLast, lifetimeVolumeKg, totalTrainingMinutes, completedWorkoutCount, lifetimeReps, lifetimeSets,
-  equipVOf, variantHistory
+  equipVOf, variantHistory, measurementChartData, measurementUnitLabel, MEASUREMENT_TYPES
 } from './logic';
 import { weightFactoid, timeFactoid } from '../data/factoids';
 import { seededFrac } from '../data/program';
@@ -28,6 +28,7 @@ import { createInitialState } from '../data/initialState';
 // exactly, and cached — the stub itself must not become a per-render cost.
 let progressStubsCache: {
   bodyWeightChart: ReturnType<typeof bodyWeightChartData>;
+  measurementChart: ReturnType<typeof measurementChartData>;
   volumeChart: ReturnType<typeof volumeChartData>;
   weeklyHeatmap: ReturnType<typeof weeklyHeatmapData>;
   exerciseProgress: ReturnType<typeof exerciseProgressData>;
@@ -42,6 +43,7 @@ function progressStubs() {
     const noop = () => {};
     progressStubsCache = {
       bodyWeightChart: bodyWeightChartData(e),
+      measurementChart: measurementChartData(e, 'waist'),
       volumeChart: volumeChartData(e),
       weeklyHeatmap: weeklyHeatmapData(e, muscleBarsList(e)),
       exerciseProgress: exerciseProgressData(e, noop, 'weight'),
@@ -1375,6 +1377,21 @@ export function buildViewModel(state: AppState, actions: Actions) {
       log: actions.logBodyWeight,
       unitsLabel: currentUnitsLabel
     },
+    measurements: (() => {
+      const type = s.selectedMeasurementType || 'waist';
+      return {
+        ...(onProgress ? measurementChartData(s, type) : progressStubs().measurementChart),
+        typeChips: MEASUREMENT_TYPES.map(t => ({
+          key: t.key, label: t.label, isActive: t.key === type,
+          select: () => actions.selectMeasurementType(t.key)
+        })),
+        inputValue: s.measurementInput || '',
+        setInput: (v: string) => actions.setMeasurementInput(v),
+        log: actions.logMeasurement,
+        unitLabel: measurementUnitLabel(s.units),
+        typeLabel: MEASUREMENT_TYPES.find(t => t.key === type)?.label || 'Waist'
+      };
+    })(),
     volumeChart: onProgress ? volumeChartData(s) : progressStubs().volumeChart,
     weeklyHeatmap: onProgress ? weeklyHeatmapData(s, bars) : progressStubs().weeklyHeatmap,
     exerciseProgress: onProgress

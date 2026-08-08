@@ -406,6 +406,15 @@ export interface AppState {
   bodyWeightLog: { date: string; weightKg: number }[];
   bodyWeightInput: string;
 
+  // ---------- body measurements (waist/chest/arms/…) ----------
+  // Stored in cm regardless of display units (mirrors bodyWeightLog's kg storage); one entry per
+  // type per local calendar date, newest logged value for a date replaces the old one. All three
+  // fields optional/back-compat via loadInitial's shallow merge; the two UI fields are transient
+  // (never synced — see durable.ts).
+  measurementLog?: { date: string; type: string; valueCm: number }[];
+  measurementInput?: string;
+  selectedMeasurementType?: string;
+
   // ---------- deload suggestion (dismissal is per-week, like other week-scoped state) ----------
   deloadDismissedWeek: number | null;
 
