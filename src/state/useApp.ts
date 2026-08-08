@@ -143,6 +143,33 @@ const MIGRATIONS: Migration[] = [
         if (changed) state.exerciseHistory = migrated;
       }
     }
+  },
+  {
+    // v2: the built-in flyes entry dropped its EZ-Bar variant (an implement that never made
+    // sense for a fly). Shrinking a built-in equip list can strand a saved slot's equipIdx past
+    // the end of the array — which crashes render on `lib.equip[ex.equipIdx].label` — so clamp
+    // EVERY out-of-range equipIdx against the merged library, the same reset-to-variant-0 choice
+    // saveExerciseForm makes when a custom-exercise edit shrinks an equip list.
+    to: 2,
+    run: (state) => {
+      const clampEx = (ex: ProgramExercise): ProgramExercise => {
+        const def = EXLIB[ex.id];
+        return def && ex.equipIdx >= def.equip.length ? { ...ex, equipIdx: 0 } : ex;
+      };
+      (state.dayOrder || []).forEach(k => {
+        const day = state.program?.[k];
+        if (day?.exercises) day.exercises = day.exercises.map(clampEx);
+      });
+      Object.values(state.savedPrograms || {}).forEach(sp => {
+        (sp.dayOrder || []).forEach(k => {
+          const day = sp.days?.[k];
+          if (day?.exercises) day.exercises = day.exercises.map(clampEx);
+        });
+      });
+      if (state.workout?.dayExercises) {
+        state.workout.dayExercises = state.workout.dayExercises.map(clampEx);
+      }
+    }
   }
 ];
 

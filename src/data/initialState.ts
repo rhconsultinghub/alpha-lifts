@@ -2,7 +2,7 @@ import type { AppState } from './types';
 
 /** Highest one-time migration a blob can have been through — see MIGRATIONS in state/useApp.ts.
  *  Lives here (not useApp) so createInitialState can stamp it without an import cycle. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export function createInitialState(): AppState {
   return {
