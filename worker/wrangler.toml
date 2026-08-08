@@ -28,6 +28,14 @@ APP_URL = "https://rhconsultinghub.github.io/alpha-lifts/"
 # gate and the enforcement gate used to be the same key-presence check, which failed open).
 REQUIRE_EMAIL_VERIFICATION = "true"
 
+# Web Push workout reminders (src/push.ts). The PUBLIC half of the VAPID pair — it ships inside
+# every subscribing browser, so it belongs here, not in a secret. The PRIVATE half is the secret:
+#   node scripts/gen-vapid.mjs                  # prints both halves
+#   npx wrangler secret put VAPID_PRIVATE_JWK   # paste the JWK line
+# Empty until keys are generated; push routes 503 and the cron sweep no-ops until both exist.
+VAPID_PUBLIC_KEY = "BIslQjN6GPx4wyesYQ04awg4Tv73scJu9vAz0W7TJ6gUUo0Ajj0VsEG4-wuwlduwZxPeSFykhi2q47zCNlrjmr8"
+VAPID_SUBJECT = "mailto:ryanhouse19@gmail.com"
+
 # Set to "true" to require the coach access allowlist (see src/access.ts + README "Access
 # allowlist"). While off, anyone whose Origin is allowed can use the coach. Approved ids are KV
 # keys `allow:<id>` in the USAGE namespace:
@@ -80,3 +88,8 @@ simple = { limit = 10, period = 60 }
 name = "AI_LIMITER"
 namespace_id = "1002"
 simple = { limit = 30, period = 60 }
+
+# Web Push reminder sweep (src/push.ts sweepPushReminders). Every 10 minutes; each subscription
+# fires at most once per user-local day, so the sweep is cheap when nothing is due.
+[triggers]
+crons = ["*/10 * * * *"]

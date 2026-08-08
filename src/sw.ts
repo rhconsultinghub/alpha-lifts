@@ -52,7 +52,19 @@ const REST_TYPES = ['rest-complete', 'rest-progress'];
 
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
-  if (!REST_TYPES.includes(event.notification.data?.type)) return;
+  const type = event.notification.data?.type;
+  // A cloud workout reminder just opens (or focuses) the app — no exercise to land on.
+  if (type === 'push-reminder') {
+    event.waitUntil((async () => {
+      const scope = self.registration.scope;
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const existing = windows.find(c => c.url.startsWith(scope));
+      if (existing) await existing.focus();
+      else await self.clients.openWindow(scope);
+    })());
+    return;
+  }
+  if (!REST_TYPES.includes(type)) return;
   event.waitUntil((async () => {
     const scope = self.registration.scope;
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
@@ -64,4 +76,17 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
     }
     await self.clients.openWindow(scope + '#rest-exercise');
   })());
+});
+
+// Cloud workout reminders (worker/src/push.ts). Pushes arrive WITHOUT a payload on purpose —
+// an empty push needs no RFC 8291 encryption server-side — so the notification text is composed
+// here. The Worker only sends when its copy of the synced state says a training day is owed.
+self.addEventListener('push', (event: PushEvent) => {
+  event.waitUntil(self.registration.showNotification('Time to train 🏋️', {
+    body: 'Today’s workout is still waiting — go get it logged.',
+    icon: 'icon-192.png',
+    badge: 'badge-96.png',
+    tag: 'alpha-lifts-push-reminder',
+    data: { type: 'push-reminder' }
+  }));
 });

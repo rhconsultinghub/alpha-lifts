@@ -16,6 +16,7 @@ import {
   equipVOf, variantHistory, measurementChartData, measurementUnitLabel, MEASUREMENT_TYPES
 } from './logic';
 import { weightFactoid, timeFactoid } from '../data/factoids';
+import { PUSH_CONFIGURED, pushSupported } from './push';
 import { seededFrac } from '../data/program';
 import { createInitialState } from '../data/initialState';
 
@@ -322,6 +323,11 @@ export function buildViewModel(state: AppState, actions: Actions) {
     reminderTime: s.reminderTime,
     reminderPermissionDenied: typeof Notification !== 'undefined' && Notification.permission === 'denied',
     toggleReminders: () => actions.setRemindersEnabled(!s.remindersEnabled),
+    // Cloud (Web Push) reminders — offered only when the Worker is configured; per-device.
+    pushRemindersAvailable: PUSH_CONFIGURED && pushSupported(),
+    pushRemindersEnabled: !!s.pushRemindersEnabled,
+    togglePushReminders: () => { void actions.setPushReminders(!s.pushRemindersEnabled); },
+    pushSetupNotice: s.pushSetupNotice || null,
     setReminderTime: (v: string) => actions.setReminderTime(v)
   };
 

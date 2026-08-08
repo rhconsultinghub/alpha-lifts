@@ -52,3 +52,18 @@ CREATE TABLE IF NOT EXISTS user_state (
   version     INTEGER NOT NULL DEFAULT 1,    -- bumped on every push; the client's tie-breaker signal
   updated_at  INTEGER NOT NULL               -- epoch ms of the last push; drives LWW
 );
+
+-- Web Push workout reminders (src/push.ts). One row per subscribed device, endpoint-keyed.
+-- Adding to an existing DB: migrate-add-push.sql (identical statements).
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  endpoint        TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  p256dh          TEXT NOT NULL,          -- subscription public key (stored for future payload support)
+  auth            TEXT NOT NULL,          -- subscription auth secret (same)
+  reminder_time   TEXT NOT NULL DEFAULT '18:00',  -- HH:MM, user-local
+  tz              TEXT NOT NULL DEFAULT 'UTC',    -- IANA zone captured at subscribe (DST-proof)
+  last_sent_date  TEXT,                   -- user-local YYYY-MM-DD of the last reminder (or skip)
+  created_at      INTEGER NOT NULL        -- epoch ms
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);

@@ -63,7 +63,11 @@ const TRANSIENT_FIELDS = [
   'coachInput',
   'coachPending',
   'coachEntitlement',
-  'showTutorial'
+  'showTutorial',
+  // Per-DEVICE, not per-account: a push subscription belongs to one browser. Syncing the flag
+  // would silently claim other devices are subscribed when they never opted in.
+  'pushRemindersEnabled',
+  'pushSetupNotice'
 ] as const satisfies readonly (keyof AppState)[];
 
 /** What actually gets pushed to (and therefore pulled from) the server. loadInitial()'s

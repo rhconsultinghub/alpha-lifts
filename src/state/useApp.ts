@@ -4,6 +4,7 @@ import { mkEx, slugify } from '../data/program';
 import { createInitialState, SCHEMA_VERSION } from '../data/initialState';
 import { exportBackup as exportBackupFile, mergeBackupIntoDefaults, safeCustomEntries } from '../data/backup';
 import { exportWorkoutCsv as exportWorkoutCsvFile } from '../data/csv';
+import { subscribePush, unsubscribePush } from './push';
 import { clearSyncMeta } from './syncMeta';
 import { exportPlan as exportPlanFile } from '../data/planIO';
 import { SPLIT_PRESETS, WEEKDAYS, buildProgramFromPreset, buildCustomProgram } from '../data/wizard';
@@ -569,7 +570,30 @@ export function useApp() {
     }
     setState(s => ({ ...s, remindersEnabled: v }));
   }, []);
-  const setReminderTime = useCallback((v: string) => setState(s => ({ ...s, reminderTime: v })), []);
+  const setReminderTime = useCallback((v: string) => {
+    setState(s => ({ ...s, reminderTime: v }));
+    // A subscribed device re-registers so the server-side reminder fires at the new time. The
+    // Worker upserts on the endpoint, so this is a cheap idempotent update, not a re-permission.
+    if (stateRef.current.pushRemindersEnabled) void subscribePush(v);
+  }, []);
+  // Cloud (Web Push) reminders — async by nature (permission prompt, SW subscription, network),
+  // so the flag is only committed once the subscription actually succeeded; failures roll the
+  // toggle back and surface a reason via pushSetupNotice.
+  const setPushReminders = useCallback(async (on: boolean) => {
+    if (!on) {
+      setState(s => ({ ...s, pushRemindersEnabled: false, pushSetupNotice: null }));
+      await unsubscribePush();
+      return;
+    }
+    const result = await subscribePush(stateRef.current.reminderTime);
+    const why =
+      result === 'ok' ? null :
+      result === 'denied' ? 'Notifications are blocked for this site — allow them in your browser settings first.' :
+      result === 'signed_out' ? 'Sign in first — cloud reminders follow your account.' :
+      result === 'unsupported' ? 'This browser/build doesn’t support push (the installed app does).' :
+      'Couldn’t reach the reminder service — try again in a bit.';
+    setState(s => ({ ...s, pushRemindersEnabled: result === 'ok', pushSetupNotice: why }));
+  }, []);
 
   // ---------- body-weight tracking ----------
   const setBodyWeightInput = useCallback((v: string) => setState(s => ({ ...s, bodyWeightInput: v })), []);
@@ -2233,7 +2257,7 @@ export function useApp() {
       exportBackup, exportHistoryCsv, stageBackupImport, cancelBackupImport, confirmBackupImport,
       exportPlan, stagePlanImport, cancelPlanImport, confirmPlanImport, parsePlanText,
       requestResetApp, cancelResetApp, resetApp,
-      setRestAlertSound, setRestAlertVibrate, setRestAlertNotify, setRemindersEnabled, setReminderTime,
+      setRestAlertSound, setRestAlertVibrate, setRestAlertNotify, setRemindersEnabled, setReminderTime, setPushReminders,
       setBodyWeightInput, logBodyWeight,
       setMeasurementInput, selectMeasurementType, logMeasurement,
       switchProgram, newProgram, requestRemoveProgram, renameSavedProgram,

@@ -448,6 +448,12 @@ export interface AppState {
   remindersEnabled: boolean;
   reminderTime: string;
   lastReminderFiredDate: string | null;
+  /** Cloud (Web Push) reminders for THIS device — per-device by nature (a push subscription
+   *  belongs to one browser), so transient/never synced (durable.ts) but persisted locally.
+   *  Optional/back-compat. See state/push.ts. */
+  pushRemindersEnabled?: boolean;
+  /** Why the last cloud-reminder enable attempt failed (transient UI copy, never synced). */
+  pushSetupNotice?: string | null;
 
   // ---------- backup export/import ----------
   pendingBackupImport: Partial<AppState> | null;

@@ -91,6 +91,8 @@ export function createInitialState(): AppState {
     remindersEnabled: false,
     reminderTime: '18:00',
     lastReminderFiredDate: null,
+    pushRemindersEnabled: false,
+    pushSetupNotice: null,
 
     pendingBackupImport: null,
     pendingPlanImport: null,

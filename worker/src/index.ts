@@ -24,6 +24,7 @@ import {
   type RateLimiter
 } from './guard';
 import { handleOnboard } from './onboard';
+import { handlePushConfig, handlePushSubscribe, handlePushUnsubscribe, sweepPushReminders } from './push';
 import { handleParsePlan } from './parsePlan';
 import {
   handleChangePassword,
@@ -67,6 +68,13 @@ export interface Env {
   // (guard.ts), since the hard gates (session auth, entitlement, budget) fail closed on their own.
   AUTH_LIMITER?: RateLimiter;
   AI_LIMITER?: RateLimiter;
+  // Web Push workout reminders (push.ts). VAPID_PRIVATE_JWK is a secret (the ES256 signing key
+  // as a JWK JSON string — `node scripts/gen-vapid.mjs`, then `wrangler secret put`);
+  // VAPID_PUBLIC_KEY (base64url uncompressed P-256 point) lives in wrangler.toml — it ships to
+  // every browser anyway. Both absent = push routes 503 and the cron sweep no-ops.
+  VAPID_PRIVATE_JWK?: string;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_SUBJECT?: string;
 }
 
 import { MODEL } from './usage';
@@ -168,6 +176,24 @@ export default {
       if (path === '/onboard' && method === 'POST') return await handleOnboard(request, env, cors);
       if (path === '/parse-plan' && method === 'POST') return await handleParsePlan(request, env, cors);
 
+      // Web Push reminders. Config is public (the VAPID public key ships in every browser);
+      // subscribe/unsubscribe require a session — a subscription is account-scoped data.
+      if (path === '/push/config' && method === 'GET') return handlePushConfig(env, cors);
+      if ((path === '/push/subscribe' || path === '/push/unsubscribe') && method === 'POST') {
+        if (!env.SESSION_SECRET || !env.DB) return json({ error: 'push_not_configured' }, 503, cors);
+        const session = await authenticate(request, env.SESSION_SECRET);
+        if (!session) return json({ error: 'unauthorized' }, 401, cors);
+        const user = await findUserById(env.DB, session.sub);
+        if (!user || userTokenVersion(user) !== sessionTokenVersion(session)) {
+          return json({ error: 'unauthorized' }, 401, cors);
+        }
+        const read = await readJsonCapped<Record<string, unknown>>(request, 8 * 1024);
+        if (!read.ok) return json({ error: 'Invalid JSON' }, 400, cors);
+        return path === '/push/subscribe'
+          ? await handlePushSubscribe(session.sub, read.value, env, cors)
+          : await handlePushUnsubscribe(session.sub, read.value, env, cors);
+      }
+
       // The coach lives at POST / (unchanged contract).
       if (path !== '/') return json({ error: 'Not found' }, 404, cors);
       if (method !== 'POST') return json({ error: 'Method not allowed' }, 405, cors);
@@ -177,6 +203,12 @@ export default {
       console.error('Unhandled error', err);
       return json({ error: 'internal_error' }, 500, cors);
     }
+  },
+
+  // Cron sweep ([triggers] in wrangler.toml): sends due workout-reminder pushes. Runs every 10
+  // minutes; each subscription fires at most once per user-local day (push.ts).
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(sweepPushReminders(env));
   }
 };
 

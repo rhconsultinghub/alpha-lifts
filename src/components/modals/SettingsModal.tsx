@@ -356,7 +356,19 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
           {st.remindersEnabled && st.reminderPermissionDenied && (
             <div style={{ font: "500 11px 'Inter'", color: 'oklch(0.72 0.17 35)', marginBottom: 6 }}>Notifications are blocked for this site in your browser — enable them in your browser settings for reminders to show.</div>
           )}
-          <div style={{ font: "400 10px/1.4 'Inter'", color: 'rgba(245,240,234,.35)', marginBottom: 24 }}>This app has no backend, so reminders can only fire while Alpha Lifts is open in a tab — they won't arrive if the app has been fully closed all day.</div>
+          {st.pushRemindersAvailable && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,.04)', borderRadius: 14, padding: '12px 14px', marginBottom: 6 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ font: "600 13px 'Inter'", color: '#f5f0ea' }}>Cloud Reminders</div>
+                <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.45)', marginTop: 2 }}>Sent from the server at your reminder time — arrives even when the app is fully closed. Per device.</div>
+              </div>
+              <button onClick={st.togglePushReminders} style={{ font: "700 11px 'Inter'", padding: '8px 14px', borderRadius: 100, border: 'none', background: st.pushRemindersEnabled ? 'oklch(0.65 0.19 35)' : 'rgba(255,255,255,.08)', color: st.pushRemindersEnabled ? '#0d0c0b' : 'rgba(245,240,234,.6)' }}>{st.pushRemindersEnabled ? 'On' : 'Off'}</button>
+            </div>
+          )}
+          {st.pushSetupNotice && (
+            <div style={{ font: "500 11px 'Inter'", color: 'oklch(0.72 0.17 35)', marginBottom: 6 }}>{st.pushSetupNotice}</div>
+          )}
+          <div style={{ font: "400 10px/1.4 'Inter'", color: 'rgba(245,240,234,.35)', marginBottom: 24 }}>Basic reminders only fire while Alpha Lifts is open in a tab. Cloud Reminders remove that limit — they only remind you on training days you haven't logged yet.</div>
 
           <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.4)', letterSpacing: '.04em', marginBottom: 10 }}>BACKUP</div>
           <div style={{ font: "400 11px 'Inter'", color: 'rgba(245,240,234,.4)', marginBottom: 10 }}>All your data lives only on this device. Export a backup periodically, or before switching phones/browsers.</div>
