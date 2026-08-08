@@ -295,6 +295,9 @@ export function buildViewModel(state: AppState, actions: Actions) {
     toggleRestAlertVibrate: () => actions.setRestAlertVibrate(!s.restAlertVibrate),
     toggleRestAlertNotify: () => actions.setRestAlertNotify(!s.restAlertNotify),
     exportBackup: actions.exportBackup,
+    // Set-by-set history CSV for spreadsheets/coaches — only useful once something is logged.
+    exportHistoryCsv: actions.exportHistoryCsv,
+    hasHistoryToExport: s.history.some(h => h.status === 'completed'),
     pendingBackupImport: !!s.pendingBackupImport,
     confirmBackupImport: actions.confirmBackupImport,
     cancelBackupImport: actions.cancelBackupImport,

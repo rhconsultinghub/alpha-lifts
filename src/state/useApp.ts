@@ -3,6 +3,7 @@ import { EXLIB, EQUIP_CATALOG, MUSCLES, planRepDefault } from '../data/exercises
 import { mkEx, slugify } from '../data/program';
 import { createInitialState, SCHEMA_VERSION } from '../data/initialState';
 import { exportBackup as exportBackupFile, mergeBackupIntoDefaults, safeCustomEntries } from '../data/backup';
+import { exportWorkoutCsv as exportWorkoutCsvFile } from '../data/csv';
 import { clearSyncMeta } from './syncMeta';
 import { exportPlan as exportPlanFile } from '../data/planIO';
 import { SPLIT_PRESETS, WEEKDAYS, buildProgramFromPreset, buildCustomProgram } from '../data/wizard';
@@ -480,6 +481,7 @@ export function useApp() {
 
   // ---------- backup export/import ----------
   const exportBackup = useCallback(() => { exportBackupFile(state); }, [state]);
+  const exportHistoryCsv = useCallback(() => { exportWorkoutCsvFile(state); }, [state]);
   const stageBackupImport = useCallback((data: Partial<AppState>) => setState(s => ({ ...s, pendingBackupImport: data })), []);
   const cancelBackupImport = useCallback(() => setState(s => ({ ...s, pendingBackupImport: null })), []);
   const confirmBackupImport = useCallback(() => {
@@ -2184,7 +2186,7 @@ export function useApp() {
       requestRemoveProgramDay, cancelRemoveProgramDay, confirmRemoveProgramDay,
       setDeloadEnabled, setDeloadIntensity, setDeloadCadence, startDeloadNow, endDeloadNow,
       deferDeload, skipDeload,
-      exportBackup, stageBackupImport, cancelBackupImport, confirmBackupImport,
+      exportBackup, exportHistoryCsv, stageBackupImport, cancelBackupImport, confirmBackupImport,
       exportPlan, stagePlanImport, cancelPlanImport, confirmPlanImport, parsePlanText,
       requestResetApp, cancelResetApp, resetApp,
       setRestAlertSound, setRestAlertVibrate, setRestAlertNotify, setRemindersEnabled, setReminderTime,

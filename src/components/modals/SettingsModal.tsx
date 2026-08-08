@@ -365,6 +365,12 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
             <button onClick={() => fileInputRef.current?.click()} style={{ flex: 1, font: "700 12px 'Inter'", padding: 12, borderRadius: 12, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.85)' }}>⬆ Import Backup</button>
             <input ref={fileInputRef} type="file" accept="application/json" onChange={handleFileChosen} style={{ display: 'none' }} />
           </div>
+          {st.hasHistoryToExport && (
+            <div style={{ marginBottom: 6 }}>
+              <button onClick={st.exportHistoryCsv} style={{ width: '100%', font: "700 12px 'Inter'", padding: 12, borderRadius: 12, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.85)' }}>📊 Export History (CSV)</button>
+              <div style={{ font: "400 10px/1.4 'Inter'", color: 'rgba(245,240,234,.35)', marginTop: 4 }}>Set-by-set spreadsheet of every logged workout — opens in Excel/Sheets, handy for sharing with a coach.</div>
+            </div>
+          )}
           {importError && (
             <div style={{ font: "500 11px 'Inter'", color: 'oklch(0.72 0.17 35)', marginBottom: 6 }}>{importError}</div>
           )}
