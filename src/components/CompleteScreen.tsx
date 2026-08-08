@@ -1,8 +1,14 @@
-﻿import type { ViewModel } from '../state/viewModel';
+﻿import { useState } from 'react';
+import type { ViewModel } from '../state/viewModel';
 
 export function CompleteScreen({ vm }: { vm: ViewModel }) {
   const prCount = vm.completeSummary.filter(c => c.isPR).length;
   const earned = vm.achievements.newlyUnlocked;
+  const [shareState, setShareState] = useState<'idle' | 'working' | 'shared' | 'downloaded' | 'failed'>('idle');
+  const onShare = () => {
+    setShareState('working');
+    vm.shareWorkout().then(setShareState).catch(() => setShareState('failed'));
+  };
   return (
     <div style={{ padding: '60px 24px 40px', textAlign: 'center' }}>
       <div style={{ fontSize: 44, marginBottom: 12 }}>🏁</div>
@@ -63,6 +69,9 @@ export function CompleteScreen({ vm }: { vm: ViewModel }) {
         ))}
       </div>
 
+      <button onClick={onShare} disabled={shareState === 'working'} style={{ width: '100%', background: 'none', border: '1px solid rgba(255,255,255,.25)', color: 'rgba(245,240,234,.85)', font: "700 14px 'Inter'", padding: 14, borderRadius: 16, marginBottom: 10 }}>
+        {shareState === 'working' ? 'Building card…' : shareState === 'downloaded' ? '✓ Card saved to downloads' : shareState === 'failed' ? 'Couldn’t build the card — try again' : '📤 Share This Workout'}
+      </button>
       <button onClick={vm.goProgram} style={{ width: '100%', background: 'oklch(0.65 0.19 35)', color: '#0d0c0b', font: "700 15px 'Inter'", padding: 16, borderRadius: 16, border: 'none' }}>Back to Program</button>
     </div>
   );

@@ -67,3 +67,13 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+
+-- Plan share links (src/share.ts). Adding to an existing DB: migrate-add-share.sql.
+CREATE TABLE IF NOT EXISTS shared_plans (
+  id          TEXT PRIMARY KEY,     -- short random id in the share URL
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan_json   TEXT NOT NULL,        -- opaque PlanEnvelope; validated client-side on import
+  created_at  INTEGER NOT NULL      -- epoch ms; per-user cap keeps only the newest 20
+);
+
+CREATE INDEX IF NOT EXISTS idx_shared_plans_user ON shared_plans(user_id);

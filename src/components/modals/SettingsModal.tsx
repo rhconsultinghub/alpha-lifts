@@ -102,6 +102,23 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
   const [planError, setPlanError] = useState('');
   const [aiText, setAiText] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  const [shareLink, setShareLink] = useState<{ state: 'idle' | 'working' | 'copied' | 'error'; message?: string }>({ state: 'idle' });
+  const handleShareLink = async () => {
+    if (shareLink.state === 'working') return;
+    setShareLink({ state: 'working' });
+    const result = await st.createShareLink();
+    if (!result.ok) {
+      setShareLink({ state: 'error', message: result.error });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(result.url);
+      setShareLink({ state: 'copied', message: result.url });
+    } catch {
+      // clipboard blocked (permissions) — still show the URL so it can be copied by hand
+      setShareLink({ state: 'copied', message: result.url });
+    }
+  };
   if (!st.open) return null;
 
   const handleFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -406,6 +423,19 @@ export function SettingsModal({ vm }: { vm: ViewModel }) {
             <button onClick={() => planFileRef.current?.click()} style={{ flex: 1, font: "700 12px 'Inter'", padding: 12, borderRadius: 12, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.85)' }}>⬆ Import Plan</button>
             <input ref={planFileRef} type="file" accept="application/json" onChange={handlePlanFileChosen} style={{ display: 'none' }} />
           </div>
+          {st.sharePlanAvailable && (
+            <div style={{ marginBottom: 6 }}>
+              <button onClick={handleShareLink} disabled={shareLink.state === 'working'} style={{ width: '100%', font: "700 12px 'Inter'", padding: 12, borderRadius: 12, border: '1px solid rgba(255,255,255,.2)', background: 'none', color: 'rgba(245,240,234,.85)' }}>
+                {shareLink.state === 'working' ? 'Creating link…' : shareLink.state === 'copied' ? '✓ Link copied to clipboard' : '🔗 Copy Share Link'}
+              </button>
+              {shareLink.state === 'error' && (
+                <div style={{ font: "500 11px 'Inter'", color: 'oklch(0.72 0.17 35)', marginTop: 4 }}>{shareLink.message}</div>
+              )}
+              {shareLink.state === 'copied' && shareLink.message && (
+                <div style={{ font: "400 10px/1.4 'Inter'", color: 'rgba(245,240,234,.35)', marginTop: 4, wordBreak: 'break-all' }}>{shareLink.message} — anyone who opens it gets an import prompt for this plan.</div>
+              )}
+            </div>
+          )}
 
           {st.aiParseAvailable && (
             <div style={{ marginTop: 12 }}>

@@ -17,6 +17,8 @@ import {
 } from './logic';
 import { weightFactoid, timeFactoid } from '../data/factoids';
 import { PUSH_CONFIGURED, pushSupported } from './push';
+import { SHARE_CONFIGURED, createPlanShareLink } from './share';
+import { shareWorkoutCard } from '../data/shareCard';
 import { seededFrac } from '../data/program';
 import { createInitialState } from '../data/initialState';
 
@@ -307,6 +309,10 @@ export function buildViewModel(state: AppState, actions: Actions) {
     stageBackupImport: actions.stageBackupImport,
     // Workout-plan (program) import/export
     exportPlan: actions.exportPlan,
+    // Share the active plan as a link (needs the Worker + a signed-in session; the token check
+    // happens inside createPlanShareLink so the error message can say why).
+    sharePlanAvailable: SHARE_CONFIGURED,
+    createShareLink: () => createPlanShareLink(s),
     pendingPlanImport: !!s.pendingPlanImport,
     planImportName: s.pendingPlanImport?.name || '',
     confirmPlanImport: actions.confirmPlanImport,
@@ -1236,6 +1242,19 @@ export function buildViewModel(state: AppState, actions: Actions) {
     warmupDetail,
     planPrompt,
     completeSubtitle,
+    // Complete-screen share card: rendered from the just-written history head + the summary rows.
+    shareWorkout: () => {
+      const h = s.history[0];
+      return shareWorkoutCard({
+        dayLabel: h?.day || 'Workout',
+        dateText: h?.date || '',
+        userName: s.userName || undefined,
+        volumeText: fmtWeight(h?.volumeKg || 0, s.units),
+        durationText: (h?.durationMin || 0) + ' min',
+        prCount: (s.completeSummary || []).filter(c => c.isPR).length,
+        exercises: (s.completeSummary || []).filter(c => c.badgeText !== 'Skipped').map(c => ({ name: c.name, resultText: c.resultText, isPR: c.isPR }))
+      });
+    },
     editWeek, openEditWeek: actions.openEditWeek,
     funStats, sessionFactoid,
     firstName, homeGreeting, startWorkoutHint,

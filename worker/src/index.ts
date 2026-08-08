@@ -25,6 +25,7 @@ import {
 } from './guard';
 import { handleOnboard } from './onboard';
 import { handlePushConfig, handlePushSubscribe, handlePushUnsubscribe, sweepPushReminders } from './push';
+import { handleShareCreate, handleShareGet } from './share';
 import { handleParsePlan } from './parsePlan';
 import {
   handleChangePassword,
@@ -192,6 +193,28 @@ export default {
         return path === '/push/subscribe'
           ? await handlePushSubscribe(session.sub, read.value, env, cors)
           : await handlePushUnsubscribe(session.sub, read.value, env, cors);
+      }
+
+      // Plan share links. Creating one requires a session (and rides the auth rate limiter to
+      // stop share-spam); fetching by id is public — the unguessable id IS the capability, and
+      // the payload is a plan the recipient still has to confirm-import client-side.
+      if (path === '/share' && method === 'POST') {
+        if (!env.SESSION_SECRET || !env.DB) return json({ error: 'share_not_configured' }, 503, cors);
+        if (!(await allowRate(env.AUTH_LIMITER, ip))) return json({ error: 'rate_limited' }, 429, cors);
+        const session = await authenticate(request, env.SESSION_SECRET);
+        if (!session) return json({ error: 'unauthorized' }, 401, cors);
+        const user = await findUserById(env.DB, session.sub);
+        if (!user || userTokenVersion(user) !== sessionTokenVersion(session)) {
+          return json({ error: 'unauthorized' }, 401, cors);
+        }
+        const read = await readJsonCapped<{ plan?: unknown }>(request, 80 * 1024);
+        if (!read.ok) {
+          return read.reason === 'too_large' ? json({ error: 'plan_too_large' }, 413, cors) : json({ error: 'Invalid JSON' }, 400, cors);
+        }
+        return await handleShareCreate(session.sub, read.value, env, cors);
+      }
+      if (path.startsWith('/share/') && method === 'GET') {
+        return await handleShareGet(path.slice('/share/'.length), env, cors);
       }
 
       // The coach lives at POST / (unchanged contract).

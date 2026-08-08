@@ -32,14 +32,15 @@ function referencedIds(days: ProgramDays): Set<string> {
   return ids;
 }
 
-// Download the active program as a plan file (mirrors exportBackup's Blob+anchor dance).
-export function exportPlan(state: AppState): void {
+/** The active program as a self-contained envelope — shared by the file export below and the
+ *  share-link flow (state/share.ts), so both paths always carry the identical shape. */
+export function buildPlanEnvelope(state: AppState): PlanEnvelope {
   const refs = referencedIds(state.program);
   const customExercises: Record<string, ExerciseDef> = {};
   for (const [id, def] of Object.entries(state.customExercises || {})) {
     if (refs.has(id)) customExercises[id] = def;
   }
-  const envelope: PlanEnvelope = {
+  return {
     format: PLAN_FORMAT,
     version: PLAN_VERSION,
     name: state.programName,
@@ -48,6 +49,11 @@ export function exportPlan(state: AppState): void {
     days: state.program,
     customExercises
   };
+}
+
+// Download the active program as a plan file (mirrors exportBackup's Blob+anchor dance).
+export function exportPlan(state: AppState): void {
+  const envelope = buildPlanEnvelope(state);
   const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const dateStr = new Date().toISOString().slice(0, 10);

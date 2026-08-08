@@ -6,7 +6,8 @@ import { exportBackup as exportBackupFile, mergeBackupIntoDefaults, safeCustomEn
 import { exportWorkoutCsv as exportWorkoutCsvFile } from '../data/csv';
 import { subscribePush, unsubscribePush } from './push';
 import { clearSyncMeta } from './syncMeta';
-import { exportPlan as exportPlanFile } from '../data/planIO';
+import { exportPlan as exportPlanFile, parsePlanFile } from '../data/planIO';
+import { fetchSharedPlan } from './share';
 import { SPLIT_PRESETS, WEEKDAYS, buildProgramFromPreset, buildCustomProgram } from '../data/wizard';
 import type {
   AppState, CoachChatMessage, CoachProposal, CoachProposalPayload, CoachVoice, ExerciseDef, ExerciseFormState, Muscle, ParsedPlan, ProgramDays, ProgramExercise, RestPacing, Screen,
@@ -2184,6 +2185,33 @@ export function useApp() {
       window.removeEventListener('hashchange', consumeHash);
     };
   }, [openRestCompleteExercise]);
+
+  // Opened via a plan share link (#plan=<id>): fetch the shared plan and stage it behind the
+  // SAME import confirm the file path uses — a link is never auto-applied. The hash is stripped
+  // immediately, mirroring the #rest-exercise handling above.
+  useEffect(() => {
+    const consumePlanHash = () => {
+      const m = /^#plan=([a-z0-9]{6,16})$/.exec(window.location.hash);
+      if (!m) return;
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      void fetchSharedPlan(m[1]).then(raw => {
+        if (!raw) {
+          setState(s => ({ ...s, showSettings: true }));
+          return;
+        }
+        try {
+          const plan = parsePlanFile(raw);
+          // Settings hosts the pending-import confirm card, so open it to surface the prompt.
+          setState(s => ({ ...s, pendingPlanImport: plan, showSettings: true }));
+        } catch {
+          setState(s => ({ ...s, showSettings: true }));
+        }
+      });
+    };
+    window.addEventListener('hashchange', consumePlanHash);
+    consumePlanHash();
+    return () => window.removeEventListener('hashchange', consumePlanHash);
+  }, []);
   // Idle-prompt resolutions: Continue brings the current exercise back to front; End Workout runs
   // the normal end-of-session flow (logs whatever's done, same as ending early). Both clear the flag
   // and reset the activity clock so the prompt can't immediately re-fire.
