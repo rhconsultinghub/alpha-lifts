@@ -931,6 +931,7 @@ export function useApp() {
   const openLibraryDetail = useCallback((id: string) => setState(s => ({ ...s, libraryDetailId: id })), []);
   const closeLibraryDetail = useCallback(() => setState(s => ({ ...s, libraryDetailId: null })), []);
   const setExerciseSearchQuery = useCallback((q: string) => setState(s => ({ ...s, exerciseSearchQuery: q })), []);
+  const setExerciseEquipFilter = useCallback((v: string | null) => setState(s => ({ ...s, exerciseEquipFilter: v })), []);
 
   // ---------- AI coach ----------
   const setCoachInput = useCallback((v: string) => setState(s => ({ ...s, coachInput: v })), []);
@@ -2197,7 +2198,7 @@ export function useApp() {
       completeOnboarding, finishOnboarding, dismissTutorial, openTutorial,
       setBodyView, openBodyModal, closeBodyModal, openDetail, closeDetail, openQuickEdit, closeQuickEdit,
       openMuscleDrill, closeMuscleDrill, openWarmupDetail, closeWarmupDetail,
-      openLibraryDetail, closeLibraryDetail, setExerciseSearchQuery, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,
+      openLibraryDetail, closeLibraryDetail, setExerciseSearchQuery, setExerciseEquipFilter, openAddExerciseForm, openEditExerciseForm, closeExerciseForm,
       setExerciseFormField, toggleFormMuscle, toggleFormSecondary, toggleFormEquip, saveExerciseForm,
       requestDeleteExercise, deleteExercise,
       openSwap, closeSwap, swapTab, swapToggleAll, swapStageEquip, swapStageEx, swapConfirm, removeWorkoutExercise, moveWorkoutExercise, setSwapQuery,

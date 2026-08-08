@@ -14,12 +14,29 @@ export function ExercisesScreen({ vm }: { vm: ViewModel }) {
         value={vm.exerciseSearchQuery}
         onChange={e => vm.setExerciseSearchQuery(e.target.value)}
         placeholder="Search by name or muscle (e.g. 'row' or 'chest')"
-        style={{ width: '100%', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.12)', color: '#f5f0ea', font: "400 13px 'Inter'", padding: '11px 14px', borderRadius: 12, marginBottom: 22 }}
+        style={{ width: '100%', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.12)', color: '#f5f0ea', font: "400 13px 'Inter'", padding: '11px 14px', borderRadius: 12, marginBottom: 12 }}
       />
 
-      {vm.exerciseSearchQuery && vm.exerciseLibraryGroups.length === 0 && (
+      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 20, paddingBottom: 4 }}>
+        {vm.exerciseEquipChips.map(chip => (
+          <button
+            key={chip.v ?? 'all'}
+            onClick={chip.select}
+            style={{
+              flexShrink: 0, font: "600 11px 'Inter'", padding: '7px 12px', borderRadius: 100,
+              border: chip.isActive ? '1px solid oklch(0.65 0.19 35)' : '1px solid rgba(255,255,255,.14)',
+              background: chip.isActive ? 'oklch(0.65 0.19 35 / 0.18)' : 'none',
+              color: chip.isActive ? 'oklch(0.78 0.15 35)' : 'rgba(245,240,234,.6)'
+            }}
+          >{chip.label}</button>
+        ))}
+      </div>
+
+      {(vm.exerciseSearchQuery || vm.exerciseEquipChips.some(c => c.isActive && c.v !== null)) && vm.exerciseLibraryGroups.length === 0 && (
         <div style={{ font: "400 13px 'Inter'", color: 'rgba(245,240,234,.45)', textAlign: 'center', padding: '30px 0' }}>
-          No exercises match “{vm.exerciseSearchQuery}”.
+          {vm.exerciseSearchQuery
+            ? <>No exercises match “{vm.exerciseSearchQuery}”.</>
+            : <>No exercises use this equipment.</>}
         </div>
       )}
 

@@ -47,6 +47,7 @@ export function createInitialState(): AppState {
     customExercises: {},
     libraryDetailId: null,
     exerciseSearchQuery: '',
+    exerciseEquipFilter: null,
     confirmDeleteExId: null,
     confirmRemoveBuilderIdx: null,
     exerciseForm: null,

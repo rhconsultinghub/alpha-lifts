@@ -370,6 +370,8 @@ export interface AppState {
   customExercises: Record<string, ExerciseDef>;
   libraryDetailId: string | null;
   exerciseSearchQuery: string;
+  /** Exercises-tab equipment filter chip (EquipOption.v), null = all. Optional/back-compat. */
+  exerciseEquipFilter?: string | null;
   confirmDeleteExId: string | null;
   /** Day Builder ✕ tap-twice confirm: index of the exercise whose permanent removal is pending.
    *  (Optional/defaulted — added post-launch, loadInitial's shallow merge carries old blobs.) */

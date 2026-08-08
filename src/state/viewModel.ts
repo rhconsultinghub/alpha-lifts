@@ -1210,15 +1210,34 @@ export function buildViewModel(state: AppState, actions: Actions) {
     openAddExerciseForm: actions.openAddExerciseForm,
     exerciseSearchQuery: s.exerciseSearchQuery || '',
     setExerciseSearchQuery: actions.setExerciseSearchQuery,
+    // Equipment filter chips: "All" plus one per catalog entry that at least one exercise
+    // actually offers — an empty chip (e.g. no kettlebell exercises in the library yet) would
+    // only ever produce a "no matches" screen.
+    exerciseEquipChips: (() => {
+      if (s.screen !== 'exercises') return [];
+      const offered = new Set(Object.values(EXLIB).flatMap(lib => lib.equip.map(e => e.v)));
+      const active = s.exerciseEquipFilter || null;
+      return [
+        { v: null as string | null, label: 'All', isActive: active === null, select: () => actions.setExerciseEquipFilter(null) },
+        ...EQUIP_CATALOG.filter(o => offered.has(o.v)).map(o => ({
+          v: o.v as string | null, label: o.label, isActive: active === o.v,
+          select: () => actions.setExerciseEquipFilter(active === o.v ? null : o.v)
+        }))
+      ];
+    })(),
     exerciseLibraryGroups: (() => {
       // Only ExercisesScreen consumes this, and it only renders on the exercises tab — skip the
       // 12-pass walk over the whole library on every other screen's renders.
       if (s.screen !== 'exercises') return [];
       const query = (s.exerciseSearchQuery || '').trim().toLowerCase();
+      const equipFilter = s.exerciseEquipFilter || null;
       const matches = (id: string) => {
-        if (!query) return true;
         const lib = EXLIB[id];
-        return lib.name.toLowerCase().includes(query) || lib.muscle.toLowerCase().includes(query);
+        if (equipFilter && !lib.equip.some(e => e.v === equipFilter)) return false;
+        if (!query) return true;
+        // name, muscle, or equipment label — typing "dumbbell" finds every dumbbell exercise.
+        return lib.name.toLowerCase().includes(query) || lib.muscle.toLowerCase().includes(query)
+          || lib.equip.some(e => e.label.toLowerCase().includes(query));
       };
       return (MUSCLES).map(muscle => {
         const ids = Object.keys(EXLIB).filter(id => EXLIB[id].muscle === muscle && matches(id)).sort((a, b) => EXLIB[a].name.localeCompare(EXLIB[b].name));
