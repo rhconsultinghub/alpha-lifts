@@ -647,6 +647,33 @@ export function useApp() {
     });
   }, []);
 
+  // ---------- daily nutrition check-in (mirrors the bodyweight/measurement pattern:
+  // display inputs, one entry per LOCAL date, re-log replaces the day) ----------
+  const setNutritionCaloriesInput = useCallback((v: string) => setState(s => ({ ...s, nutritionCaloriesInput: v })), []);
+  const setNutritionProteinInput = useCallback((v: string) => setState(s => ({ ...s, nutritionProteinInput: v })), []);
+  const selectNutritionMetric = useCallback((m: 'protein' | 'calories') => setState(s => ({ ...s, selectedNutritionMetric: m })), []);
+  const logNutrition = useCallback(() => {
+    setState(s => {
+      const calories = Math.round(parseFloat(s.nutritionCaloriesInput || ''));
+      const proteinG = Math.round(parseFloat(s.nutritionProteinInput || ''));
+      const hasCal = Number.isFinite(calories) && calories > 0;
+      const hasProt = Number.isFinite(proteinG) && proteinG > 0;
+      if (!hasCal && !hasProt) return s;
+      const d = new Date();
+      const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      // Merge with anything already logged today, so logging protein at lunch and calories at
+      // night doesn't erase either.
+      const existing = (s.nutritionLog || []).find(e => e.date === todayKey);
+      const entry = {
+        date: todayKey,
+        ...(hasCal ? { calories } : existing?.calories != null ? { calories: existing.calories } : {}),
+        ...(hasProt ? { proteinG } : existing?.proteinG != null ? { proteinG: existing.proteinG } : {})
+      };
+      const nutritionLog = [...(s.nutritionLog || []).filter(e => e.date !== todayKey), entry];
+      return { ...s, nutritionLog, nutritionCaloriesInput: '', nutritionProteinInput: '' };
+    });
+  }, []);
+
   // ---------- program management ----------
   const switchProgram = useCallback((id: string) => {
     setState(s => {
@@ -2327,6 +2354,7 @@ export function useApp() {
       setRestAlertSound, setRestAlertVibrate, setRestAlertNotify, setRemindersEnabled, setReminderTime, setPushReminders,
       setBodyWeightInput, logBodyWeight,
       setMeasurementInput, selectMeasurementType, logMeasurement,
+      setNutritionCaloriesInput, setNutritionProteinInput, selectNutritionMetric, logNutrition,
       switchProgram, newProgram, requestRemoveProgram, renameSavedProgram,
       openNewProgramWizard, closeNewProgramWizard, setWizardField, setWizardPrefill, selectWizardSplit,
       addWizardCustomDay, removeWizardCustomDay, setWizardCustomDayField, createProgramFromWizard,

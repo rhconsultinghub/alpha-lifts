@@ -424,6 +424,16 @@ export interface AppState {
   measurementInput?: string;
   selectedMeasurementType?: string;
 
+  // ---------- daily nutrition check-in ----------
+  // Deliberately lightweight — calories and/or protein per LOCAL date, one entry per day (a
+  // re-log replaces that day). NOT a food diary; it exists so trends chart and the coach can
+  // reason about intake. Either field may be absent (log only what you track). All optional/
+  // back-compat; the two inputs + metric selection are transient (durable.ts).
+  nutritionLog?: { date: string; calories?: number; proteinG?: number }[];
+  nutritionCaloriesInput?: string;
+  nutritionProteinInput?: string;
+  selectedNutritionMetric?: 'protein' | 'calories';
+
   // ---------- deload suggestion (dismissal is per-week, like other week-scoped state) ----------
   deloadDismissedWeek: number | null;
 

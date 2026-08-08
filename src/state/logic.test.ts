@@ -5,7 +5,7 @@ import {
   muscleVolumes, muscleStatus, isWeekComplete, warmupInfo, deloadSuggestion,
   bestEverStreak, cleanWeekCount, totalPRCount, consistencyData,
   nextIncompleteIndex, isWorkoutFullyDone, estimateDayTime, formatSetTime, formatElapsed,
-  fmtMeasurement, measurementUnitLabel, measurementChartData
+  fmtMeasurement, measurementUnitLabel, measurementChartData, nutritionChartData, nutritionSummary
 } from './logic';
 import { EXLIB, KG_PER_LB_STEP } from '../data/exercises';
 import { testState, histEntry, exEntry, trainingDay, restDay, slot, stateWithProgram } from './testFixtures';
@@ -439,6 +439,38 @@ describe('measurements', () => {
     expect(d.latestText).toBe('88 cm');
     expect(d.deltaText).toContain('-2 cm since 2026-08-01');
     expect(measurementChartData(state, 'thigh').hasData).toBe(false);
+  });
+});
+
+describe('nutrition check-in', () => {
+  const log = [
+    { date: '2026-08-06', calories: 2400, proteinG: 150 },
+    { date: '2026-08-07', proteinG: 170 },              // protein-only day
+    { date: '2026-08-08', calories: 2600, proteinG: 160 },
+    { date: '2026-07-01', calories: 9000, proteinG: 999 } // outside the 7-day window
+  ];
+  it('charts one metric, skipping days that did not log it', () => {
+    const state = testState({ nutritionLog: log });
+    const protein = nutritionChartData(state, 'protein');
+    expect(protein.points.length).toBe(4); // all four days carry protein
+    expect(protein.latestText).toBe('160 g');
+    const cals = nutritionChartData(state, 'calories');
+    expect(cals.points.length).toBe(3); // the protein-only day is skipped
+    expect(cals.latestText).toBe('2600 kcal');
+    expect(nutritionChartData(testState(), 'protein').hasData).toBe(false);
+  });
+  it('summarizes the rolling window, averaging only days that carry each field', () => {
+    const state = testState({ nutritionLog: log });
+    const sum = nutritionSummary(state, 7, new Date('2026-08-08T12:00:00'));
+    expect(sum.daysLogged).toBe(3);            // July entry excluded
+    expect(sum.avgCalories).toBe(2500);        // (2400+2600)/2 — protein-only day not counted
+    expect(sum.avgProteinG).toBe(160);         // (150+170+160)/3
+  });
+  it('reports an empty window honestly', () => {
+    const sum = nutritionSummary(testState(), 7);
+    expect(sum.daysLogged).toBe(0);
+    expect(sum.avgCalories).toBeNull();
+    expect(sum.avgProteinG).toBeNull();
   });
 });
 

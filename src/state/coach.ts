@@ -4,7 +4,7 @@ import { getStoredToken } from './tokenStore';
 import { mkEx, slugify } from '../data/program';
 import {
   muscleBarsList, fmtWeight, completedWorkoutCount, bestEverStreak, totalPRCount,
-  lifetimeVolumeKg, bestSessionVolumeKg, estimatedOneRepMax
+  lifetimeVolumeKg, bestSessionVolumeKg, estimatedOneRepMax, nutritionSummary
 } from './logic';
 
 /**
@@ -83,6 +83,9 @@ export interface CoachContext {
   days?: { name: string; kind: string; exercises: string[] }[];
   recentWorkouts?: { day: string; when: string; exercises: string[] }[];
   bodyWeight?: { value: number; when: string } | null;
+  /** Rolling 7-day intake summary from the nutrition check-in — lets the coach reason about
+   *  eating without a food-diary feature. Omitted entirely when nothing was logged. */
+  nutrition?: { daysLogged: number; window: number; avgCalories?: number; avgProteinG?: number };
   stats?: {
     totalWorkouts?: number;
     currentStreak?: number;
@@ -240,6 +243,18 @@ export function buildCoachContext(s: AppState): CoachContext {
   const bw = (s.bodyWeightLog || []).slice().sort((a, b) => a.date.localeCompare(b.date));
   const latest = bw.length ? bw[bw.length - 1] : null;
   if (latest) ctx.bodyWeight = { value: displayWeight(latest.weightKg, s.units), when: relativeDay(latest.date) };
+
+  // Nutrition check-in, last 7 days — only emitted when something was logged (no tokens spent
+  // telling the model about a feature the user doesn't use).
+  const nutrition = nutritionSummary(s);
+  if (nutrition.daysLogged > 0) {
+    ctx.nutrition = {
+      daysLogged: nutrition.daysLogged,
+      window: nutrition.window,
+      ...(nutrition.avgCalories != null ? { avgCalories: nutrition.avgCalories } : {}),
+      ...(nutrition.avgProteinG != null ? { avgProteinG: nutrition.avgProteinG } : {})
+    };
+  }
 
   ctx.stats = buildStats(s);
   ctx.catalog = buildCatalog();

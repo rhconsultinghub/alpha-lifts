@@ -13,7 +13,8 @@ import {
   volumeChartData, weeklyHeatmapData, exerciseProgressData, compareLiftsData, consistencyData,
   volumeDonutData, durationTrendData, warmupForDay, bodyWeightChartData, platesBreakdown, deloadSuggestion,
   effectiveLast, lifetimeVolumeKg, totalTrainingMinutes, completedWorkoutCount, lifetimeReps, lifetimeSets,
-  equipVOf, variantHistory, measurementChartData, measurementUnitLabel, MEASUREMENT_TYPES
+  equipVOf, variantHistory, measurementChartData, measurementUnitLabel, MEASUREMENT_TYPES,
+  nutritionChartData, nutritionSummary
 } from './logic';
 import { weightFactoid, timeFactoid } from '../data/factoids';
 import { PUSH_CONFIGURED, pushSupported } from './push';
@@ -32,6 +33,7 @@ import { createInitialState } from '../data/initialState';
 let progressStubsCache: {
   bodyWeightChart: ReturnType<typeof bodyWeightChartData>;
   measurementChart: ReturnType<typeof measurementChartData>;
+  nutritionChart: ReturnType<typeof nutritionChartData>;
   volumeChart: ReturnType<typeof volumeChartData>;
   weeklyHeatmap: ReturnType<typeof weeklyHeatmapData>;
   exerciseProgress: ReturnType<typeof exerciseProgressData>;
@@ -47,6 +49,7 @@ function progressStubs() {
     progressStubsCache = {
       bodyWeightChart: bodyWeightChartData(e),
       measurementChart: measurementChartData(e, 'waist'),
+      nutritionChart: nutritionChartData(e, 'protein'),
       volumeChart: volumeChartData(e),
       weeklyHeatmap: weeklyHeatmapData(e, muscleBarsList(e)),
       exerciseProgress: exerciseProgressData(e, noop, 'weight'),
@@ -1418,6 +1421,28 @@ export function buildViewModel(state: AppState, actions: Actions) {
       log: actions.logBodyWeight,
       unitsLabel: currentUnitsLabel
     },
+    nutrition: (() => {
+      const metric = s.selectedNutritionMetric === 'calories' ? 'calories' as const : 'protein' as const;
+      const summary = onProgress ? nutritionSummary(s) : { daysLogged: 0, avgCalories: null, avgProteinG: null, window: 7 };
+      return {
+        ...(onProgress ? nutritionChartData(s, metric) : progressStubs().nutritionChart),
+        metric,
+        metricChips: (['protein', 'calories'] as const).map(m => ({
+          key: m, label: m === 'protein' ? 'Protein' : 'Calories', isActive: m === metric,
+          select: () => actions.selectNutritionMetric(m)
+        })),
+        caloriesInput: s.nutritionCaloriesInput || '',
+        proteinInput: s.nutritionProteinInput || '',
+        setCaloriesInput: actions.setNutritionCaloriesInput,
+        setProteinInput: actions.setNutritionProteinInput,
+        log: actions.logNutrition,
+        summaryText: summary.daysLogged > 0
+          ? `Last 7 days: ${summary.daysLogged} logged` +
+            (summary.avgCalories != null ? ` · ~${summary.avgCalories} kcal/day` : '') +
+            (summary.avgProteinG != null ? ` · ~${summary.avgProteinG} g protein/day` : '')
+          : ''
+      };
+    })(),
     measurements: (() => {
       const type = s.selectedMeasurementType || 'waist';
       return {

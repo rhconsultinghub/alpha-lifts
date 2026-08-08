@@ -8,6 +8,7 @@ const CARD: CSSProperties = { background: 'rgba(255,255,255,.03)', borderRadius:
 export function ProgressScreen({ vm }: { vm: ViewModel }) {
   const bw = vm.bodyWeight;
   const ms = vm.measurements;
+  const nu = vm.nutrition;
   const vc = vm.volumeChart;
   const heat = vm.weeklyHeatmap;
   const ep = vm.exerciseProgress;
@@ -111,6 +112,48 @@ export function ProgressScreen({ vm }: { vm: ViewModel }) {
             </>
           ) : (
             <div style={{ padding: '10px 0 2px', textAlign: 'center', font: "400 12px 'Inter'", color: 'rgba(245,240,234,.4)' }}>Log a {ms.typeLabel.toLowerCase()} measurement to start a trend.</div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+          <div style={SECTION_LABEL}>NUTRITION CHECK-IN</div>
+          {nu.hasData && <div style={{ font: "600 11px 'Inter'", color: 'oklch(0.72 0.17 35)' }}>{nu.latestText}</div>}
+        </div>
+        <div style={CARD}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <input
+              type="number" value={nu.caloriesInput} onChange={e => nu.setCaloriesInput(e.target.value)}
+              placeholder="Calories today"
+              style={{ flex: 1, minWidth: 0, background: 'rgba(255,255,255,.07)', border: 'none', borderRadius: 10, padding: '10px 12px', color: '#f5f0ea', font: "600 13px 'Inter'" }}
+            />
+            <input
+              type="number" value={nu.proteinInput} onChange={e => nu.setProteinInput(e.target.value)}
+              placeholder="Protein (g)"
+              style={{ flex: 1, minWidth: 0, background: 'rgba(255,255,255,.07)', border: 'none', borderRadius: 10, padding: '10px 12px', color: '#f5f0ea', font: "600 13px 'Inter'" }}
+            />
+            <button onClick={nu.log} style={{ font: "700 12px 'Inter'", padding: '0 16px', borderRadius: 10, border: 'none', background: 'oklch(0.65 0.19 35)', color: '#0d0c0b' }}>Log</button>
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: nu.hasData ? 10 : 0 }}>
+            {nu.metricChips.map(chip => (
+              <button key={chip.key} onClick={chip.select} style={{
+                font: "600 11px 'Inter'", padding: '6px 11px', borderRadius: 100,
+                border: chip.isActive ? '1px solid oklch(0.65 0.19 35)' : '1px solid rgba(255,255,255,.14)',
+                background: chip.isActive ? 'oklch(0.65 0.19 35 / 0.18)' : 'none',
+                color: chip.isActive ? 'oklch(0.78 0.15 35)' : 'rgba(245,240,234,.6)'
+              }}>{chip.label}</button>
+            ))}
+          </div>
+          {nu.hasData ? (
+            <>
+              <svg viewBox="0 0 280 110" style={{ width: '100%', height: 90, display: 'block' }}>
+                <polyline points={nu.linePoints} fill="none" stroke="oklch(0.65 0.19 35)" strokeWidth={2} />
+                {nu.points.map((pt, i) => <circle key={i} cx={pt.x} cy={pt.y} r={3.5} fill="oklch(0.65 0.19 35)" />)}
+              </svg>
+              <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.45)', marginTop: 4 }}>{nu.deltaText}</div>
+              {nu.summaryText && <div style={{ font: "500 11px 'Inter'", color: 'rgba(245,240,234,.45)', marginTop: 2 }}>{nu.summaryText}</div>}
+            </>
+          ) : (
+            <div style={{ padding: '10px 0 2px', textAlign: 'center', font: "400 12px 'Inter'", color: 'rgba(245,240,234,.4)' }}>Log calories or protein once a day — the coach uses it too.</div>
           )}
         </div>
 

@@ -27,6 +27,8 @@ export interface CoachContext {
   days?: { name: string; kind: string; exercises: string[] }[];
   recentWorkouts?: { day: string; when: string; exercises: string[] }[];
   bodyWeight?: { value: number; when: string } | null;
+  /** Rolling intake summary from the app's nutrition check-in (see buildCoachContext). */
+  nutrition?: { daysLogged: number; window: number; avgCalories?: number; avgProteinG?: number };
   // Precomputed aggregate stats, so the coach can answer "what's my bench 1RM / am I hitting
   // enough back volume / how many PRs" without a tool round-trip. Reads stay in context; only
   // mutations use tools. See buildCoachContext() client-side.
@@ -159,6 +161,21 @@ export function sanitizeContext(raw: unknown): CoachContext | undefined {
     if (value != null) out.bodyWeight = { value, when: capStr(b.when, 40) ?? '' };
   }
 
+  if (c.nutrition && typeof c.nutrition === 'object') {
+    const nu = c.nutrition as Record<string, unknown>;
+    const daysLogged = capNum(nu.daysLogged, 0, 60);
+    const window = capNum(nu.window, 1, 60);
+    if (daysLogged != null && window != null) {
+      const avgCalories = capNum(nu.avgCalories, 0, 20000);
+      const avgProteinG = capNum(nu.avgProteinG, 0, 2000);
+      out.nutrition = {
+        daysLogged, window,
+        ...(avgCalories != null ? { avgCalories } : {}),
+        ...(avgProteinG != null ? { avgProteinG } : {})
+      };
+    }
+  }
+
   if (c.stats && typeof c.stats === 'object') {
     const s = c.stats as Record<string, unknown>;
     const stats: NonNullable<CoachContext['stats']> = {};
@@ -222,6 +239,13 @@ function renderContext(ctx: CoachContext | undefined): string {
   if (ctx.weekNumber) lines.push(`Currently on week ${ctx.weekNumber}`);
   if (ctx.units) lines.push(`Units: ${ctx.units}`);
   if (ctx.bodyWeight) lines.push(`Latest bodyweight: ${ctx.bodyWeight.value} ${ctx.units ?? 'kg'} (${ctx.bodyWeight.when})`);
+  if (ctx.nutrition) {
+    const parts = [
+      ...(ctx.nutrition.avgCalories != null ? [`~${ctx.nutrition.avgCalories} kcal/day`] : []),
+      ...(ctx.nutrition.avgProteinG != null ? [`~${ctx.nutrition.avgProteinG} g protein/day`] : [])
+    ];
+    lines.push(`Nutrition check-in: logged ${ctx.nutrition.daysLogged} of the last ${ctx.nutrition.window} days${parts.length ? ', averaging ' + parts.join(' and ') : ''}.`);
+  }
 
   if (ctx.days?.length) {
     lines.push('', 'Weekly split:');

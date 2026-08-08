@@ -958,6 +958,51 @@ export function measurementChartData(state: AppState, type: string) {
   return { hasData: true, empty: false, points, linePoints, deltaText, latestText: fmtMeasurement(latest.valueCm, state.units) };
 }
 
+// ---------- daily nutrition check-in ----------
+
+// Same points/linePoints/deltaText shape as the bodyweight/measurement sparklines.
+export function nutritionChartData(state: AppState, metric: 'protein' | 'calories') {
+  const entries = (state.nutritionLog || [])
+    .map(e => ({ date: e.date, value: metric === 'protein' ? e.proteinG : e.calories }))
+    .filter((e): e is { date: string; value: number } => typeof e.value === 'number' && e.value > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const unit = metric === 'protein' ? 'g' : 'kcal';
+  if (!entries.length) return { hasData: false, empty: true, points: [] as { x: number; y: number; date: string }[], linePoints: '', deltaText: '', latestText: '' };
+  const maxV = Math.max(1, ...entries.map(e => e.value));
+  const minV = Math.min(...entries.map(e => e.value));
+  const range = Math.max(1, maxV - minV);
+  const n = entries.length;
+  const points = entries.map((e, i) => ({
+    x: n > 1 ? Math.round((i / (n - 1)) * 260 + 10) : 140,
+    y: Math.round(90 - ((e.value - minV) / range) * 70),
+    date: e.date
+  }));
+  const linePoints = points.map(p => p.x + ',' + p.y).join(' ');
+  const first = entries[0], latest = entries[entries.length - 1];
+  const delta = latest.value - first.value;
+  const deltaText = entries.length > 1
+    ? (delta >= 0 ? '+' : '-') + Math.abs(delta) + ' ' + unit + ' since ' + first.date
+    : 'First logged ' + first.date;
+  return { hasData: true, empty: false, points, linePoints, deltaText, latestText: latest.value + ' ' + unit };
+}
+
+// Rolling window summary for the Progress card and the coach context ("last 7 days: 5 logged,
+// averaging 2450 kcal / 160 g protein"). Averages are over the days that actually carry that
+// field, not the whole window — a day where only protein was logged shouldn't drag calories down.
+export function nutritionSummary(state: AppState, windowDays = 7, now = new Date()): { daysLogged: number; avgCalories: number | null; avgProteinG: number | null; window: number } {
+  const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (windowDays - 1));
+  const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+  const recent = (state.nutritionLog || []).filter(e => e.date >= cutoffKey);
+  const cals = recent.map(e => e.calories).filter((v): v is number => typeof v === 'number' && v > 0);
+  const prot = recent.map(e => e.proteinG).filter((v): v is number => typeof v === 'number' && v > 0);
+  return {
+    daysLogged: recent.length,
+    avgCalories: cals.length ? Math.round(cals.reduce((a, b) => a + b, 0) / cals.length) : null,
+    avgProteinG: prot.length ? Math.round(prot.reduce((a, b) => a + b, 0) / prot.length) : null,
+    window: windowDays
+  };
+}
+
 export function durationTrendData(state: AppState) {
   const recent = state.history.slice(0, 8).reverse();
   const maxDur = Math.max(1, ...recent.map(h => h.durationMin || 0));

@@ -78,6 +78,11 @@ export function createInitialState(): AppState {
     measurementInput: '',
     selectedMeasurementType: 'waist',
 
+    nutritionLog: [],
+    nutritionCaloriesInput: '',
+    nutritionProteinInput: '',
+    selectedNutritionMetric: 'protein',
+
     deloadDismissedWeek: null,
 
     deloadEnabled: false,
